@@ -24,6 +24,12 @@ const I = {
   book: 'M4 5c3-1 6-1 8 1 2-2 5-2 8-1v13c-3-1-6-1-8 1-2-2-5-2-8-1V5zM12 6v13',
   wind: 'M12 12v9M12 12L11 3M12 12l8 4M12 12l-8 4',
   plant: 'M4 21V10l5 3V8l5 3V3h3v18H4z',
+  wire: 'M4 5h16M8 5v15M16 5v15M4 9c4 3.5 12 3.5 16 0',
+  cable: 'M3 12h5l2-5 4 10 2-5h5',
+  trash: 'M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v6M14 11v6',
+  recycle: 'M20 12a8 8 0 01-13.5 5.8M4 12a8 8 0 0113.5-5.8M17.5 3v3.5H14M6.5 21v-3.5H10',
+  ball: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 8l3.5 2.5-1.3 4h-4.4l-1.3-4L12 8zM12 3v5M20.5 9.5L15.5 10.5M3.5 9.5l5 1M7 19l2.8-4.5M17 19l-2.8-4.5',
+  bank: 'M3 10l9-6 9 6M5 10v8m4-8v8m6-8v8m4-8v8M3 20h18',
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10-3a3 3 0 100 6 3 3 0 000-6z',
 };
 const Icon = ({ n, size = 22, fill }) => (
@@ -45,15 +51,31 @@ const T = {
   fire: { id: 'fire', label: 'Fire', icon: 'flame', cost: 600 },
   clinic: { id: 'clinic', label: 'Clinic', icon: 'cross', cost: 800 },
   school: { id: 'school', label: 'School', icon: 'book', cost: 700 },
+  wire: { id: 'wire', label: 'Power line', icon: 'wire', cost: 4 },
+  cable: { id: 'cable', label: 'Cable', icon: 'cable', cost: 12 },
+  dump: { id: 'dump', label: 'Landfill', icon: 'trash', cost: 1200 },
+  recycle: { id: 'recycle', label: 'Recycling', icon: 'recycle', cost: 3200 },
+  wte: { id: 'wte', label: 'Waste power', icon: 'bolt', cost: 5200 },
+  police2: { id: 'police2', label: 'Police HQ', icon: 'shield', cost: 2400 },
+  fire2: { id: 'fire2', label: 'Fire HQ', icon: 'flame', cost: 2400 },
+  hospital: { id: 'hospital', label: 'Hospital', icon: 'cross', cost: 3400 },
+  university: { id: 'university', label: 'University', icon: 'book', cost: 6500 },
+  plaza: { id: 'plaza', label: 'Plaza', icon: 'tree', cost: 900 },
+  library: { id: 'library', label: 'Library', icon: 'book', cost: 700 },
+  museum: { id: 'museum', label: 'Museum', icon: 'bank', cost: 2200 },
+  stadium: { id: 'stadium', label: 'Stadium', icon: 'ball', cost: 7000 },
 };
 const CATS = [
   { id: 'build', label: 'Build', tools: ['move', 'road', 'res', 'com', 'ind', 'park', 'clear'] },
-  { id: 'util', label: 'Utilities', tools: ['move', 'coal', 'wind', 'water', 'clear'] },
-  { id: 'svc', label: 'Services', tools: ['move', 'police', 'fire', 'clinic', 'school', 'clear'] },
+  { id: 'util', label: 'Power & water', tools: ['move', 'coal', 'wind', 'water', 'wire', 'cable', 'clear'] },
+  { id: 'waste', label: 'Waste', tools: ['move', 'dump', 'recycle', 'wte', 'clear'] },
+  { id: 'svc', label: 'Services', tools: ['move', 'police', 'police2', 'fire', 'fire2', 'clinic', 'hospital', 'school', 'university', 'clear'] },
+  { id: 'fun', label: 'Amenities', tools: ['move', 'plaza', 'library', 'museum', 'stadium', 'clear'] },
 ];
 const VIEWS = [
   { id: 'value', label: 'Land value' }, { id: 'crime', label: 'Crime' }, { id: 'pollution', label: 'Pollution' },
   { id: 'power', label: 'Power' }, { id: 'water', label: 'Water' },
+  { id: 'waste', label: 'Waste' }, { id: 'fun', label: 'Amenities' },
   { id: 'police', label: 'Police' }, { id: 'fire', label: 'Fire' }, { id: 'health', label: 'Health' }, { id: 'edu', label: 'Education' },
 ];
 const money = (n) => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US');
@@ -96,7 +118,7 @@ export default function App() {
   }, [say]);
 
   const g = gameRef.current;
-  const pick = (id) => { setTool(id); g && g.setTool(id); if (id) { setPanel(null); g.setOverlay(null); } };
+  const pick = (id) => { setTool(id); g && g.setTool(id); if (id) { setPanel(null); g.setOverlay(id === 'wire' || id === 'cable' ? 'power' : null); } };
   const speed = (s) => { g.setSpeed(s); setSt(g.stats()); };
   const setTax = (k, v) => { g.setTax(k, v); setSt(g.stats()); };
   const pickTime = (v) => { setTimeSet(v); g.setTime(v); };
@@ -116,6 +138,7 @@ export default function App() {
             <div className="meta"><b>{st.pop.toLocaleString('en-US')}</b><span>residents</span></div>
             <div className={'util ' + supplyClass(st.pSup, st.pDem)} title="Power supply / demand"><Icon n="bolt" size={15} fill /><b>{st.pSup}/{st.pDem}</b></div>
             <div className={'util ' + supplyClass(st.wSup, st.wDem)} title="Water supply / demand"><Icon n="drop" size={15} fill /><b>{st.wSup}/{st.wDem}</b></div>
+            <div className={'util ' + supplyClass(st.tSup, st.tDem)} title="Waste capacity / output"><Icon n="trash" size={15} /><b>{st.tSup}/{st.tDem}</b></div>
             <div className="meta hide-s"><b>{st.happy}%</b><span>happy</span></div>
             <div className="date">{st.date}</div>
             <div className="speed" role="group" aria-label="Game speed">
@@ -168,8 +191,10 @@ export default function App() {
                 <div><span>Service &amp; utility upkeep</span><b>{money(st.upkeep)}</b></div>
                 <div><span>Power supply / demand</span><b className={supplyClass(st.pSup, st.pDem) === 'ok' ? 'pos' : 'neg'}>{st.pSup} / {st.pDem}</b></div>
                 <div><span>Water supply / demand</span><b className={supplyClass(st.wSup, st.wDem) === 'ok' ? 'pos' : 'neg'}>{st.wSup} / {st.wDem}</b></div>
+                <div><span>Waste capacity / output</span><b className={supplyClass(st.tSup, st.tDem) === 'ok' ? 'pos' : 'neg'}>{st.tSup} / {st.tDem}</b></div>
+                <div><span>Uncollected waste</span><b className={st.wasteUn > 0.2 ? 'neg' : ''}>{Math.round(st.wasteUn * 100)}% of buildings</b></div>
                 <div><span>Crime / pollution</span><b>{st.crime} / {st.poll}</b></div>
-                <div><span>Police · Fire · Health · School</span><b>{['police', 'fire', 'health', 'edu'].map((k) => Math.round(st.cov[k] * 100) + '%').join(' · ')}</b></div>
+                <div><span>Police · Fire · Health · School · Fun</span><b>{['police', 'fire', 'health', 'edu', 'fun'].map((k) => Math.round(st.cov[k] * 100) + '%').join(' · ')}</b></div>
                 <div><span>Buildings (R / C / I)</span><b>{st.bld.r} / {st.bld.c} / {st.bld.i}</b></div>
               </div>
               <h3>Tax rates</h3>
@@ -180,7 +205,7 @@ export default function App() {
                   <b>{st.tax[k]}%</b>
                 </label>
               ))}
-              <p className="hint">Higher taxes raise income but slow growth and lower happiness. Buildings without power or water pay less.</p>
+              <p className="hint">Higher taxes raise income but slow growth and lower happiness. Buildings without power or water pay less, and uncollected garbage hurts happiness.</p>
             </section>
           )}
           {panel === 'menu' && (

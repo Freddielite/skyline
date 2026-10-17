@@ -450,7 +450,194 @@ function school(k) {
   for (const [a, b, c] of [[0.62, 0.7, '#e0483f'], [0.72, 0.78, '#f4c542'], [0.5, 0.88, '#3a7bd5']]) circ(P(a, b, 2), 2.2, C(c));
   tree(0.12, 0.9, 0, 5);
 }
-const SVC_SPR = { 1: [coalPlant, 2, 2, 190], 2: [wind, 1, 1, 130], 3: [waterTower, 1, 1, 130], 4: [police, 1, 1, 100], 5: [fireStation, 1, 1, 130], 6: [clinic, 1, 1, 110], 7: [school, 1, 1, 130] };
+
+function flag(k, x, y, h, col) {
+  const { P, line, poly, C } = k, b = P(x, y), t = [b[0], b[1] - h];
+  line(b, t, C('#8b8f96'), 1.2); poly([t, [t[0] + 11, t[1] + 3], [t[0], t[1] + 7]], C(col), null, true);
+}
+function door(k, x, y, u0, u1, h, col) { const { P, poly, C } = k; poly([P(x + u0, y, 0), P(x + u1, y, 0), P(x + u1, y, h), P(x + u0, y, h)], C(col || '#35566b')); }
+function helipad(k, x, y, z) {
+  const { P, ell, line, C } = k, c = P(x, y, z);
+  ell(c, 20, 10, C('#4a5568')); ell(c, 17, 8.5, C('#5a6475'));
+  line([c[0] - 6, c[1] - 3], [c[0] - 6, c[1] + 3], '#f2f2f2', 1.6); line([c[0] + 6, c[1] - 3], [c[0] + 6, c[1] + 3], '#f2f2f2', 1.6); line([c[0] - 6, c[1]], [c[0] + 6, c[1]], '#f2f2f2', 1.6);
+}
+function policeHQ(k) {
+  const { P, poly, box, faces, sh, C, circ } = k;
+  padRect(k, 2, 2, '#cfd1d4', null);
+  const x = 0.15, y = 0.15, w = 1.5, d = 0.95, h = 54;
+  sh(x, y, w, d, h);
+  box(x, y, w, d, h, { l: '#dfe6f0', r: shade('#dfe6f0', 0.76), t: '#a3a9b3' });
+  poly([P(x, y + d, 26), P(x + w, y + d, 26), P(x + w, y + d, 33), P(x, y + d, 33)], C('#2f5fb0'));
+  k.wins(x, y, w, d, h, 81, { dens: 3.4, rh: 11, wh: 6, base: 6 });
+  poly([P(x + 0.62, y + d, 0), P(x + 0.92, y + d, 0), P(x + 0.92, y + d, 16), P(x + 0.62, y + d, 16)], C(k.store()));
+  poly([P(x + 0.55, y + d, 16), P(x + 0.99, y + d, 16), P(x + 0.99, y + d + 0.16, 13), P(x + 0.55, y + d + 0.16, 13)], C('#2f5fb0'));
+  helipad(k, x + 0.45, y + 0.45, h);
+  box(x + 1.1, y + 0.2, 0.1, 0.1, 30, faces('#8b929c'), h); const lb = P(x + 1.15, y + 0.25, h + 31); circ(lb, 2, '#ff3b30');
+  flag(k, 0.35, 1.45, 36, '#2f5fb0'); flag(k, 0.55, 1.5, 36, '#e0483f');
+  box(1.15, 1.35, 0.4, 0.16, 5, faces('#f2f2f2')); box(1.15, 1.35, 0.4, 0.16, 2, faces('#2f5fb0'), 1);
+  box(1.15, 1.6, 0.4, 0.16, 5, faces('#f2f2f2')); box(1.15, 1.6, 0.4, 0.16, 2, faces('#2f5fb0'), 1);
+  circ(P(1.35, 1.43, 8), 1.6, '#e0483f'); circ(P(1.35, 1.68, 8), 1.6, '#3a7bd5');
+}
+function fireHQ(k) {
+  const { P, poly, box, faces, sh, C, line } = k;
+  padRect(k, 2, 2, '#cfd1d4', null);
+  const x = 0.12, y = 0.2, w = 1.5, d = 0.95, h = 46;
+  sh(x, y, w, d, h);
+  box(x, y, w, d, h, { l: '#cf4b3f', r: shade('#cf4b3f', 0.76), t: '#a3a9b3' });
+  poly([P(x, y + d, 28), P(x + w, y + d, 28), P(x + w, y + d, 33), P(x, y + d, 33)], C('#f2f2f2'));
+  for (let i = 0; i < 3; i++) { const a = 0.1 + i * 0.48, b = a + 0.38; poly([P(x + a, y + d, 0), P(x + b, y + d, 0), P(x + b, y + d, 24), P(x + a, y + d, 24)], C('#e9ecf0')); for (let z = 3; z < 24; z += 3) line(P(x + a, y + d, z), P(x + b, y + d, z), 'rgba(0,0,0,.2)', 0.6); }
+  k.wins(x, y, w, d, h, 82, { dens: 2.4, rh: 10, wh: 5, base: 35 });
+  box(1.4, 0.18, 0.24, 0.24, 88, faces('#cf4b3f')); for (let z = 20; z < 88; z += 22) box(1.4, 0.18, 0.24, 0.24, 8, faces('#f4c542'), z);
+  box(1.36, 0.14, 0.32, 0.32, 6, faces('#8b929c'), 88); sh(1.4, 0.18, 0.24, 0.24, 94);
+  box(0.25, 1.35, 0.7, 0.2, 7, faces('#d03a2f')); box(0.25, 1.35, 0.2, 0.2, 5, faces('#e9ecf0'), 7);
+  line(P(0.45, 1.45, 14), P(0.9, 1.45, 14), '#c9ccd2', 1.4); line(P(0.45, 1.5, 14), P(0.9, 1.5, 14), '#c9ccd2', 1.4);
+  flag(k, 1.6, 1.5, 32, '#cf4b3f');
+}
+function hospital(k) {
+  const { P, poly, box, faces, sh, C, line } = k;
+  padRect(k, 2, 2, '#cfd1d4', null);
+  sh(0.2, 0.2, 0.95, 0.85, 80);
+  box(0.2, 0.2, 0.95, 0.85, 80, { l: '#f0f3f6', r: shade('#f0f3f6', 0.78), t: '#a3a9b3' });
+  k.wins(0.2, 0.2, 0.95, 0.85, 80, 83, { dens: 3.6, rh: 10, wh: 5.5, base: 16 });
+  box(1.15, 0.45, 0.7, 0.8, 38, { l: '#e6eaee', r: shade('#e6eaee', 0.78), t: '#a3a9b3' });
+  k.wins(1.15, 0.45, 0.7, 0.8, 38, 84, { dens: 3, rh: 10, wh: 5.5, base: 10 });
+  const cx = 0.675, y = 1.05;
+  poly([P(cx - 0.07, y, 36), P(cx + 0.07, y, 36), P(cx + 0.07, y, 66), P(cx - 0.07, y, 66)], C('#e0483f'));
+  poly([P(cx - 0.2, y, 45), P(cx + 0.2, y, 45), P(cx + 0.2, y, 57), P(cx - 0.2, y, 57)], C('#e0483f'));
+  poly([P(0.5, y, 0), P(0.85, y, 0), P(0.85, y, 14), P(0.5, y, 14)], C(k.store()));
+  poly([P(0.4, y, 14), P(0.95, y, 14), P(0.95, y + 0.3, 11), P(0.4, y + 0.3, 11)], C('#e0483f'));
+  helipad(k, 1.5, 0.85, 38);
+  box(0.4, 1.55, 0.4, 0.16, 5, faces('#f7f7f7')); box(0.4, 1.55, 0.4, 0.16, 1.8, faces('#e0483f'), 2);
+  box(0.9, 1.6, 0.4, 0.16, 5, faces('#f7f7f7')); box(0.9, 1.6, 0.4, 0.16, 1.8, faces('#e0483f'), 2);
+}
+function university(k) {
+  const { P, poly, box, faces, sh, C, line, tree, ell, circ } = k;
+  padRect(k, 3, 3, '#b9d9a0', ['#4d8f3c', '#8fd070']);
+  poly([P(1.2, 1.7), P(1.8, 1.7), P(1.8, 3), P(1.2, 3)], C('#d9cfae'), null, true);
+  sh(0.3, 0.3, 2.4, 1.3, 60);
+  box(0.3, 0.35, 0.85, 1.25, 42, faces('#c78b6a')); k.wins(0.3, 0.35, 0.85, 1.25, 42, 91, { dens: 3.4, rh: 12, wh: 6, base: 8 });
+  box(1.85, 0.35, 0.85, 1.25, 42, faces('#c78b6a')); k.wins(1.85, 0.35, 0.85, 1.25, 42, 92, { dens: 3.4, rh: 12, wh: 6, base: 8 });
+  box(1.1, 0.5, 0.8, 1.0, 58, faces('#e3d9c4')); k.wins(1.1, 0.5, 0.8, 1.0, 58, 93, { dens: 3, rh: 12, wh: 6, base: 18 });
+  for (let i = 0; i < 4; i++) box(1.18 + i * 0.2, 1.5, 0.07, 0.07, 22, faces('#f2efe6'));
+  poly([P(1.1, 1.58, 24), P(1.9, 1.58, 24), P(1.9, 1.58, 29), P(1.1, 1.58, 29)], C('#d9cfae'));
+  box(1.38, 0.72, 0.24, 0.24, 36, faces('#d9a58a'), 58);
+  poly([P(1.38, 0.96, 74), P(1.62, 0.96, 74), P(1.62, 0.96, 88), P(1.38, 0.96, 88)], C('#f2f2f2'));
+  const t1 = P(1.5, 0.84, 94), b1 = P(1.38, 0.72, 94);
+  k.ctx.beginPath(); k.ctx.moveTo(P(1.36, 0.96, 94)[0], P(1.36, 0.96, 94)[1]); k.ctx.lineTo(t1[0], t1[1] - 16); k.ctx.lineTo(P(1.64, 0.96, 94)[0], P(1.64, 0.96, 94)[1]); k.ctx.closePath(); k.ctx.fillStyle = C('#8d4b3c'); k.ctx.fill();
+  const f = P(1.5, 2.35); ell([f[0], f[1] + 1], 14, 7, C('#b9b194')); ell([f[0], f[1] - 1], 11, 5.5, C('#62b6e6'));
+  line([f[0], f[1] - 2], [f[0], f[1] - 12], C('#bfe6fa'), 1.8);
+  tree(0.3, 1.9, 0, 3); tree(2.7, 1.9, 1, 4); tree(0.5, 2.7, 3, 5); tree(2.5, 2.7, 0, 6);
+  flag(k, 2.75, 1.7, 38, '#2f5fb0');
+}
+function plaza(k) {
+  const { P, poly, line, ell, circ, tree, C, box } = k;
+  padRect(k, 2, 2, '#dcd3b4', null);
+  for (let i = 1; i < 8; i++) { line(P(i / 4, 0), P(i / 4, 2), 'rgba(0,0,0,.08)', 0.6); line(P(0, i / 4), P(2, i / 4), 'rgba(0,0,0,.08)', 0.6); }
+  const c = P(1, 1);
+  ell([c[0], c[1] + 2], 34, 17, C('#b9b194')); ell([c[0], c[1]], 30, 15, C('#e4dcc0')); ell([c[0], c[1] - 1], 25, 12.5, C('#62b6e6')); ell([c[0], c[1] - 2], 10, 5, C('#d8f1fc'));
+  line([c[0], c[1] - 2], [c[0], c[1] - 28], C('#bfe6fa'), 2.4); ell([c[0], c[1] - 28], 7, 3.5, C('#d8f1fc'));
+  line([c[0], c[1] - 22], [c[0] - 12, c[1] - 10], C('#bfe6fa'), 1.4); line([c[0], c[1] - 22], [c[0] + 12, c[1] - 10], C('#bfe6fa'), 1.4);
+  const fc = ['#e86f9b', '#f4c542', '#e04848', '#ffffff'];
+  for (let i = 0; i < 22; i++) { const a = (i / 22) * 6.283; circ([c[0] + Math.cos(a) * 46, c[1] + Math.sin(a) * 23], 2, C(fc[i % 4])); }
+  const wd = { l: '#8a5a34', r: '#6b4426', t: '#a06a3c' };
+  box(0.2, 1.55, 0.3, 0.09, 2.4, wd); box(0.2, 1.55, 0.3, 0.02, 3, wd, 2.4); box(1.55, 0.25, 0.09, 0.3, 2.4, wd);
+  tree(0.2, 0.2, 0, 11); tree(1.8, 1.8, 3, 12); tree(0.25, 1.8, 1, 13); tree(1.8, 0.2, 0, 14);
+}
+function library(k) {
+  const { P, poly, box, faces, sh, C, line } = k;
+  k.pad('#cfd1d4', null);
+  const x = 0.1, y = 0.18, w = 0.8, d = 0.62, h = 32;
+  sh(x, y, w, d, h);
+  box(x, y, w, d, h, { l: '#e9e2d0', r: shade('#e9e2d0', 0.78), t: '#a3a9b3' });
+  for (let i = 0; i < 5; i++) box(x + 0.07 + i * 0.15, y + d, 0.06, 0.06, 26, faces('#f6f2e8'));
+  poly([P(x, y + d + 0.06, 26), P(x + w, y + d + 0.06, 26), P(x + w / 2, y + d + 0.06, 40)], C('#d9d2bf'));
+  poly([P(x - 0.02, y + d + 0.06, 26), P(x + w + 0.02, y + d + 0.06, 26), P(x + w + 0.02, y + d + 0.06, 29), P(x - 0.02, y + d + 0.06, 29)], C('#f2efe6'));
+  for (let i = 0; i < 3; i++) poly([P(x + 0.05, y + d + 0.08 + i * 0.04, i * 2), P(x + w - 0.05, y + d + 0.08 + i * 0.04, i * 2), P(x + w - 0.05, y + d + 0.08 + i * 0.04, i * 2 + 2), P(x + 0.05, y + d + 0.08 + i * 0.04, i * 2 + 2)], C('#d9d2bf'));
+  k.wins(x, y, w, d, h, 94, { dens: 1.6, rh: 20, wh: 7, base: 6 });
+}
+function museum(k) {
+  const { P, poly, box, faces, sh, C, line, ctx } = k;
+  padRect(k, 2, 2, '#dcd3b4', null);
+  const x = 0.15, y = 0.25, w = 1.7, d = 1.0, h = 38;
+  sh(x, y, w, d, h);
+  box(x, y, w, d, h, { l: '#e3dcc8', r: shade('#e3dcc8', 0.78), t: '#a3a9b3' });
+  for (let i = 0; i < 8; i++) box(x + 0.06 + i * 0.2, y + d, 0.07, 0.07, 30, faces('#f6f2e8'));
+  poly([P(x, y + d + 0.07, 30), P(x + w, y + d + 0.07, 30), P(x + w, y + d + 0.07, 34), P(x, y + d + 0.07, 34)], C('#f2efe6'));
+  for (let i = 0; i < 4; i++) { const u = x + 0.12 + i * 0.4; poly([P(u, y + d + 0.1, 8), P(u + 0.18, y + d + 0.1, 8), P(u + 0.18, y + d + 0.1, 26), P(u, y + d + 0.1, 26)], C(['#c0392b', '#2e86c1', '#27ae60', '#e67e22'][i]), null, true); }
+  const c = P(x + w / 2, y + d / 2, h);
+  ctx.beginPath(); ctx.ellipse(c[0], c[1], 26, 13, 0, 0, 6.2832); ctx.fillStyle = C('#cfd6d0'); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(c[0] - 24, c[1]); ctx.bezierCurveTo(c[0] - 24, c[1] - 34, c[0] + 24, c[1] - 34, c[0] + 24, c[1]); ctx.closePath(); ctx.fillStyle = C('#7fb7a4'); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(c[0], c[1]); ctx.bezierCurveTo(c[0], c[1] - 34, c[0] + 24, c[1] - 34, c[0] + 24, c[1]); ctx.closePath(); ctx.fillStyle = C('#6ca08d'); ctx.fill();
+  line([c[0], c[1] - 26], [c[0], c[1] - 36], C('#c9b46a'), 1.4);
+  poly([P(x + 0.7, y + d, 0), P(x + 1.0, y + d, 0), P(x + 1.0, y + d, 14), P(x + 0.7, y + d, 14)], C(k.store()));
+}
+function stadium(k) {
+  const { P, ell, ctx, line, poly, box, faces, C, circ } = k;
+  padRect(k, 3, 3, '#cfd1d4', null);
+  const c = P(1.5, 1.5);
+  ctx.fillStyle = k.mode === 2 ? 'rgba(0,0,0,.22)' : 'rgba(10,20,40,.16)'; ctx.beginPath(); ctx.ellipse(c[0] + 14, c[1] + 4, 94, 47, 0, 0, 6.2832); ctx.fill();
+  for (let z = 0; z <= 24; z += 2) { ctx.beginPath(); ctx.ellipse(c[0], c[1] - z, 90, 45, 0, 0, 6.2832); ctx.fillStyle = C(z < 12 ? '#aab1bc' : '#c3c9d2'); ctx.fill(); }
+  ctx.beginPath(); ctx.ellipse(c[0], c[1] - 24, 90, 45, 0, 0, 6.2832); ctx.fillStyle = C('#e6e9ee'); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 0.8; ctx.stroke();
+  ell([c[0], c[1] - 22], 76, 38, C('#c9372c')); ell([c[0], c[1] - 20], 66, 33, C('#2f5fb0')); ell([c[0], c[1] - 18], 58, 29, C('#d9a441'));
+  ell([c[0], c[1] - 12], 50, 25, C('#4aa05a'));
+  for (let i = -4; i <= 4; i++) { ctx.save(); ctx.beginPath(); ctx.ellipse(c[0], c[1] - 12, 50, 25, 0, 0, 6.2832); ctx.clip(); line([c[0] + i * 11 - 6, c[1] - 40], [c[0] + i * 11 + 6, c[1] + 14], C(i % 2 ? '#43964f' : '#52ad62'), 6); ctx.restore(); }
+  ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.ellipse(c[0], c[1] - 12, 38, 19, 0, 0, 6.2832); ctx.stroke(); line([c[0] - 20, c[1] - 22], [c[0] + 20, c[1] - 2], 'rgba(255,255,255,.85)', 1.2);
+  ctx.beginPath(); ctx.ellipse(c[0], c[1] - 12, 7, 3.5, 0, 0, 6.2832); ctx.stroke();
+  for (const [x, y] of [[0.15, 0.15], [2.85, 0.15], [0.15, 2.85], [2.85, 2.85]]) {
+    box(x - 0.04, y - 0.04, 0.08, 0.08, 70, faces('#8b929c'));
+    const t = P(x, y, 74); poly([[t[0] - 9, t[1]], [t[0] + 9, t[1] + 3], [t[0] + 9, t[1] - 9], [t[0] - 9, t[1] - 12]], C(k.mode === 2 && k.lit ? '#fff2b8' : '#dfe3e8'));
+  }
+  poly([P(1.1, 2.62, 0), P(1.9, 2.62, 0), P(1.9, 2.62, 10), P(1.1, 2.62, 10)], C('#4a5568'));
+  for (let i = 0; i < 6; i++) circ(P(0.4 + i * 0.4, 2.9, 2), 2, C(['#e0483f', '#f4c542', '#3a7bd5'][i % 3]));
+}
+function dump(k) {
+  const { P, ell, ctx, line, box, faces, sh, C, circ, poly } = k;
+  padRect(k, 2, 2, '#8a7f66', ['#6b5a45', '#a39878']);
+  const c = P(1, 1);
+  ell([c[0] + 2, c[1] + 6], 62, 31, 'rgba(0,0,0,.15)');
+  const cols = ['#6b5a45', '#7a6a52', '#867660'];
+  for (let i = 0; i < 3; i++) ell([c[0] - 2, c[1] - i * 7], 58 - i * 14, 29 - i * 7, C(cols[i]));
+  const tc = ['#d9534a', '#4a7fc7', '#f4c542', '#e8e8e8', '#3a9d6e', '#8b5a2b'];
+  for (let i = 0; i < 70; i++) { const a = hash(i, 1, 1) * 6.283, r = Math.sqrt(hash(i, 2, 2)) * 44, px = c[0] + Math.cos(a) * r - 2, py = c[1] - 10 + Math.sin(a) * r * 0.5 - (1 - r / 44) * 6; ctx.fillStyle = C(tc[i % 6]); ctx.fillRect(px, py, 2.4, 1.8); }
+  for (let i = 0; i < 6; i++) { const p = [c[0] - 30 + i * 12 + hash(i, 5, 5) * 8, c[1] - 26 - hash(i, 6, 6) * 12]; line(p, [p[0] + 3, p[1] - 1.5], '#fff', 1); line(p, [p[0] - 3, p[1] - 1.5], '#fff', 1); }
+  box(1.35, 1.35, 0.35, 0.22, 7, faces('#f4c542')); box(1.6, 1.35, 0.05, 0.22, 5, faces('#555b66'));
+  box(0.15, 1.5, 0.35, 0.3, 14, faces('#c9ccd2')); poly([P(0.2, 1.8, 0), P(0.32, 1.8, 0), P(0.32, 1.8, 9), P(0.2, 1.8, 9)], C('#4a5568'));
+  for (let i = 0; i <= 8; i++) { const u = i / 4; line(P(u, 1.97), P(u, 1.97, 7), C('#6b7280'), 0.7); line(P(1.97, u), P(1.97, u, 7), C('#6b7280'), 0.7); }
+  line(P(0, 1.97, 7), P(2, 1.97, 7), C('#6b7280'), 0.8); line(P(1.97, 0, 7), P(1.97, 2, 7), C('#6b7280'), 0.8);
+}
+function recycle(k) {
+  const { P, poly, box, faces, sh, C, line, circ } = k;
+  padRect(k, 2, 2, '#a9a493', ['#8a8574', '#bdb8a6']);
+  const x = 0.15, y = 0.2, w = 1.2, d = 0.95, h = 36;
+  sh(x, y, w, d, h);
+  box(x, y, w, d, h, { l: '#d8e4dc', r: shade('#d8e4dc', 0.76), t: '#8f98a6' });
+  poly([P(x, y + d, 20), P(x + w, y + d, 20), P(x + w, y + d, 25), P(x, y + d, 25)], C('#3a9d6e'));
+  poly([P(x + 0.3, y + d, 5), P(x + 0.9, y + d, 5), P(x + 0.9, y + d, 19), P(x + 0.3, y + d, 19)], C('#3a9d6e'));
+  for (const [a, b] of [[0.42, 0.62], [0.6, 0.78], [0.5, 0.7]]) line(P(x + a, y + d, 8 + (a - 0.42) * 30), P(x + b, y + d, 12 + (b - 0.6) * 20), '#fff', 1.8);
+  for (let i = 0; i < 2; i++) for (let j = 0; j < 3; j++) poly([P(x + 0.1 + j * 0.34, y + 0.1 + i * 0.4, h), P(x + 0.38 + j * 0.34, y + 0.1 + i * 0.4, h), P(x + 0.38 + j * 0.34, y + 0.4 + i * 0.4, h), P(x + 0.1 + j * 0.34, y + 0.4 + i * 0.4, h)], C('#1f3a5f'));
+  box(1.42, 0.25, 0.4, 0.3, 12, faces('#c9ccd2'));
+  const bc = ['#3d8bd9', '#9aa0a8', '#3a9d6e', '#e0b526'];
+  for (let i = 0; i < 6; i++) box(1.1 + (i % 3) * 0.22, 1.4 + Math.floor(i / 3) * 0.2, 0.2, 0.18, 8, faces(bc[i % 4]));
+  box(0.2, 1.6, 0.5, 0.18, 7, faces('#3f8f5a')); box(0.2, 1.6, 0.16, 0.18, 5, faces('#f2f2f2'), 7);
+}
+function wte(k) {
+  const { P, poly, box, faces, sh, C, line, cyl, circ } = k;
+  padRect(k, 2, 2, '#a9a493', ['#8a8574', '#bdb8a6']);
+  const x = 0.15, y = 0.5, w = 1.2, d = 0.9, h = 40;
+  sh(x, y, w, d, h);
+  box(x, y, w, d, h, { l: '#9aa3ad', r: shade('#9aa3ad', 0.76), t: '#6f7782' });
+  poly([P(x, y + d, 22), P(x + w, y + d, 22), P(x + w, y + d, 27), P(x, y + d, 27)], C('#3a9d6e'));
+  k.wins(x, y, w, d, h, 95, { dens: 2.4, rh: 12, wh: 5, base: 8 });
+  poly([P(x + 0.4, y + d, 0), P(x + 0.8, y + d, 0), P(x + 0.8, y + d, 16), P(x + 0.4, y + d, 16)], C('#4a5568'));
+  box(0.35, 0.18, 0.22, 0.22, 104, faces('#c9ccd2')); for (let z = 20; z < 104; z += 28) box(0.35, 0.18, 0.22, 0.22, 10, faces('#3a9d6e'), z);
+  sh(0.35, 0.18, 0.22, 0.22, 110); k.smoke(P(0.46, 0.29, 110), 4);
+  cyl(1.55, 0.45, 15, 30, '#cfd6de'); cyl(1.55, 0.45, 15.4, 5, '#3a9d6e', 20);
+  for (let i = 0; i < 2; i++) { const px = 0.95 + i * 0.5; line(P(px, 0.2), P(px, 0.2, 52), C('#6b7280'), 1.6); line(P(px - 0.1, 0.2, 46), P(px + 0.1, 0.2, 46), C('#6b7280'), 1.4); line(P(px - 0.08, 0.2, 38), P(px + 0.08, 0.2, 38), C('#6b7280'), 1.2); }
+  line(P(0.95, 0.2, 50), P(1.45, 0.2, 50), C('#2b2e36'), 0.9);
+  box(1.4, 1.45, 0.4, 0.2, 7, faces('#3f8f5a'));
+}
+const SVC_SPR_X = { 8: [policeHQ, 2, 2, 150], 9: [fireHQ, 2, 2, 170], 10: [hospital, 2, 2, 170], 11: [university, 3, 3, 190], 12: [plaza, 2, 2, 100], 13: [library, 1, 1, 100], 14: [museum, 2, 2, 130], 15: [stadium, 3, 3, 150], 16: [dump, 2, 2, 100], 17: [recycle, 2, 2, 100], 18: [wte, 2, 2, 170] };
+const SVC_SPR = { 1: [coalPlant, 2, 2, 190], 2: [wind, 1, 1, 130], 3: [waterTower, 1, 1, 130], 4: [police, 1, 1, 100], 5: [fireStation, 1, 1, 130], 6: [clinic, 1, 1, 110], 7: [school, 1, 1, 130], ...SVC_SPR_X };
 export function serviceSprite(id, mode, lit = true) {
   lit = mode === 2 ? !!lit : true;
   return memo(`s${id}${mode}${lit ? 1 : 0}`, () => {

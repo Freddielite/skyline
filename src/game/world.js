@@ -29,6 +29,7 @@ export class World {
     this.variant = new Uint8Array(N * N);
     this.bt = new Uint8Array(N * N);   // utility/service building type id (0 none)
     this.bo = new Uint8Array(N * N);   // offset from anchor tile: dx | dy << 2
+    this.wire = new Uint8Array(N * N); // 0 none, 1 overhead line, 2 underground cable
     this.generate(seed);
   }
   idx(x, y) { return y * N + x; }
@@ -36,7 +37,7 @@ export class World {
   generate(seed) {
     this.seed = seed;
     const n1 = makeNoise(seed), n2 = makeNoise(seed + 77), rnd = mulberry32(seed + 5);
-    this.terrain.fill(0); this.tree.fill(0); this.kind.fill(0); this.level.fill(0); this.variant.fill(0); this.bt.fill(0); this.bo.fill(0);
+    this.terrain.fill(0); this.tree.fill(0); this.kind.fill(0); this.level.fill(0); this.variant.fill(0); this.bt.fill(0); this.bo.fill(0); this.wire.fill(0);
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       const nx = x / 8, ny = y / 8;
       const v = n1(nx, ny) * 0.62 + n1(nx * 2.1, ny * 2.1) * 0.28 + n1(nx * 4.3, ny * 4.3) * 0.1;
@@ -67,13 +68,14 @@ export class World {
   }
   toJSON() {
     const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); };
-    return { seed: this.seed, terrain: b64(this.terrain), tree: b64(this.tree), kind: b64(this.kind), level: b64(this.level), variant: b64(this.variant), bt: b64(this.bt), bo: b64(this.bo) };
+    return { seed: this.seed, terrain: b64(this.terrain), tree: b64(this.tree), kind: b64(this.kind), level: b64(this.level), variant: b64(this.variant), bt: b64(this.bt), bo: b64(this.bo), wire: b64(this.wire) };
   }
   static fromJSON(o) {
     const w = new World(o.seed);
     const un = (s, arr) => { const b = atob(s); for (let i = 0; i < arr.length && i < b.length; i++) arr[i] = b.charCodeAt(i); };
     un(o.terrain, w.terrain); un(o.tree, w.tree); un(o.kind, w.kind); un(o.level, w.level); un(o.variant, w.variant);
     if (o.bt) { un(o.bt, w.bt); un(o.bo, w.bo); }
+    if (o.wire) un(o.wire, w.wire);
     return w;
   }
 }

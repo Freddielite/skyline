@@ -54,7 +54,7 @@ export class Renderer {
     }
     // objects pass in painter order
     const badges = [];
-    const cars = g.cars.concat(g.people), buckets = new Map();
+    const cars = g.cars.concat(g.people, g.trucks), buckets = new Map();
     for (const c of cars) { const kx = Math.max(0, Math.min(N - 1, Math.floor(c.px))), ky = Math.max(0, Math.min(N - 1, Math.floor(c.py))), key = ky * N + kx; (buckets.get(key) || buckets.set(key, []).get(key)).push(c); }
     for (let s = 0; s < 2 * N - 1; s++) {
       for (let x = Math.max(0, s - N + 1); x <= Math.min(s, N - 1); x++) {
@@ -69,6 +69,7 @@ export class Renderer {
           const lv = w.level[i];
           if (!g.sim.pw[i]) badges.push([X, Y + 16 * z - [34, 60, 100][lv - 1] * z, 'bolt']);
           else if (!g.sim.wt[i]) badges.push([X, Y + 16 * z - [34, 60, 100][lv - 1] * z, 'drop']);
+          else if (lv >= 2 && !g.sim.ts[i]) badges.push([X, Y + 16 * z - [34, 60, 100][lv - 1] * z, 'trash']);
         } else if (k === T.SVC) {
           const bt = w.bt[i], def = BT[bt], dx = w.bo[i] & 3, dy = w.bo[i] >> 2;
           if (dx === def.w - 1 && dy === def.d - 1) {
@@ -83,8 +84,9 @@ export class Renderer {
           ctx.strokeStyle = '#3a3d44'; ctx.lineWidth = 1.4 * z; ctx.beginPath(); ctx.moveTo(X, Y + 16 * z); ctx.lineTo(X, Y + 16 * z - 16 * z); ctx.stroke();
           ctx.fillStyle = '#fff2b8'; ctx.beginPath(); ctx.arc(X, Y + 16 * z - 17 * z, 2 * z, 0, 6.3); ctx.fill();
         }
+        if (w.wire[i] === 1) this.pole(ctx, w, x, y, X, Y, z, mode);
         const cb = buckets.get(y * N + x);
-        if (cb) for (const c of cb) { if (c.ped) this.person(ctx, c, z, cx, cy, mode, t); else this.car(ctx, c, z, cx, cy, mode); }
+        if (cb) for (const c of cb) { if (c.ped) this.person(ctx, c, z, cx, cy, mode, t); else if (c.truck) this.truck(ctx, c, z, cx, cy, mode); else this.car(ctx, c, z, cx, cy, mode); }
       }
     }
     if (g.overlay) this.overlay(ctx, g, z, cx, cy);
@@ -109,6 +111,36 @@ export class Renderer {
       ctx.drawImage(this.bloom, 0, 0, this.cv.width, this.cv.height); ctx.restore();
     }
   }
+  pole(ctx, w, x, y, X, Y, z, mode) {
+    const bx = X, by = Y + 16 * z, H = 26 * z, tx = bx, ty = by - H;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = mode === 2 ? '#2a2118' : '#6b5844'; ctx.lineWidth = 2.2 * z; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(tx, ty); ctx.stroke();
+    ctx.lineWidth = 1.6 * z; ctx.beginPath(); ctx.moveTo(tx - 6 * z, ty + 2.5 * z); ctx.lineTo(tx + 6 * z, ty - 2.5 * z); ctx.stroke();
+    ctx.fillStyle = mode === 2 ? '#4a4f5a' : '#dfe3e8'; ctx.beginPath(); ctx.arc(tx - 6 * z, ty + 2.5 * z, 1.1 * z, 0, 6.3); ctx.arc(tx + 6 * z, ty - 2.5 * z, 1.1 * z, 0, 6.3); ctx.fill();
+    ctx.strokeStyle = mode === 2 ? '#0e1016' : '#2b2e36'; ctx.lineWidth = 0.9 * z;
+    const link = (nx, ny, dx, dy) => {
+      if (!w.inb(nx, ny) || w.wire[ny * N + nx] !== 1) return;
+      const ex = tx + dx * 32 * z, ey = ty + dy * 16 * z, mx = (tx + ex) / 2, my = (ty + ey) / 2 + 5 * z;
+      for (const o of [-1, 1]) { ctx.beginPath(); ctx.moveTo(tx + o * 5 * z, ty - o * 2 * z); ctx.quadraticCurveTo(mx + o * 5 * z, my - o * 2 * z, ex + o * 5 * z, ey - o * 2 * z); ctx.stroke(); }
+    };
+    link(x + 1, y, 1, 1); link(x, y + 1, -1, 1);
+  }
+  truck(ctx, c, z, cx, cy, mode) {
+    const P = (x, y, h = 0) => [(x - y) * 32 * z + cx, (x + y) * 16 * z + cy - h * z];
+    const d = mode === 2 ? 0.45 : mode === 1 ? 0.85 : 1;
+    const sh = (hex, f) => { const h = parseInt(hex.slice(1), 16); return `rgb(${Math.min(255, ((h >> 16) & 255) * f * d) | 0},${Math.min(255, ((h >> 8) & 255) * f * d) | 0},${Math.min(255, (h & 255) * f * d) | 0})`; };
+    const poly = (a, f) => { ctx.beginPath(); ctx.moveTo(a[0][0], a[0][1]); for (let i = 1; i < a.length; i++) ctx.lineTo(a[i][0], a[i][1]); ctx.closePath(); ctx.fillStyle = f; ctx.fill(); };
+    const boxAt = (px, py, l, wd, z0, z1, col) => {
+      const horiz = c.dx !== 0, bw = horiz ? l : wd, bd = horiz ? wd : l, x = px - bw / 2, y = py - bd / 2;
+      poly([P(x, y + bd, z0), P(x + bw, y + bd, z0), P(x + bw, y + bd, z1), P(x, y + bd, z1)], sh(col, 1));
+      poly([P(x + bw, y, z0), P(x + bw, y + bd, z0), P(x + bw, y + bd, z1), P(x + bw, y, z1)], sh(col, 0.76));
+      poly([P(x, y, z1), P(x + bw, y, z1), P(x + bw, y + bd, z1), P(x, y + bd, z1)], sh(col, 1.1));
+    };
+    const fx = c.dx > 0 || c.dy > 0 ? 1 : -1;      // screen-order: draw the part behind first
+    const parts = [[c.px - c.dx * 0.07, c.py - c.dy * 0.07, 0.3, 0.17, 1, 8, '#3f8f5a'], [c.px + c.dx * 0.18, c.py + c.dy * 0.18, 0.14, 0.17, 1, 6, '#f1f1ee']];
+    for (const q of (fx > 0 ? parts : parts.slice().reverse())) boxAt(...q.slice(0, 4), q[4], q[5], q[6]);
+    if (mode === 2) { const p = P(c.px + c.dx * 0.32, c.py + c.dy * 0.32); ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(this.glowSprite(), p[0] - 18 * z, p[1] - 8 * z, 36 * z, 18 * z); ctx.restore(); }
+  }
   blades(ctx, X, Y, z, t, mode) {
     const a0 = t * 1.8, L = 25 * z;
     ctx.lineCap = 'round';
@@ -120,10 +152,11 @@ export class Renderer {
   }
   badge(ctx, X, Y, z, type) {
     const r = 8 * z; if (z < 0.6) return;
-    ctx.fillStyle = type === 'bolt' ? '#ef6f5e' : '#3d8bd9'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4 * z;
+    ctx.fillStyle = type === 'bolt' ? '#ef6f5e' : type === 'trash' ? '#a0703c' : '#3d8bd9'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4 * z;
     ctx.beginPath(); ctx.arc(X, Y, r, 0, 6.3); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#fff'; ctx.beginPath();
     if (type === 'bolt') { ctx.moveTo(X + 1.5 * z, Y - 5 * z); ctx.lineTo(X - 3 * z, Y + 1 * z); ctx.lineTo(X, Y + 1 * z); ctx.lineTo(X - 1.5 * z, Y + 5 * z); ctx.lineTo(X + 3 * z, Y - 1.2 * z); ctx.lineTo(X + 0.2 * z, Y - 1.2 * z); ctx.closePath(); }
+    else if (type === 'trash') { ctx.rect(X - 3 * z, Y - 2 * z, 6 * z, 7 * z); ctx.rect(X - 4 * z, Y - 4 * z, 8 * z, 1.6 * z); ctx.rect(X - 1.5 * z, Y - 5.6 * z, 3 * z, 1.4 * z); }
     else { ctx.moveTo(X, Y - 5 * z); ctx.quadraticCurveTo(X + 5 * z, Y + 1 * z, X, Y + 5 * z); ctx.quadraticCurveTo(X - 5 * z, Y + 1 * z, X, Y - 5 * z); }
     ctx.fill();
   }
@@ -143,12 +176,27 @@ export class Renderer {
         case 'police': if (sim.cov.police[i] > 0.02) col = `rgba(80,140,255,${0.2 + sim.cov.police[i] * 0.5})`; break;
         case 'fire': if (sim.cov.fire[i] > 0.02) col = `rgba(255,110,70,${0.2 + sim.cov.fire[i] * 0.5})`; break;
         case 'health': if (sim.cov.health[i] > 0.02) col = `rgba(255,120,170,${0.2 + sim.cov.health[i] * 0.5})`; break;
+        case 'fun': if (sim.cov.fun[i] > 0.02) col = `rgba(190,120,255,${0.2 + sim.cov.fun[i] * 0.5})`; break;
+        case 'waste': { const m = sim.wasteMap[i]; col = m === 3 ? 'rgba(95,211,166,.7)' : m === 2 ? 'rgba(239,111,94,.8)' : m === 1 ? 'rgba(176,132,76,.38)' : null; break; }
         case 'edu': if (sim.cov.edu[i] > 0.02) col = `rgba(240,200,70,${0.2 + sim.cov.edu[i] * 0.5})`; break;
-        case 'power': { const m = sim.powerMap[i]; col = m === 1 ? 'rgba(95,211,166,.7)' : m === 2 ? 'rgba(239,111,94,.8)' : m === 3 ? 'rgba(242,184,75,.4)' : null; break; }
+        case 'power': { const m = sim.powerMap[i]; col = m === 1 ? 'rgba(95,211,166,.7)' : m === 2 ? 'rgba(239,111,94,.8)' : m === 3 && w.wire[i] ? 'rgba(242,184,75,.55)' : m === 4 ? 'rgba(160,170,185,.5)' : null; break; }
         case 'water': { const m = sim.waterMap[i]; col = m === 3 ? 'rgba(95,211,166,.7)' : m === 2 ? 'rgba(239,111,94,.8)' : m === 1 ? 'rgba(61,139,217,.32)' : null; break; }
       }
       if (!col) continue;
       ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(X + 32 * z, Y + 16 * z); ctx.lineTo(X, Y + 32 * z); ctx.lineTo(X - 32 * z, Y + 16 * z); ctx.closePath(); ctx.fillStyle = col; ctx.fill();
+    }
+    if (ov === 'power') {
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+        const i = y * N + x, wv = w.wire[i]; if (!wv) continue;
+        const X = (x - y) * 32 * z + cx, Y = (x + y) * 16 * z + cy + 16 * z;
+        if (X < -40 * z || X > W + 40 * z || Y < -34 * z || Y > H + 40 * z) continue;
+        const live = sim.powerMap[i] === 3; ctx.strokeStyle = live ? '#ffd166' : '#8a93a3'; ctx.lineWidth = 2 * z; ctx.setLineDash(wv === 2 ? [4 * z, 3 * z] : []);
+        ctx.beginPath();
+        if (x + 1 < N && w.wire[i + 1]) { ctx.moveTo(X, Y); ctx.lineTo(X + 32 * z, Y + 16 * z); }
+        if (y + 1 < N && w.wire[i + N]) { ctx.moveTo(X, Y); ctx.lineTo(X - 32 * z, Y + 16 * z); }
+        ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = live ? '#ffd166' : '#8a93a3'; ctx.beginPath(); ctx.arc(X, Y, (wv === 2 ? 2.2 : 3) * z, 0, 6.3); ctx.fill();
+      }
     }
   }
   drawSlab(ctx, z, cx, cy, mode) {

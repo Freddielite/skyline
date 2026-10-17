@@ -76,3 +76,23 @@ export class Walkers extends Mover {
   make(x, y, d) { return { ped: true, tx: x, ty: y, d, t: this.rnd(), speed: 0.28 + this.rnd() * 0.18, col: Math.floor(this.rnd() * 8), px: 0, py: 0, dx: DIRS[d][0], dy: DIRS[d][1], off: (this.rnd() < 0.5 ? -1 : 1) * 0.43 }; }
   update(dt, target) { this.balance(dt, target, 0.3); this.step(dt, 0.25); }
 }
+
+export class Trucks extends Mover {
+  constructor(world, rnd, getFacilities) { super(world, rnd); this.needBuilt = false; this.getFac = getFacilities; }
+  get trucks() { return this.list; }
+  make(x, y, d) { return { truck: true, tx: x, ty: y, d, t: this.rnd() * 0.8, speed: 0.6 + this.rnd() * 0.3, col: 8, px: 0, py: 0, dx: DIRS[d][0], dy: DIRS[d][1], off: 0.13 }; }
+  spawn() {
+    const fac = this.getFac();
+    if (fac.length) {
+      const f = fac[Math.floor(this.rnd() * fac.length)];
+      for (let t = 0; t < 40; t++) {
+        const x = f.x + Math.floor(this.rnd() * (f.def.w + 8)) - 4, y = f.y + Math.floor(this.rnd() * (f.def.d + 8)) - 4;
+        if (!this.w.inb(x, y) || !this.w.isRoad(x, y)) continue;
+        const od = this.openDirs(x, y, -1); if (!od.length) continue;
+        return this.make(x, y, od[Math.floor(this.rnd() * od.length)]);
+      }
+    }
+    return super.spawn(false);
+  }
+  update(dt, target) { this.balance(dt, target, 0.8); this.step(dt, 0); }
+}
