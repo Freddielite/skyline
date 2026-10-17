@@ -5,7 +5,7 @@ const S = 2;               // supersampling for crisp zoom
 const cache = new Map();
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w * S; c.height = h * S; return c; };
 
-function kit(ctx, mode, ox, oy) {
+function kit(ctx, mode, ox, oy, lit = true) {
   const C = (h) => tint(h, mode);
   const P = (x, y, z = 0) => [ox + (x - y) * 32, oy + (x + y) * 16 - z];
   const path = (a) => { ctx.beginPath(); ctx.moveTo(a[0][0], a[0][1]); for (let i = 1; i < a.length; i++) ctx.lineTo(a[i][0], a[i][1]); ctx.closePath(); };
@@ -50,7 +50,7 @@ function kit(ctx, mode, ox, oy) {
   };
   const win = (a, r, side, gl) => {
     let f;
-    if (mode === 2) f = r > 0.45 ? (side ? '#f0bf6a' : '#ffd98c') : (side ? '#1b2a52' : '#223360');
+    if (mode === 2) f = lit && r > 0.45 ? (side ? '#f0bf6a' : '#ffd98c') : (side ? '#1b2a52' : '#223360');
     else { f = gl ? (side ? '#9fc9e2' : '#d6eefa') : (side ? '#7ea6c6' : '#b7dbf2'); if (mode === 1) f = mix(f, '#ffc58a', 0.45); }
     path(a); ctx.fillStyle = f; ctx.fill();
     if (mode !== 2) { ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 0.6; ctx.stroke(); }
@@ -93,7 +93,8 @@ function kit(ctx, mode, ox, oy) {
     if (speck) for (let i = 0; i < 9; i++) { const p = P(hash(i, 1, 4) * 0.9 + 0.05, hash(i, 2, 5) * 0.9 + 0.05); line(p, [p[0] + 1.8, p[1] - 1.4], C(speck[i % speck.length]), 0.9); }
   };
   const smoke = (p, n = 3) => { for (let i = 0; i < n; i++) circ([p[0] + i * 7, p[1] - i * 12], 6 + i * 2.5, mode === 2 ? `rgba(141,150,173,${0.7 - i * 0.2})` : `rgba(236,239,243,${0.85 - i * 0.25})`); };
-  return { C, P, path, poly, line, circ, ell, faces, box, sh, win, wins, cyl, tree, pad, smoke, ctx, mode };
+  const store = () => C(mode === 2 && lit ? '#ffd98c' : '#35566b');
+  return { C, P, path, poly, line, circ, ell, faces, box, sh, win, wins, cyl, tree, pad, smoke, ctx, mode, lit, store };
 }
 
 const WALL = ['#f2e6cd', '#e8cdb5', '#d9e6ef', '#f5dca8', '#e9d9ee'];
@@ -133,7 +134,7 @@ function apartment(k, v) {
   box(x, y, w, d, h, f);
   k.wins(x, y, w, d, h, v + 3, { dens: 3.6, rh: 10, wh: 5.5, base: 14 });
   for (let z = 12; z < h; z += 10) line(P(x, y + d, z), P(x + w, y + d, z), 'rgba(0,0,0,.14)', 0.6);
-  poly([P(x + 0.08, y + d, 1), P(x + w - 0.08, y + d, 1), P(x + w - 0.08, y + d, 11), P(x + 0.08, y + d, 11)], C(k.mode === 2 ? '#ffd98c' : '#35566b'));
+  poly([P(x + 0.08, y + d, 1), P(x + w - 0.08, y + d, 1), P(x + w - 0.08, y + d, 11), P(x + 0.08, y + d, 11)], k.store());
   poly([P(x + 0.08, y + d, 13), P(x + w - 0.08, y + d, 13), P(x + w - 0.08, y + d + 0.13, 9), P(x + 0.08, y + d + 0.13, 9)], C(AWN[v % 5]));
   box(x + 0.1, y + 0.1, 0.22, 0.2, 5, faces('#9aa0a8'), h); box(x + 0.4, y + 0.3, 0.2, 0.18, 4, faces('#b0b5bc'), h);
   cyl(x + w * 0.7, y + d * 0.28, 5, 11, '#9c7a55', h);
@@ -145,7 +146,7 @@ function tower(k, v) {
   sh(x, y, w, d, h + 14);
   box(x, y, w, d, h, f);
   k.wins(x, y, w, d, h, v + 11, { dens: 4.2, rh: 8.5, wh: 4.5, base: 14 });
-  poly([P(x + 0.08, y + d, 1), P(x + w - 0.08, y + d, 1), P(x + w - 0.08, y + d, 11), P(x + 0.08, y + d, 11)], C(k.mode === 2 ? '#ffd98c' : '#35566b'));
+  poly([P(x + 0.08, y + d, 1), P(x + w - 0.08, y + d, 1), P(x + w - 0.08, y + d, 11), P(x + 0.08, y + d, 11)], k.store());
   box(x + 0.12, y + 0.12, w - 0.24, d - 0.24, 14, f, h);
   const p = P(x + w / 2, y + d / 2, h + 14);
   line(p, [p[0], p[1] - 22], C('#c9d3de'), 1.2); circ([p[0], p[1] - 23], 1.8, '#ff3b30');
@@ -156,7 +157,7 @@ function shop(k, v) {
   k.pad('#cfd1d4', null);
   sh(x, y, w, d, h);
   box(x, y, w, d, h, { l: ['#e5d9c0', '#d8c3b0', '#c9d3dc', '#e6cdb5'][v % 4], r: shade(['#e5d9c0', '#d8c3b0', '#c9d3dc', '#e6cdb5'][v % 4], 0.76), t: '#a3a9b3' });
-  poly([P(x + 0.07, y + d, 1), P(x + w - 0.07, y + d, 1), P(x + w - 0.07, y + d, 14), P(x + 0.07, y + d, 14)], C(k.mode === 2 ? '#ffd98c' : '#35566b'));
+  poly([P(x + 0.07, y + d, 1), P(x + w - 0.07, y + d, 1), P(x + w - 0.07, y + d, 14), P(x + 0.07, y + d, 14)], k.store());
   for (let i = 1; i < 6; i++) { const u = lerp(x + 0.07, x + w - 0.07, i / 6); line(P(u, y + d, 1), P(u, y + d, 14), 'rgba(255,255,255,.45)', 0.7); }
   poly([P(x + 0.04, y + d, 17), P(x + w - 0.04, y + d, 17), P(x + w - 0.04, y + d + 0.14, 11), P(x + 0.04, y + d + 0.14, 11)], C(AWN[(v + 1) % 5]));
   for (let i = 1; i < 6; i++) { const u = lerp(x + 0.04, x + w - 0.04, i / 6); line(P(u, y + d, 17), P(u, y + d + 0.14, 11), 'rgba(255,255,255,.55)', 1.2); }
@@ -170,7 +171,7 @@ function office(k, v) {
   sh(x, y, w, d, h);
   box(x, y, w, d, h, f);
   k.wins(x, y, w, d, h, v + 21, { dens: 3.8, rh: 9, wh: 5, base: 16 });
-  poly([P(x + 0.07, y + d, 1), P(x + w - 0.07, y + d, 1), P(x + w - 0.07, y + d, 12), P(x + 0.07, y + d, 12)], C(k.mode === 2 ? '#ffd98c' : '#35566b'));
+  poly([P(x + 0.07, y + d, 1), P(x + w - 0.07, y + d, 1), P(x + w - 0.07, y + d, 12), P(x + 0.07, y + d, 12)], k.store());
   poly([P(x + 0.07, y + d, 14), P(x + w - 0.07, y + d, 14), P(x + w - 0.07, y + d + 0.13, 10), P(x + 0.07, y + d + 0.13, 10)], C(AWN[(v + 2) % 5]));
   box(x + 0.12, y + 0.14, 0.28, 0.26, 5, faces('#9aa0a8'), h); box(x + 0.5, y + 0.45, 0.22, 0.2, 4, faces('#b0b5bc'), h);
   if (v % 2) cyl(x + w * 0.72, y + d * 0.3, 5, 11, '#9c7a55', h);
@@ -184,7 +185,7 @@ function glassTower(k, v) {
   poly([P(x, y + d, 0), P(x + w, y + d, 0), P(x + w, y + d, h), P(x, y + d, h)], 'rgba(0,0,0,0)', 'glass', true);
   poly([P(x + w, y, 0), P(x + w, y + d, 0), P(x + w, y + d, h), P(x + w, y, h)], 'rgba(0,0,0,0)', 'glass', true);
   k.wins(x, y, w, d, h, v + 31, { dens: 4.6, rh: 7.5, wh: 4.2, base: 14, glass: 1 });
-  poly([P(x + 0.07, y + d, 1), P(x + w - 0.07, y + d, 1), P(x + w - 0.07, y + d, 11), P(x + 0.07, y + d, 11)], C(k.mode === 2 ? '#ffd98c' : '#35566b'));
+  poly([P(x + 0.07, y + d, 1), P(x + w - 0.07, y + d, 1), P(x + w - 0.07, y + d, 11), P(x + 0.07, y + d, 11)], k.store());
   box(x + 0.14, y + 0.14, w - 0.28, d - 0.28, 16, f, h);
   box(x + 0.26, y + 0.26, w - 0.52, d - 0.52, 10, f, h + 16);
   const p = P(x + w / 2, y + d / 2, h + 26);
@@ -256,19 +257,20 @@ const BUILD = {
 const HEIGHTS = { [T.RES]: [100, 150, 230], [T.COM]: [110, 170, 250], [T.IND]: [110, 150, 220] };
 const PAD = { [T.RES]: '#a9dc8e', [T.COM]: '#cfd1d4', [T.IND]: '#a9a493' };
 
-function make(w, h, ox, oy, fn, mode) {
+function make(w, h, ox, oy, fn, mode, lit = true) {
   const c = mk(w, h), ctx = c.getContext('2d');
   ctx.scale(S, S);
-  const k = kit(ctx, mode, ox, oy);
+  const k = kit(ctx, mode, ox, oy, lit);
   fn(k);
   return { c, ox, oy, S };
 }
 function memo(key, fn) { let v = cache.get(key); if (!v) { v = fn(); cache.set(key, v); } return v; }
 
-export function buildingSprite(kind, level, variant, mode) {
-  return memo(`b${kind}${level}${variant}${mode}`, () => {
+export function buildingSprite(kind, level, variant, mode, lit = true) {
+  lit = mode === 2 ? !!lit : true;
+  return memo(`b${kind}${level}${variant}${mode}${lit ? 1 : 0}`, () => {
     const H = HEIGHTS[kind][level - 1];
-    return make(160, H, 80, H - 64, (k) => BUILD[kind][level - 1](k, variant), mode);
+    return make(160, H, 80, H - 64, (k) => BUILD[kind][level - 1](k, variant), mode, lit);
   });
 }
 export function parkSprite(variant, mode) {
@@ -449,10 +451,11 @@ function school(k) {
   tree(0.12, 0.9, 0, 5);
 }
 const SVC_SPR = { 1: [coalPlant, 2, 2, 190], 2: [wind, 1, 1, 130], 3: [waterTower, 1, 1, 130], 4: [police, 1, 1, 100], 5: [fireStation, 1, 1, 130], 6: [clinic, 1, 1, 110], 7: [school, 1, 1, 130] };
-export function serviceSprite(id, mode) {
-  return memo(`s${id}${mode}`, () => {
+export function serviceSprite(id, mode, lit = true) {
+  lit = mode === 2 ? !!lit : true;
+  return memo(`s${id}${mode}${lit ? 1 : 0}`, () => {
     const [fn, fw, fd, hh] = SVC_SPR[id];
     const W = (fw + fd) * 32 + 96, ox = fd * 32 + 32, H = hh + (fw + fd) * 16 + 34, oy = H - (fw + fd) * 16 - 34;
-    return make(W, H, ox, oy, (k) => fn(k), mode);
+    return make(W, H, ox, oy, (k) => fn(k), mode, lit);
   });
 }

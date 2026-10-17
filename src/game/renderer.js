@@ -64,7 +64,7 @@ export class Renderer {
         if (k === T.EMPTY && w.tree[i]) { const sp = treeSprite(w.tree[i], mode); ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
         else if (k === T.PARK) { const sp = parkSprite(w.variant[i] % 4, mode); ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
         else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) {
-          const sp = buildingSprite(k, w.level[i], w.variant[i] % 4, mode);
+          const sp = buildingSprite(k, w.level[i], w.variant[i] % 4, mode, g.sim.pw[i] === 1);
           ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
           const lv = w.level[i];
           if (!g.sim.pw[i]) badges.push([X, Y + 16 * z - [34, 60, 100][lv - 1] * z, 'bolt']);
@@ -72,12 +72,12 @@ export class Renderer {
         } else if (k === T.SVC) {
           const bt = w.bt[i], def = BT[bt], dx = w.bo[i] & 3, dy = w.bo[i] >> 2;
           if (dx === def.w - 1 && dy === def.d - 1) {
-            const ax = x - dx, ay = y - dy, AX = sx(ax, ay), AY = sy(ax, ay), sp = serviceSprite(bt, mode);
+            const ax = x - dx, ay = y - dy, AX = sx(ax, ay), AY = sy(ax, ay), sp = serviceSprite(bt, mode, def.power ? true : g.sim.pw[ay * N + ax] === 1);
             ctx.drawImage(sp.c, AX - sp.ox * z, AY - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
             if (bt === 2) this.blades(ctx, sx(ax + 0.5, ay + 0.5), sy(ax + 0.5, ay + 0.5, 74), z, t, mode);
             if (def.use && !g.sim.pw[ay * N + ax]) badges.push([sx(ax + def.w / 2, ay + def.d / 2), sy(ax + def.w / 2, ay + def.d / 2, 66), 'bolt']);
           }
-        } else if (k === T.ROAD && mode === 2 && hash(x, y, 3) > 0.72) {
+        } else if (k === T.ROAD && mode === 2 && hash(x, y, 3) > 0.72 && g.sim.powerMap[i] === 3) {
           const gs = this.glowSprite(); ctx.globalCompositeOperation = 'lighter';
           ctx.drawImage(gs, X - 48 * z * 0.8, Y - 8 * z, 96 * z * 0.8, 48 * z * 0.8); ctx.globalCompositeOperation = 'source-over';
           ctx.strokeStyle = '#3a3d44'; ctx.lineWidth = 1.4 * z; ctx.beginPath(); ctx.moveTo(X, Y + 16 * z); ctx.lineTo(X, Y + 16 * z - 16 * z); ctx.stroke();
