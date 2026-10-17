@@ -15,8 +15,8 @@ Isometric city builder for Android. React + Vite + canvas, packaged with Capacit
     npm run android:sync     # build + copy web assets into the Android project
     npm run android:open     # opens Android Studio -> Build > Build APK(s)
 
-Optional: lock to landscape by adding `android:screenOrientation="sensorLandscape"`
-to the `<activity>` tag in `android/app/src/main/AndroidManifest.xml`.
+`npm run android:sync` also locks the app to landscape (it patches `AndroidManifest.xml` via
+`scripts/landscape.mjs`). Run `npm run android:landscape` on its own if you only need that.
 
 ## Controls
 
@@ -26,7 +26,13 @@ to the `<activity>` tag in `android/app/src/main/AndroidManifest.xml`.
 - Utilities and services: tap a tile to place (the preview shows the footprint); drag to reposition before lifting.
 - With a build tool active, one finger paints and two fingers move the map.
 
-## Stage 2.5 (this build)
+## Landscape layout (this build)
+
+- The game is landscape-first: tool rail on the left (category icons + 2-column tool grid), Views / Budget / Menu on the right, compact HUD across the top
+- Portrait still works as a fallback in the browser
+- The Android build is locked to sensor-landscape
+
+## Stage 2.5
 
 - Power now travels over wires you place: overhead lines (cheap, open ground and roads only) and underground cable (costs more, can run under buildings). Buildings within 2 tiles of a live line get power; generators must touch a line
 - Bigger services: Police HQ, Fire HQ, Hospital, University (wider radius, stronger effect)

@@ -35,7 +35,7 @@ export class Game {
   }
   fitCamera() {
     const r = this.renderer;
-    const z = clamp(r.W / 700, 0.9, 1.3);
+    const z = clamp(Math.min(r.W / 700, r.H / 430), 0.75, 1.3);
     this.cam.zoom = z;
     this.cam.x = r.W / 2; this.cam.y = r.H / 2 - (N * 16 * z) + 10 * z;
   }

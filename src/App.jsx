@@ -30,6 +30,8 @@ const I = {
   recycle: 'M20 12a8 8 0 01-13.5 5.8M4 12a8 8 0 0113.5-5.8M17.5 3v3.5H14M6.5 21v-3.5H10',
   ball: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 8l3.5 2.5-1.3 4h-4.4l-1.3-4L12 8zM12 3v5M20.5 9.5L15.5 10.5M3.5 9.5l5 1M7 19l2.8-4.5M17 19l-2.8-4.5',
   bank: 'M3 10l9-6 9 6M5 10v8m4-8v8m6-8v8m4-8v8M3 20h18',
+  smile: 'M12 3a9 9 0 100 18 9 9 0 000-18zM8.5 14a4.2 4.2 0 007 0M9 9.5h.01M15 9.5h.01',
+  people: 'M9 11a3 3 0 100-6 3 3 0 000 6zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 11a2.5 2.5 0 100-5M17 14.2c2.2.5 4 2.4 4 5.8',
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10-3a3 3 0 100 6 3 3 0 000-6z',
 };
 const Icon = ({ n, size = 22, fill }) => (
@@ -66,11 +68,11 @@ const T = {
   stadium: { id: 'stadium', label: 'Stadium', icon: 'ball', cost: 7000 },
 };
 const CATS = [
-  { id: 'build', label: 'Build', tools: ['move', 'road', 'res', 'com', 'ind', 'park', 'clear'] },
-  { id: 'util', label: 'Power & water', tools: ['move', 'coal', 'wind', 'water', 'wire', 'cable', 'clear'] },
-  { id: 'waste', label: 'Waste', tools: ['move', 'dump', 'recycle', 'wte', 'clear'] },
-  { id: 'svc', label: 'Services', tools: ['move', 'police', 'police2', 'fire', 'fire2', 'clinic', 'hospital', 'school', 'university', 'clear'] },
-  { id: 'fun', label: 'Amenities', tools: ['move', 'plaza', 'library', 'museum', 'stadium', 'clear'] },
+  { id: 'build', label: 'Build', icon: 'road', tools: ['move', 'road', 'res', 'com', 'ind', 'park', 'clear'] },
+  { id: 'util', label: 'Power & water', icon: 'bolt', tools: ['move', 'coal', 'wind', 'water', 'wire', 'cable', 'clear'] },
+  { id: 'waste', label: 'Waste', icon: 'trash', tools: ['move', 'dump', 'recycle', 'wte', 'clear'] },
+  { id: 'svc', label: 'Services', icon: 'shield', tools: ['move', 'police', 'police2', 'fire', 'fire2', 'clinic', 'hospital', 'school', 'university', 'clear'] },
+  { id: 'fun', label: 'Amenities', icon: 'ball', tools: ['move', 'plaza', 'library', 'museum', 'stadium', 'clear'] },
 ];
 const VIEWS = [
   { id: 'value', label: 'Land value' }, { id: 'crime', label: 'Crime' }, { id: 'pollution', label: 'Pollution' },
@@ -135,11 +137,11 @@ export default function App() {
         <>
           <header className="top">
             <div className="cash"><Icon n="coin" size={18} /><b>{money(st.money)}</b></div>
-            <div className="meta"><b>{st.pop.toLocaleString('en-US')}</b><span>residents</span></div>
+            <div className="util pop" title="Residents"><Icon n="people" size={15} /><b>{st.pop.toLocaleString('en-US')}</b></div>
             <div className={'util ' + supplyClass(st.pSup, st.pDem)} title="Power supply / demand"><Icon n="bolt" size={15} fill /><b>{st.pSup}/{st.pDem}</b></div>
             <div className={'util ' + supplyClass(st.wSup, st.wDem)} title="Water supply / demand"><Icon n="drop" size={15} fill /><b>{st.wSup}/{st.wDem}</b></div>
             <div className={'util ' + supplyClass(st.tSup, st.tDem)} title="Waste capacity / output"><Icon n="trash" size={15} /><b>{st.tSup}/{st.tDem}</b></div>
-            <div className="meta hide-s"><b>{st.happy}%</b><span>happy</span></div>
+            <div className={'util ' + (st.happy >= 60 ? 'ok' : st.happy >= 40 ? 'mid' : 'bad')} title="Happiness"><Icon n="smile" size={15} /><b>{st.happy}%</b></div>
             <div className="date">{st.date}</div>
             <div className="speed" role="group" aria-label="Game speed">
               {[[0, 'pause'], [1, 'play'], [2, 'ff'], [4, 'fff']].map(([v, ic]) => (
@@ -156,8 +158,9 @@ export default function App() {
           <nav className="dock" aria-label="Build tools">
             <div className="stack">
               <div className="tabs" role="tablist">
-                {CATS.map((c) => <button key={c.id} role="tab" aria-selected={cat === c.id} className={cat === c.id ? 'on' : ''} onClick={() => setCat(c.id)}>{c.label}</button>)}
+                {CATS.map((c) => <button key={c.id} role="tab" aria-label={c.label} aria-selected={cat === c.id} className={cat === c.id ? 'on' : ''} onClick={() => setCat(c.id)}><Icon n={c.icon} size={18} /><span>{c.label}</span></button>)}
               </div>
+              <div className="tabcap">{CATS.find((c) => c.id === cat).label}</div>
               <div className="tools">
                 {catTools.map((k) => { const t = T[k]; return (
                   <button key={k} className={'tool' + (tool === t.id ? ' on' : '') + (t.zone ? ' z-' + t.zone : '')} onClick={() => pick(t.id)}>

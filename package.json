@@ -8,8 +8,9 @@
     "build": "vite build",
     "preview": "vite preview --host",
     "android:add": "npx cap add android",
-    "android:sync": "vite build && npx cap sync android",
-    "android:open": "npx cap open android"
+    "android:sync": "vite build && npx cap sync android && node scripts/landscape.mjs",
+    "android:open": "npx cap open android",
+    "android:landscape": "node scripts/landscape.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.1.2",
