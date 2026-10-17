@@ -32,6 +32,8 @@ const I = {
   bank: 'M3 10l9-6 9 6M5 10v8m4-8v8m6-8v8m4-8v8M3 20h18',
   smile: 'M12 3a9 9 0 100 18 9 9 0 000-18zM8.5 14a4.2 4.2 0 007 0M9 9.5h.01M15 9.5h.01',
   people: 'M9 11a3 3 0 100-6 3 3 0 000 6zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 11a2.5 2.5 0 100-5M17 14.2c2.2.5 4 2.4 4 5.8',
+  clock: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 7v5l3.5 2',
+  eyeoff: 'M3 3l18 18M10.6 6.1A9.8 9.8 0 0112 6c6 0 10 6 10 6a17 17 0 01-3.2 3.7M6.5 6.7C3.7 8.6 2 12 2 12s4 7 10 7a9.6 9.6 0 004.2-1M9.9 9.9a3 3 0 004.2 4.2',
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10-3a3 3 0 100 6 3 3 0 000-6z',
 };
 const Icon = ({ n, size = 22, fill }) => (
@@ -102,6 +104,7 @@ export default function App() {
   const [cost, setCost] = useState(null);
   const [panel, setPanel] = useState(null);
   const [timeSet, setTimeSet] = useState('auto');
+  const [ui, setUi] = useState(() => { try { return localStorage.getItem('skyline.hideui') !== '1'; } catch (e) { return true; } });
   const toastT = useRef(0);
 
   const say = useCallback((m) => { setToast(m); clearTimeout(toastT.current); toastT.current = setTimeout(() => setToast(''), 2400); }, []);
@@ -127,6 +130,7 @@ export default function App() {
   const newCity = () => { g.newCity(Math.floor(Math.random() * 100000)); setPanel(null); setSt(g.stats()); };
   const setView = (v) => { g.setOverlay(v); if (v) { setTool(null); g.setTool(null); } setPanel(null); setSt(g.stats()); };
   const toggle = (p) => setPanel(panel === p ? null : p);
+  const flipUi = () => { const next = !ui; setUi(next); try { localStorage.setItem('skyline.hideui', next ? '0' : '1'); } catch (e) { /* ignore */ } if (!next) { setPanel(null); setTool(null); g && g.setTool(null); } };
   const catTools = CATS.find((c) => c.id === cat).tools;
   const view = st && VIEWS.find((v) => v.id === st.overlay);
 
@@ -135,13 +139,15 @@ export default function App() {
       <canvas ref={cvRef} className="map" />
       {st && (
         <>
-          <header className="top">
+          {!ui && <button className="showui" onClick={flipUi} aria-label="Show interface"><Icon n="eye" size={22} /></button>}
+          {ui && <header className="top">
             <div className="cash"><Icon n="coin" size={18} /><b>{money(st.money)}</b></div>
             <div className="util pop" title="Residents"><Icon n="people" size={15} /><b>{st.pop.toLocaleString('en-US')}</b></div>
             <div className={'util ' + supplyClass(st.pSup, st.pDem)} title="Power supply / demand"><Icon n="bolt" size={15} fill /><b>{st.pSup}/{st.pDem}</b></div>
             <div className={'util ' + supplyClass(st.wSup, st.wDem)} title="Water supply / demand"><Icon n="drop" size={15} fill /><b>{st.wSup}/{st.wDem}</b></div>
             <div className={'util ' + supplyClass(st.tSup, st.tDem)} title="Waste capacity / output"><Icon n="trash" size={15} /><b>{st.tSup}/{st.tDem}</b></div>
             <div className={'util ' + (st.happy >= 60 ? 'ok' : st.happy >= 40 ? 'mid' : 'bad')} title="Happiness"><Icon n="smile" size={15} /><b>{st.happy}%</b></div>
+            <div className="util time" title="Time of day"><Icon n="clock" size={15} /><b>{st.time}</b></div>
             <div className="date">{st.date}</div>
             <div className="speed" role="group" aria-label="Game speed">
               {[[0, 'pause'], [1, 'play'], [2, 'ff'], [4, 'fff']].map(([v, ic]) => (
@@ -149,13 +155,13 @@ export default function App() {
               ))}
             </div>
             <Demand s={st} />
-          </header>
+          </header>}
 
-          {cost && tool && <div className="costtag">{cost.name ? cost.name + ' · ' : cost.n + ' tiles · '}{money(cost.c)}</div>}
-          {view && <button className="viewtag" onClick={() => setView(null)}>{view.label} view <Icon n="close" size={14} /></button>}
+          {ui && cost && tool && <div className="costtag">{cost.name ? cost.name + ' · ' : cost.n + ' tiles · '}{money(cost.c)}</div>}
+          {ui && view && <button className="viewtag" onClick={() => setView(null)}>{view.label} view <Icon n="close" size={14} /></button>}
           {toast && <div className="toast" role="status">{toast}</div>}
 
-          <nav className="dock" aria-label="Build tools">
+          {ui && <nav className="dock" aria-label="Build tools">
             <div className="stack">
               <div className="tabs" role="tablist">
                 {CATS.map((c) => <button key={c.id} role="tab" aria-label={c.label} aria-selected={cat === c.id} className={cat === c.id ? 'on' : ''} onClick={() => setCat(c.id)}><Icon n={c.icon} size={18} /><span>{c.label}</span></button>)}
@@ -172,10 +178,11 @@ export default function App() {
               <button className={'tool' + (st.overlay ? ' on' : '')} onClick={() => toggle('views')}><Icon n="eye" /><span>Views</span><em>&nbsp;</em></button>
               <button className="tool" onClick={() => toggle('budget')}><Icon n="coin" /><span>Budget</span><em>&nbsp;</em></button>
               <button className="tool" onClick={() => toggle('menu')}><Icon n="menu" /><span>Menu</span><em>&nbsp;</em></button>
+              <button className="tool" onClick={flipUi} aria-label="Hide interface"><Icon n="eyeoff" /><span>Hide</span><em>&nbsp;</em></button>
             </div>
-          </nav>
+          </nav>}
 
-          {panel === 'views' && (
+          {ui && panel === 'views' && (
             <section className="sheet" aria-label="Map views">
               <div className="sheet-h"><h2>Map views</h2><button className="x" onClick={() => setPanel(null)} aria-label="Close"><Icon n="close" size={18} /></button></div>
               <div className="viewgrid">
@@ -185,7 +192,7 @@ export default function App() {
               <p className="hint">Green is good, red is trouble. Power and water views show which buildings are connected.</p>
             </section>
           )}
-          {panel === 'budget' && (
+          {ui && panel === 'budget' && (
             <section className="sheet" aria-label="Budget">
               <div className="sheet-h"><h2>Budget</h2><button className="x" onClick={() => setPanel(null)} aria-label="Close"><Icon n="close" size={18} /></button></div>
               <div className="ledger">
@@ -198,6 +205,7 @@ export default function App() {
                 <div><span>Uncollected waste</span><b className={st.wasteUn > 0.2 ? 'neg' : ''}>{Math.round(st.wasteUn * 100)}% of buildings</b></div>
                 <div><span>Crime / pollution</span><b>{st.crime} / {st.poll}</b></div>
                 <div><span>Police · Fire · Health · School · Fun</span><b>{['police', 'fire', 'health', 'edu', 'fun'].map((k) => Math.round(st.cov[k] * 100) + '%').join(' · ')}</b></div>
+                <div><span>Citizens · with a job</span><b>{st.citizens} · {st.employed}</b></div>
                 <div><span>Buildings (R / C / I)</span><b>{st.bld.r} / {st.bld.c} / {st.bld.i}</b></div>
               </div>
               <h3>Tax rates</h3>
@@ -211,7 +219,7 @@ export default function App() {
               <p className="hint">Higher taxes raise income but slow growth and lower happiness. Buildings without power or water pay less, and uncollected garbage hurts happiness.</p>
             </section>
           )}
-          {panel === 'menu' && (
+          {ui && panel === 'menu' && (
             <section className="sheet" aria-label="Menu">
               <div className="sheet-h"><h2>Menu</h2><button className="x" onClick={() => setPanel(null)} aria-label="Close"><Icon n="close" size={18} /></button></div>
               <h3>Time of day</h3>

@@ -2,7 +2,9 @@ import { World, N, T } from './world.js';
 import { Sim, COST } from './sim.js';
 import { BY_KEY, BT } from './buildings.js';
 import { Renderer } from './renderer.js';
-import { Traffic, Walkers, Trucks } from './cars.js';
+import { Traffic, Trucks } from './cars.js';
+import { Agents } from './agents.js';
+import { siteInfo } from './construction.js';
 import { clamp, mulberry32 } from './util.js';
 
 const SAVE_KEY = 'skyline.save.v1';
@@ -20,14 +22,15 @@ export class Game {
     this.load() || this.newCity(Math.floor(Math.random() * 100000), true);
     this.bind();
   }
-  get cars() { return this.traffic.cars; }
-  get people() { return this.walkers.people; }
+  get cars() { return this.traffic.cars.concat(this.agents.drivers); }
+  get people() { return this.agents.walkers; }
   get trucks() { return this.garbage.trucks; }
   newCity(seed, silent) {
     this.world = new World(seed);
     this.sim = new Sim(this.world);
     this.traffic = new Traffic(this.world, mulberry32(seed + 3));
-    this.walkers = new Walkers(this.world, mulberry32(seed + 4));
+    this.sites = new Map();
+    this.agents = new Agents(this.world, mulberry32(seed + 4), (i) => this.sites.has(i));
     this.garbage = new Trucks(this.world, mulberry32(seed + 5), () => this.sim.facilities);
     this.fitCamera();
     this.dirtySave = true;
@@ -53,7 +56,8 @@ export class Game {
       this.world = World.fromJSON(o.world);
       this.sim = new Sim(this.world, o.sim);
       this.traffic = new Traffic(this.world, mulberry32(this.world.seed + 3));
-      this.walkers = new Walkers(this.world, mulberry32(this.world.seed + 4));
+      this.sites = new Map();
+      this.agents = new Agents(this.world, mulberry32(this.world.seed + 4), (i) => this.sites.has(i));
       this.garbage = new Trucks(this.world, mulberry32(this.world.seed + 5), () => this.sim.facilities);
       if (o.cam) this.cam = o.cam; else this.fitCamera();
       this.clock = o.clock || 20;
@@ -66,7 +70,7 @@ export class Game {
   setOverlay(o) { this.overlay = o; }
   stats() {
     const s = this.sim;
-    return { money: Math.floor(s.money), pop: s.pop, date: s.dateLabel(), rd: s.rd, cd: s.cd, id: s.id, happy: s.happiness, tax: { ...s.tax }, income: s.lastIncome, expense: s.lastExpense, bld: s.bld, roads: s.roads, parks: s.parks, jobs: s.cJobs + s.iJobs, speed: this.speed, mode: this.mode, tSup: s.net.tSup, tDem: s.net.tDem, wasteUn: s.net.wasteUn, pSup: s.net.pSup, pDem: s.net.pDem, wSup: s.net.wSup, wDem: s.net.wDem, upkeep: Math.round(s.net.upkeep), crime: Math.round(s.net.crimeAvg), poll: Math.round(s.net.pollAvg), cov: { police: s.net.police, fire: s.net.fire, health: s.net.health, edu: s.net.edu, fun: s.net.fun }, overlay: this.overlay };
+    return { money: Math.floor(s.money), pop: s.pop, date: s.dateLabel(), rd: s.rd, cd: s.cd, id: s.id, happy: s.happiness, tax: { ...s.tax }, income: s.lastIncome, expense: s.lastExpense, bld: s.bld, roads: s.roads, parks: s.parks, jobs: s.cJobs + s.iJobs, speed: this.speed, mode: this.mode, time: `${String(Math.floor(this.hour)).padStart(2, '0')}:${String(Math.floor((this.hour % 1) * 60)).padStart(2, '0')}`, citizens: this.agents.stats.total, employed: this.agents.stats.employed, tSup: s.net.tSup, tDem: s.net.tDem, wasteUn: s.net.wasteUn, pSup: s.net.pSup, pDem: s.net.pDem, wSup: s.net.wSup, wDem: s.net.wDem, upkeep: Math.round(s.net.upkeep), crime: Math.round(s.net.crimeAvg), poll: Math.round(s.net.pollAvg), cov: { police: s.net.police, fire: s.net.fire, health: s.net.health, edu: s.net.edu, fun: s.net.fun }, overlay: this.overlay };
   }
   setTax(k, v) { this.sim.tax[k] = clamp(v, 0, 20); this.sim.recount(); this.dirtySave = true; }
 
@@ -186,24 +190,33 @@ export class Game {
     this._raf = requestAnimationFrame(frame);
   }
   stop() { this.running = false; cancelAnimationFrame(this._raf); window.removeEventListener('resize', this._resize); }
+  get abs() { return (this.clock / 180) * 24 + 6; }          // absolute clock hours; a day lasts 180s at 1x
+  get hour() { return this.abs % 24; }
   update(dt) {
-    this.clock += dt;
+    const sp = this.speed;
+    this.clock += dt * sp;
     if (this.timeSetting === 'auto') { const ph = (this.clock / 180) % 1; this.mode = ph < 0.55 ? 0 : ph < 0.62 ? 1 : ph < 0.9 ? 2 : 1; }
     else this.mode = this.timeSetting;
-    if (this.speed > 0) {
-      this.acc += dt * this.speed;
+    if (sp > 0) {
+      this.acc += dt * sp;
       while (this.acc >= 0.8) { this.acc -= 0.8; this.sim.tick(); this.dirtySave = true; }
     }
-    const s = this.sim, run = this.speed > 0 ? 1 : 0;
-    // life scales with the city: nothing on empty roads, busier as people and jobs arrive
+    const s = this.sim;
+    while (s.events.length) {
+      const ev = s.events.shift();
+      if (ev.type === 'month') this.hooks.month && this.hooks.month(ev);
+      else if (ev.type === 'built' && !this.sites.has(ev.i)) { const info = siteInfo(ev); this.sites.set(ev.i, { i: ev.i, kind: ev.kind, from: ev.from, to: ev.to, pv: ev.pv || 0, t: 0, ...info }); }
+    }
+    for (const [i, site] of this.sites) { site.t += dt * sp; if (site.t >= site.dur) this.sites.delete(i); }
+    this.siteCheck = (this.siteCheck || 0) + dt;
+    if (this.siteCheck > 1) { this.siteCheck = 0; for (const i of this.sites.keys()) { const k = this.world.kind[i]; if (k === T.EMPTY || k === T.ROAD) this.sites.delete(i); } }
+    // life scales with the city; people follow real routines (home, work, shops, parks)
     const night = this.mode === 2 ? 0.45 : this.mode === 1 ? 0.8 : 1;
     const carT = Math.min(60, Math.floor((s.pop / 14 + (s.cJobs + s.iJobs) / 30) * night), Math.floor(s.roads / 2));
-    const pedT = Math.min(90, Math.floor((s.pop / 7) * (this.mode === 2 ? 0.25 : this.mode === 1 ? 0.7 : 1)), s.roads * 2);
-    this.traffic.update(dt * run, carT);
-    this.walkers.update(dt * run, pedT);
-    this.garbage.update(dt * run, Math.min(10, this.sim.facilities.length * 2));
+    this.traffic.update(dt * sp, Math.floor(carT * 0.3));
+    this.agents.update(dt * sp, dt, this.abs, Math.min(140, Math.floor(s.pop / 4)));
+    this.garbage.update(dt * sp, Math.min(10, s.facilities.length * 2));
     this.saveTimer += dt;
     if (this.saveTimer > 20) { this.saveTimer = 0; if (this.dirtySave) this.save(); }
-    while (this.sim.events.length) { const ev = this.sim.events.shift(); this.hooks.month && this.hooks.month(ev); }
   }
 }

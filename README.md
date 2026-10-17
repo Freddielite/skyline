@@ -26,7 +26,13 @@ Isometric city builder for Android. React + Vite + canvas, packaged with Capacit
 - Utilities and services: tap a tile to place (the preview shows the footprint); drag to reposition before lifting.
 - With a build tool active, one finger paints and two fingers move the map.
 
-## Landscape layout (this build)
+## Stage 2.6 (this build)
+
+- Citizens have homes, jobs and routines: they leave for work in the morning, work through the day, go shopping or to parks and plazas in the evening, and return home at night. Short trips are on foot along the sidewalks, long ones by car
+- Every building has its own construction process: wooden frames with a cement mixer for houses, tower cranes and glass panels for shops and offices, welding and diggers for industry, mobile cranes for services, turbines assembled last, earthworks for parks and landfills. Upgrades build over the old building
+- In-game clock in the top bar, and a one-tap Hide button to clear all interface (floating eye button brings it back)
+
+## Landscape layout
 
 - The game is landscape-first: tool rail on the left (category icons + 2-column tool grid), Views / Budget / Menu on the right, compact HUD across the top
 - Portrait still works as a fallback in the browser

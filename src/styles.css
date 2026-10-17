@@ -13,7 +13,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .cash { display: flex; align-items: center; gap: 6px; color: var(--amber); font-size: 17px; }
 .meta { display: flex; flex-direction: column; line-height: 1.1; font-size: 15px; }
 .meta span { font-size: 10px; color: var(--dim); }
-.date { margin-left: auto; font-size: 13px; color: var(--dim); white-space: nowrap; }
+.date { font-size: 13px; color: var(--dim); white-space: nowrap; }
 .speed { display: flex; background: rgba(255, 255, 255, .06); border-radius: 10px; padding: 2px; }
 .speed button { width: 34px; height: 30px; display: grid; place-items: center; background: none; border: 0; border-radius: 8px; color: var(--dim); }
 .speed button.on { background: var(--amber); color: #1b1405; }
@@ -112,4 +112,18 @@ button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
   .tabcap { display: block; flex: none; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); padding: 0 4px; }
   .tools { grid-auto-rows: min-content; }
   .tool { flex-shrink: 0; }
+}
+
+.top { justify-content: space-between; }
+.top > * { flex: 0 0 auto; }
+.util.time { color: var(--text); }
+.showui { position: absolute; right: calc(var(--sar) + 10px); bottom: calc(var(--sab) + 10px); width: 48px; height: 48px; display: grid; place-items: center; background: var(--glass); color: var(--text); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(8px); opacity: .72; }
+.showui:active { opacity: 1; }
+@media (orientation: landscape) and (max-width: 790px) {
+  .top { gap: 3px; padding: 4px 6px; }
+  .util { padding: 2px 5px; gap: 3px; font-size: 11px; }
+  .cash { font-size: 14px; gap: 4px; }
+  .speed button { width: 26px; }
+  .demand { gap: 3px; }
+  .dm-track { width: 10px; }
 }

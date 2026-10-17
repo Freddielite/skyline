@@ -239,14 +239,14 @@ export class Sim {
       if (!road) { if (lvl && rnd() < 0.03) w.level[i] = lvl - 1; continue; }
       const pw = this.pw[i], wt = this.wt[i];
       if (lvl === 0) {
-        if (pw && d > -0.05 && rnd() < 0.15 + 0.5 * Math.max(0, d)) { w.level[i] = 1; w.variant[i] = Math.floor(rnd() * 4); this.needAn = true; }
+        if (pw && d > -0.05 && rnd() < 0.15 + 0.5 * Math.max(0, d)) { const pv = w.variant[i]; w.level[i] = 1; w.variant[i] = Math.floor(rnd() * 4); this.needAn = true; this.events.push({ type: 'built', i, kind: z, from: 0, to: 1, pv }); }
         continue;
       }
       if (!pw && this.day > this.grace && rnd() < 0.02) { w.level[i] = lvl - 1; this.needAn = true; continue; }
       if (lvl < 3) {
         const need = lvl === 1 ? 46 : 62;
         const ok = pw && wt && (lvl === 1 || this.ts[i]);
-        if (ok && d > 0.04 && this.landValue(i, z) >= need && rnd() < 0.1 * d + 0.02) { w.level[i] = lvl + 1; w.variant[i] = Math.floor(rnd() * 4); this.needAn = true; }
+        if (ok && d > 0.04 && this.landValue(i, z) >= need && rnd() < 0.1 * d + 0.02) { const pv = w.variant[i]; w.level[i] = lvl + 1; w.variant[i] = Math.floor(rnd() * 4); this.needAn = true; this.events.push({ type: 'built', i, kind: z, from: lvl, to: lvl + 1, pv }); }
         else if (d < -0.25 && rnd() < 0.06) { w.level[i] = lvl - 1; this.needAn = true; }
       } else if (d < -0.25 && rnd() < 0.06) { w.level[i] = 2; this.needAn = true; }
       if (lvl === 1 && d < -0.35 && rnd() < 0.05) { w.level[i] = 0; this.needAn = true; }
@@ -287,6 +287,7 @@ export class Sim {
       w.kind[i] = T.SVC; w.bt[i] = def.id; w.bo[i] = dx | (dy << 2); w.level[i] = 0; w.tree[i] = 0;
       if (w.wire[i] === 1) w.wire[i] = 0;      // overhead lines are cleared, buried cable stays
     }
+    this.events.push({ type: 'built', i: w.idx(x, y), bt: def.id, from: 0, to: 1 });
     this.recount(); this.analyze();
     return { ok: true, cost: def.cost };
   }
@@ -328,6 +329,7 @@ export class Sim {
     if (!this.spend(cost)) return { ok: false, why: 'Not enough money' };
     w.kind[i] = nk; w.level[i] = 0; w.tree[i] = 0; w.variant[i] = Math.floor(this.rnd() * 4);
     if (w.wire[i] === 1 && (nk === T.RES || nk === T.COM || nk === T.IND)) w.wire[i] = 0;
+    if (nk === T.PARK) this.events.push({ type: 'built', i, kind: T.PARK, from: 0, to: 1 });
     this.needAn = true; this.recount();
     return { ok: true, cost };
   }

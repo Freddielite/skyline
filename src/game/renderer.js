@@ -2,6 +2,7 @@ import { hash } from './util.js';
 import { N, T, TERRAIN } from './world.js';
 import { buildingSprite, parkSprite, zoneSprite, terrainSprite, treeSprite, roadSprite, serviceSprite } from './sprites.js';
 import { BT } from './buildings.js';
+import { drawConstruction } from './construction.js';
 
 const BG = [['#2a78a8', '#6fb4d6'], ['#3a4f86', '#c98a78'], ['#050a1f', '#14204a']];
 const CAR_COLS = ['#e0b43a', '#4a7fc7', '#c9372c', '#7a5bd0', '#4aa36a', '#f2f2f2', '#e67e22', '#2c3e50'];
@@ -62,21 +63,25 @@ export class Renderer {
         if (X < -mX * 3 || X > W + mX * 3 || Y < top || Y > H + 60 * z) continue;
         const i = y * N + x, k = w.kind[i];
         if (k === T.EMPTY && w.tree[i]) { const sp = treeSprite(w.tree[i], mode); ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
-        else if (k === T.PARK) { const sp = parkSprite(w.variant[i] % 4, mode); ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
+        else if (k === T.PARK) { const sp = parkSprite(w.variant[i] % 4, mode), site = g.sites.get(i); if (site) drawConstruction(ctx, site, X, Y, z, mode, t, sp, null); else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
         else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) {
           const sp = buildingSprite(k, w.level[i], w.variant[i] % 4, mode, g.sim.pw[i] === 1);
-          ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
-          const lv = w.level[i];
-          if (!g.sim.pw[i]) badges.push([X, Y + 16 * z - [34, 60, 100][lv - 1] * z, 'bolt']);
+          const site = g.sites.get(i), lv = w.level[i];
+          if (site) { const so = site.from > 0 ? buildingSprite(k, site.from, site.pv % 4, mode, g.sim.pw[i] === 1) : null; drawConstruction(ctx, site, X, Y, z, mode, t, sp, so); }
+          else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
+          if (site) { /* no status badges while building */ }
+          else if (!g.sim.pw[i]) badges.push([X, Y + 16 * z - [34, 60, 100][lv - 1] * z, 'bolt']);
           else if (!g.sim.wt[i]) badges.push([X, Y + 16 * z - [34, 60, 100][lv - 1] * z, 'drop']);
           else if (lv >= 2 && !g.sim.ts[i]) badges.push([X, Y + 16 * z - [34, 60, 100][lv - 1] * z, 'trash']);
         } else if (k === T.SVC) {
           const bt = w.bt[i], def = BT[bt], dx = w.bo[i] & 3, dy = w.bo[i] >> 2;
           if (dx === def.w - 1 && dy === def.d - 1) {
             const ax = x - dx, ay = y - dy, AX = sx(ax, ay), AY = sy(ax, ay), sp = serviceSprite(bt, mode, def.power ? true : g.sim.pw[ay * N + ax] === 1);
-            ctx.drawImage(sp.c, AX - sp.ox * z, AY - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
-            if (bt === 2) this.blades(ctx, sx(ax + 0.5, ay + 0.5), sy(ax + 0.5, ay + 0.5, 74), z, t, mode);
-            if (def.use && !g.sim.pw[ay * N + ax]) badges.push([sx(ax + def.w / 2, ay + def.d / 2), sy(ax + def.w / 2, ay + def.d / 2, 66), 'bolt']);
+            const site = g.sites.get(ay * N + ax);
+            if (site) drawConstruction(ctx, site, AX, AY, z, mode, t, sp, null);
+            else ctx.drawImage(sp.c, AX - sp.ox * z, AY - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
+            if (bt === 2 && (!site || site.t / site.dur > 0.93)) this.blades(ctx, sx(ax + 0.5, ay + 0.5), sy(ax + 0.5, ay + 0.5, 74), z, t, mode);
+            if (!site && def.use && !g.sim.pw[ay * N + ax]) badges.push([sx(ax + def.w / 2, ay + def.d / 2), sy(ax + def.w / 2, ay + def.d / 2, 66), 'bolt']);
           }
         } else if (k === T.ROAD && mode === 2 && hash(x, y, 3) > 0.72 && g.sim.powerMap[i] === 3) {
           const gs = this.glowSprite(); ctx.globalCompositeOperation = 'lighter';
@@ -230,7 +235,7 @@ export class Renderer {
   }
   person(ctx, c, z, cx, cy, mode, t) {
     const X = (c.px - c.py) * 32 * z + cx, Y = (c.px + c.py) * 16 * z + cy;
-    const d = mode === 2 ? 0.5 : mode === 1 ? 0.85 : 1, bob = Math.abs(Math.sin(t * 7 + c.col * 3)) * 0.8 * z;
+    const d = mode === 2 ? 0.5 : mode === 1 ? 0.85 : 1, bob = c.idle ? 0 : Math.abs(Math.sin(t * 7 + c.col * 3)) * 0.8 * z;
     const cols = ['#e0483f', '#3a7bd5', '#f4c542', '#8e44ad', '#27ae60', '#e67e22', '#34495e', '#e86f9b'];
     const hex = cols[c.col % 8], h = parseInt(hex.slice(1), 16);
     const body = `rgb(${(((h >> 16) & 255) * d) | 0},${(((h >> 8) & 255) * d) | 0},${((h & 255) * d) | 0})`;
