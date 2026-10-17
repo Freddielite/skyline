@@ -1,11 +1,14 @@
-import { T, N } from './world.js';
-import { clamp, mulberry32 } from './util.js';
+import { T, N, TERRAIN } from './world.js';
+import { clamp, mulberry32, hash } from './util.js';
+import { BT, BY_KEY, ELEC, WATER } from './buildings.js';
 
 export const COST = { road: 10, zone: 5, park: 25, bulldoze: 2 };
 export const POP_CAP = [0, 8, 24, 70];
 export const COM_CAP = [0, 5, 14, 40];
 export const IND_CAP = [0, 8, 18, 42];
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const D4 = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+const ZK = { [T.RES]: 'r', [T.COM]: 'c', [T.IND]: 'i' };
 
 export class Sim {
   constructor(world, state) {
@@ -18,7 +21,16 @@ export class Sim {
     this.lastIncome = s.lastIncome ?? 0;
     this.lastExpense = s.lastExpense ?? 0;
     this.events = [];
+    this.grace = this.day + 90;         // older saves get time to build power before buildings decay
+    const n = N * N;
+    this.pw = new Uint8Array(n); this.wt = new Uint8Array(n);
+    this.lv = new Float32Array(n); this.indPen = new Float32Array(n);
+    this.crime = new Float32Array(n); this.poll = new Float32Array(n);
+    this.cov = { police: new Float32Array(n), fire: new Float32Array(n), health: new Float32Array(n), edu: new Float32Array(n) };
+    this.powerMap = new Uint8Array(n); this.waterMap = new Uint8Array(n);
+    this.net = { pSup: 0, pDem: 0, wSup: 0, wDem: 0, unserved: 0, upkeep: 0, crimeAvg: 0, pollAvg: 0, police: 0, fire: 0, health: 0, edu: 0 };
     this.recount();
+    this.analyze();
   }
   get year() { return 2026 + Math.floor(this.day / 360); }
   get month() { return Math.floor((this.day % 360) / 30); }
@@ -44,32 +56,141 @@ export class Sim {
     this.rd = clamp((jobs - pop * 0.85 + 18) / (40 + jobs * 0.25) + tm(this.tax.r), -1, 1);
     this.cd = clamp((pop * 0.3 - cj + 4) / (30 + cj * 0.2) + tm(this.tax.c), -1, 1);
     this.id = clamp((pop * 0.4 - ij + 6) / (30 + ij * 0.2) + tm(this.tax.i), -1, 1);
-    const avgTax = (this.tax.r + this.tax.c + this.tax.i) / 3;
-    const parkBonus = Math.min(18, (parks * 400) / (pop + 100));
-    this.happiness = clamp(Math.round(62 - (avgTax - 9) * 3.2 + parkBonus - Math.max(0, -this.rd) * 12), 0, 100);
+    this.updateHappiness();
+  }
+  updateHappiness() {
+    const n = this.net, avgTax = (this.tax.r + this.tax.c + this.tax.i) / 3;
+    const parkBonus = Math.min(18, (this.parks * 400) / (this.pop + 100));
+    let h = 58 - (avgTax - 9) * 3.2 + parkBonus - Math.max(0, -this.rd) * 12;
+    h += n.police * 7 + n.health * 7 + n.edu * 6 + n.fire * 3 - n.crimeAvg * 0.18 - n.pollAvg * 0.16 - n.unserved * 30;
+    this.happiness = clamp(Math.round(h), 0, 100);
   }
 
-  landValue(x, y, z) {
-    const w = this.w;
-    let v = 40, parks = 0, ind = 0;
-    for (let j = -5; j <= 5; j++) for (let i = -5; i <= 5; i++) {
-      const xx = x + i, yy = y + j;
-      if (!w.inb(xx, yy)) continue;
-      const k = w.kind[w.idx(xx, yy)];
-      if (k === T.PARK) parks++;
-      else if (k === T.IND && w.level[w.idx(xx, yy)] && Math.abs(i) <= 4 && Math.abs(j) <= 4) ind++;
+  // ---- networks, coverage and value maps ----
+  analyze() {
+    const w = this.w, n = N * N;
+    const comp = new Int32Array(n).fill(-1), par = [];
+    let nc = 0; const stack = [];
+    for (let s = 0; s < n; s++) {
+      if (w.kind[s] !== T.ROAD || comp[s] >= 0) continue;
+      comp[s] = nc; par.push(nc); stack.push(s);
+      while (stack.length) {
+        const c = stack.pop(), x = c % N, y = (c / N) | 0;
+        for (const [dx, dy] of D4) { const xx = x + dx, yy = y + dy; if (!w.inb(xx, yy)) continue; const q = yy * N + xx; if (w.kind[q] === T.ROAD && comp[q] < 0) { comp[q] = nc; stack.push(q); } }
+      }
+      nc++;
     }
-    v += Math.min(24, parks * 8);
-    if (z === T.RES) v -= Math.min(24, ind * 6);
-    if (w.roadNear(x, y, 1)) v += 8;
-    return v;
+    const find = (a) => { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; };
+    const union = (a, b) => { a = find(a); b = find(b); if (a !== b) par[b] = a; };
+    const ring = (x0, y0, fw, fd, r, fn) => { for (let y = y0 - r; y < y0 + fd + r; y++) for (let x = x0 - r; x < x0 + fw + r; x++) if (w.inb(x, y)) fn(comp[y * N + x]); };
+
+    const anchors = [], zones = [], empties = [];
+    for (let i = 0; i < n; i++) {
+      const k = w.kind[i], x = i % N, y = (i / N) | 0;
+      if (k === T.SVC && w.bo[i] === 0) anchors.push({ x, y, i, def: BT[w.bt[i]] });
+      else if (ZK[k] && w.level[i]) zones.push({ x, y, i, z: ZK[k], l: w.level[i] });
+      else if (ZK[k]) empties.push({ x, y, i });
+    }
+    // power: plants attach to every road network touching their footprint; roads carry power
+    const plants = anchors.filter((a) => a.def.power);
+    for (const a of plants) { let first = -1; ring(a.x, a.y, a.def.w, a.def.d, 1, (c) => { if (c >= 0) { if (first < 0) first = c; else union(first, c); } }); a.comp = first; }
+    const out = new Map(), dem = new Map();
+    let pSup = 0, pDem = 0;
+    for (const a of plants) { pSup += a.def.power; if (a.comp >= 0) { const r = find(a.comp); out.set(r, (out.get(r) || 0) + a.def.power); } }
+    const consumers = [];
+    for (const z of zones) consumers.push({ i: z.i, x: z.x, y: z.y, fw: 1, fd: 1, p: ELEC[z.z][z.l], wa: WATER[z.z][z.l] });
+    for (const a of anchors) if (!a.def.power && a.def.use) consumers.push({ i: a.i, x: a.x, y: a.y, fw: a.def.w, fd: a.def.d, p: a.def.use, wa: 2 });
+    for (const c of consumers) {
+      let root = -1; ring(c.x, c.y, c.fw, c.fd, 2, (cc) => { if (root < 0 && cc >= 0) root = find(cc); });
+      c.root = root; pDem += c.p;
+      if (root >= 0) dem.set(root, (dem.get(root) || 0) + c.p);
+    }
+    this.pw.fill(0); this.powerMap.fill(0);
+    let unpowered = 0;
+    for (const c of consumers) {
+      const o = c.root >= 0 ? out.get(c.root) || 0 : 0, d = dem.get(c.root) || 1, ratio = Math.min(1, o / d);
+      const ok = c.root >= 0 && o > 0 && hash(c.x, c.y, 1) < ratio + 1e-6;
+      this.pw[c.i] = ok ? 1 : 0; this.powerMap[c.i] = ok ? 1 : 2; if (!ok) unpowered++;
+    }
+    // empty zones may only start growing when a network with spare power reaches them
+    for (const e of empties) {
+      let root = -1; ring(e.x, e.y, 1, 1, 2, (cc) => { if (root < 0 && cc >= 0) root = find(cc); });
+      const o = root >= 0 ? out.get(root) || 0 : 0, d = dem.get(root) || 0;
+      this.pw[e.i] = o > 0 && o >= d * 0.95 ? 1 : 0;
+    }
+    for (let i = 0; i < n; i++) if (comp[i] >= 0 && (out.get(find(comp[i])) || 0) > 0) this.powerMap[i] = 3;
+
+    // water: towers serve consumers inside their radius, up to capacity
+    const towers = anchors.filter((a) => a.def.water);
+    const load = towers.map(() => 0);
+    this.waterMap.fill(0);
+    for (const t of towers) {
+      const cx = t.x + t.def.w / 2, cy = t.y + t.def.d / 2, R = t.def.radius;
+      for (let y = Math.max(0, Math.floor(cy - R)); y <= Math.min(N - 1, Math.ceil(cy + R)); y++) for (let x = Math.max(0, Math.floor(cx - R)); x <= Math.min(N - 1, Math.ceil(cx + R)); x++) {
+        if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= R) this.waterMap[y * N + x] = 1;
+      }
+    }
+    let wDem = 0, wSup = 0; for (const t of towers) wSup += t.def.water;
+    for (const c of consumers) {
+      wDem += c.wa; let best = -1, bd = 1e9;
+      towers.forEach((t, ti) => { const d = Math.hypot(c.x + c.fw / 2 - (t.x + t.def.w / 2), c.y + c.fd / 2 - (t.y + t.def.d / 2)); if (d <= t.def.radius && d < bd) { bd = d; best = ti; } });
+      c.tower = best; if (best >= 0) load[best] += c.wa;
+    }
+    this.wt.fill(0);
+    for (const c of consumers) {
+      if (c.tower < 0) { this.waterMap[c.i] = 2; continue; }
+      const ratio = Math.min(1, towers[c.tower].def.water / Math.max(1, load[c.tower]));
+      const ok = hash(c.x, c.y, 2) < ratio + 1e-6;
+      this.wt[c.i] = ok ? 1 : 0; this.waterMap[c.i] = ok ? 3 : 2;
+    }
+
+    // service coverage
+    for (const k in this.cov) this.cov[k].fill(0);
+    const svcKey = { police: 'police', fire: 'fire', clinic: 'health', school: 'edu' };
+    let upkeep = 0;
+    for (const a of anchors) {
+      upkeep += a.def.upkeep;
+      const arr = this.cov[svcKey[a.def.key]]; if (!arr) continue;
+      const eff = this.pw[a.i] ? 1 : 0.3, R = a.def.radius, cx = a.x + a.def.w / 2, cy = a.y + a.def.d / 2;
+      for (let y = Math.max(0, Math.floor(cy - R)); y <= Math.min(N - 1, Math.ceil(cy + R)); y++) for (let x = Math.max(0, Math.floor(cx - R)); x <= Math.min(N - 1, Math.ceil(cx + R)); x++) {
+        const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy); if (d >= R) continue;
+        const v = Math.min(1, (1 - d / R) * 1.6) * eff, q = y * N + x; if (v > arr[q]) arr[q] = v;
+      }
+    }
+    // pollution, density, crime, land value
+    const poll = this.poll, dens = new Float32Array(n), parkAcc = new Float32Array(n), ind = this.indPen;
+    poll.fill(0); ind.fill(0);
+    const spread = (x0, y0, R, fn) => { for (let y = Math.max(0, y0 - R); y <= Math.min(N - 1, y0 + R); y++) for (let x = Math.max(0, x0 - R); x <= Math.min(N - 1, x0 + R); x++) { const d = Math.hypot(x - x0, y - y0); if (d <= R) fn(y * N + x, 1 - d / (R + 0.001)); } };
+    for (let i = 0; i < n; i++) {
+      const k = w.kind[i], x = i % N, y = (i / N) | 0, l = w.level[i];
+      if (k === T.IND && l) { spread(x, y, 4, (q, f) => { poll[q] += l * 7 * f; }); spread(x, y, 4, (q) => { ind[q] += 6; }); }
+      else if (k === T.PARK) { spread(x, y, 5, (q) => { parkAcc[q] += 8; }); spread(x, y, 3, (q, f) => { poll[q] -= 8 * f; }); }
+      else if ((k === T.RES || k === T.COM) && l) spread(x, y, 3, (q, f) => { dens[q] += (k === T.RES ? POP_CAP[l] : COM_CAP[l] * 0.5) * f * 0.25; });
+    }
+    for (const a of anchors) if (a.def.pollute && this.pw[a.i] !== undefined) spread(a.x, a.y, 8, (q, f) => { poll[q] += a.def.pollute * f; });
+    let cs = 0, ps = 0, pv = 0, polSum = 0, crSum = 0, covS = { police: 0, fire: 0, health: 0, edu: 0 };
+    for (let i = 0; i < n; i++) {
+      poll[i] = clamp(poll[i], 0, 100);
+      this.crime[i] = clamp(10 + dens[i] * 0.5 + poll[i] * 0.12 - this.cov.police[i] * 55, 0, 100);
+      const x = i % N, y = (i / N) | 0;
+      let v = 40 + Math.min(24, parkAcc[i]) + (w.roadNear(x, y, 1) ? 8 : 0);
+      v += this.cov.police[i] * 5 + this.cov.health[i] * 6 + this.cov.edu[i] * 6 + this.cov.fire[i] * 4 - poll[i] * 0.28 - this.crime[i] * 0.12;
+      this.lv[i] = clamp(v, 0, 100);
+      if (w.kind[i] === T.RES && w.level[i]) { const wgt = POP_CAP[w.level[i]]; pv += wgt; polSum += poll[i] * wgt; crSum += this.crime[i] * wgt; for (const k in covS) covS[k] += this.cov[k][i] * wgt; }
+    }
+    const pvv = Math.max(1, pv);
+    Object.assign(this.net, { pSup, pDem, wSup, wDem, unserved: consumers.length ? unpowered / consumers.length : 0, upkeep, crimeAvg: pv ? crSum / pvv : 0, pollAvg: pv ? polSum / pvv : 0, police: covS.police / pvv, fire: covS.fire / pvv, health: covS.health / pvv, edu: covS.edu / pvv });
+    this.needAn = false;
+    this.updateHappiness();
   }
+
+  landValue(i, z) { return this.lv[i] - (z === T.RES ? Math.min(24, this.indPen[i]) : 0); }
 
   tick() {
     this.day++;
+    if (this.needAn || this.day % 8 === 0) this.analyze();
     const w = this.w, rnd = this.rnd;
-    const tries = 150;
-    for (let n = 0; n < tries; n++) {
+    for (let n = 0; n < 150; n++) {
       const x = Math.floor(rnd() * N), y = Math.floor(rnd() * N), i = w.idx(x, y);
       const z = w.kind[i];
       if (z !== T.RES && z !== T.COM && z !== T.IND) continue;
@@ -77,22 +198,27 @@ export class Sim {
       const lvl = w.level[i];
       const road = w.roadNear(x, y, 2);
       if (!road) { if (lvl && rnd() < 0.03) w.level[i] = lvl - 1; continue; }
+      const pw = this.pw[i], wt = this.wt[i];
       if (lvl === 0) {
-        if (d > -0.05 && rnd() < 0.15 + 0.5 * Math.max(0, d)) { w.level[i] = 1; w.variant[i] = Math.floor(rnd() * 4); this.dirty = true; }
-      } else if (lvl < 3) {
+        if (pw && d > -0.05 && rnd() < 0.15 + 0.5 * Math.max(0, d)) { w.level[i] = 1; w.variant[i] = Math.floor(rnd() * 4); this.needAn = true; }
+        continue;
+      }
+      if (!pw && this.day > this.grace && rnd() < 0.02) { w.level[i] = lvl - 1; this.needAn = true; continue; }
+      if (lvl < 3) {
         const need = lvl === 1 ? 46 : 62;
-        if (d > 0.04 && this.landValue(x, y, z) >= need && rnd() < 0.1 * d + 0.02) { w.level[i] = lvl + 1; w.variant[i] = Math.floor(rnd() * 4); this.dirty = true; }
-        else if (d < -0.25 && rnd() < 0.06) { w.level[i] = lvl - 1; this.dirty = true; }
-      } else if (d < -0.25 && rnd() < 0.06) { w.level[i] = 2; this.dirty = true; }
-      if (lvl === 1 && d < -0.35 && rnd() < 0.05) { w.level[i] = 0; this.dirty = true; }
+        if (pw && wt && d > 0.04 && this.landValue(i, z) >= need && rnd() < 0.1 * d + 0.02) { w.level[i] = lvl + 1; w.variant[i] = Math.floor(rnd() * 4); this.needAn = true; }
+        else if (d < -0.25 && rnd() < 0.06) { w.level[i] = lvl - 1; this.needAn = true; }
+      } else if (d < -0.25 && rnd() < 0.06) { w.level[i] = 2; this.needAn = true; }
+      if (lvl === 1 && d < -0.35 && rnd() < 0.05) { w.level[i] = 0; this.needAn = true; }
     }
     this.recount();
     if (this.day % 30 === 0) this.monthly();
   }
 
   monthly() {
-    const inc = this.pop * (this.tax.r / 100) * 14 + this.cJobs * (this.tax.c / 100) * 16 + this.iJobs * (this.tax.i / 100) * 16;
-    const exp = this.roads * 0.6 + this.parks * 1.5;
+    const served = 0.5 + 0.5 * (1 - this.net.unserved);
+    const inc = (this.pop * (this.tax.r / 100) * 14 + this.cJobs * (this.tax.c / 100) * 16 + this.iJobs * (this.tax.i / 100) * 16) * served;
+    const exp = this.roads * 0.6 + this.parks * 1.5 + this.net.upkeep;
     this.lastIncome = Math.round(inc); this.lastExpense = Math.round(exp);
     this.money += this.lastIncome - this.lastExpense;
     this.events.push({ type: 'month', income: this.lastIncome, expense: this.lastExpense });
@@ -100,24 +226,53 @@ export class Sim {
 
   // ---- player actions ----
   spend(c) { if (this.money < c) return false; this.money -= c; return true; }
+  canPlaceBuilding(key, x, y) {
+    const def = BY_KEY[key], w = this.w;
+    for (let dy = 0; dy < def.d; dy++) for (let dx = 0; dx < def.w; dx++) {
+      const xx = x + dx, yy = y + dy;
+      if (!w.inb(xx, yy)) return { ok: false, why: 'Out of bounds' };
+      const i = w.idx(xx, yy), k = w.kind[i];
+      if (w.terrain[i] === TERRAIN.WATER) return { ok: false, why: 'Can\u2019t build on water' };
+      if (!(k === T.EMPTY || (ZK[k] && w.level[i] === 0))) return { ok: false, why: 'Tiles must be clear' };
+    }
+    return { ok: true };
+  }
+  placeBuilding(key, x, y) {
+    const def = BY_KEY[key], w = this.w, c = this.canPlaceBuilding(key, x, y);
+    if (!c.ok) return c;
+    if (!this.spend(def.cost)) return { ok: false, why: 'Not enough money' };
+    for (let dy = 0; dy < def.d; dy++) for (let dx = 0; dx < def.w; dx++) {
+      const i = w.idx(x + dx, y + dy);
+      w.kind[i] = T.SVC; w.bt[i] = def.id; w.bo[i] = dx | (dy << 2); w.level[i] = 0; w.tree[i] = 0;
+    }
+    this.recount(); this.analyze();
+    return { ok: true, cost: def.cost };
+  }
   place(tool, x, y) {
     const w = this.w;
     if (!w.buildable(x, y)) return { ok: false, why: 'Can\u2019t build on water' };
     const i = w.idx(x, y), k = w.kind[i];
     if (tool === 'bulldoze') {
       if (k === T.EMPTY && !w.tree[i]) return { ok: false };
+      if (k === T.SVC) {
+        const def = BT[w.bt[i]], ax = x - (w.bo[i] & 3), ay = y - (w.bo[i] >> 2), cost = COST.bulldoze * 5;
+        if (!this.spend(cost)) return { ok: false, why: 'Not enough money' };
+        for (let dy = 0; dy < def.d; dy++) for (let dx = 0; dx < def.w; dx++) { const q = w.idx(ax + dx, ay + dy); w.kind[q] = T.EMPTY; w.bt[q] = 0; w.bo[q] = 0; }
+        this.needAn = true; this.recount(); return { ok: true, cost };
+      }
       if (k !== T.EMPTY && !this.spend(COST.bulldoze)) return { ok: false, why: 'Not enough money' };
-      w.kind[i] = T.EMPTY; w.level[i] = 0; w.tree[i] = 0; this.recount(); return { ok: true, cost: k ? COST.bulldoze : 0 };
+      w.kind[i] = T.EMPTY; w.level[i] = 0; w.tree[i] = 0; this.needAn = true; this.recount(); return { ok: true, cost: k ? COST.bulldoze : 0 };
     }
     const map = { road: T.ROAD, res: T.RES, com: T.COM, ind: T.IND, park: T.PARK };
     const nk = map[tool];
     const cost = tool === 'road' ? COST.road : tool === 'park' ? COST.park : COST.zone;
     if (k === nk) return { ok: false };
+    if (k === T.SVC) return { ok: false, why: 'Bulldoze the building first' };
     if (k === T.ROAD) return { ok: false, why: 'Bulldoze the road first' };
     if (w.level[i] > 0) return { ok: false, why: 'Bulldoze the building first' };
     if (!this.spend(cost)) return { ok: false, why: 'Not enough money' };
     w.kind[i] = nk; w.level[i] = 0; w.tree[i] = 0; w.variant[i] = Math.floor(this.rnd() * 4);
-    this.recount();
+    this.needAn = true; this.recount();
     return { ok: true, cost };
   }
 }

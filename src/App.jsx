@@ -16,21 +16,48 @@ const I = {
   ff: 'M4 5l8 7-8 7V5zm9 0l8 7-8 7V5z',
   fff: 'M2 5l6 7-6 7V5zm7 0l6 7-6 7V5zm7 0l6 7-6 7V5z',
   close: 'M6 6l12 12M18 6L6 18',
+  bolt: 'M13 2L5 14h6l-1 8 8-12h-6l1-8z',
+  drop: 'M12 3s6 6.5 6 11a6 6 0 01-12 0c0-4.5 6-11 6-11z',
+  shield: 'M12 3l7 3v5c0 5-3 8.5-7 10-4-1.5-7-5-7-10V6l7-3z',
+  flame: 'M12 3c1 4 5 6 5 11a5 5 0 01-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-6 1-10z',
+  cross: 'M9 4h6v5h5v6h-5v5H9v-5H4V9h5V4z',
+  book: 'M4 5c3-1 6-1 8 1 2-2 5-2 8-1v13c-3-1-6-1-8 1-2-2-5-2-8-1V5zM12 6v13',
+  wind: 'M12 12v9M12 12L11 3M12 12l8 4M12 12l-8 4',
+  plant: 'M4 21V10l5 3V8l5 3V3h3v18H4z',
+  eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10-3a3 3 0 100 6 3 3 0 000-6z',
 };
 const Icon = ({ n, size = 22, fill }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill={fill ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={I[n]} /></svg>
 );
 
-const TOOLS = [
-  { id: null, label: 'Move', icon: 'hand' },
-  { id: 'road', label: 'Road', icon: 'road', cost: 10 },
-  { id: 'res', label: 'Homes', icon: 'home', cost: 5, zone: 'r' },
-  { id: 'com', label: 'Shops', icon: 'shop', cost: 5, zone: 'c' },
-  { id: 'ind', label: 'Industry', icon: 'gear', cost: 5, zone: 'i' },
-  { id: 'park', label: 'Park', icon: 'tree', cost: 25 },
-  { id: 'bulldoze', label: 'Clear', icon: 'dozer', cost: 2 },
+const T = {
+  move: { id: null, label: 'Move', icon: 'hand' },
+  road: { id: 'road', label: 'Road', icon: 'road', cost: 10 },
+  res: { id: 'res', label: 'Homes', icon: 'home', cost: 5, zone: 'r' },
+  com: { id: 'com', label: 'Shops', icon: 'shop', cost: 5, zone: 'c' },
+  ind: { id: 'ind', label: 'Industry', icon: 'gear', cost: 5, zone: 'i' },
+  park: { id: 'park', label: 'Park', icon: 'tree', cost: 25 },
+  clear: { id: 'bulldoze', label: 'Clear', icon: 'dozer', cost: 2 },
+  coal: { id: 'coal', label: 'Coal plant', icon: 'plant', cost: 3000 },
+  wind: { id: 'wind', label: 'Wind', icon: 'wind', cost: 500 },
+  water: { id: 'water', label: 'Water', icon: 'drop', cost: 800 },
+  police: { id: 'police', label: 'Police', icon: 'shield', cost: 600 },
+  fire: { id: 'fire', label: 'Fire', icon: 'flame', cost: 600 },
+  clinic: { id: 'clinic', label: 'Clinic', icon: 'cross', cost: 800 },
+  school: { id: 'school', label: 'School', icon: 'book', cost: 700 },
+};
+const CATS = [
+  { id: 'build', label: 'Build', tools: ['move', 'road', 'res', 'com', 'ind', 'park', 'clear'] },
+  { id: 'util', label: 'Utilities', tools: ['move', 'coal', 'wind', 'water', 'clear'] },
+  { id: 'svc', label: 'Services', tools: ['move', 'police', 'fire', 'clinic', 'school', 'clear'] },
+];
+const VIEWS = [
+  { id: 'value', label: 'Land value' }, { id: 'crime', label: 'Crime' }, { id: 'pollution', label: 'Pollution' },
+  { id: 'power', label: 'Power' }, { id: 'water', label: 'Water' },
+  { id: 'police', label: 'Police' }, { id: 'fire', label: 'Fire' }, { id: 'health', label: 'Health' }, { id: 'edu', label: 'Education' },
 ];
 const money = (n) => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US');
+const supplyClass = (sup, dem) => (dem <= 0 ? 'ok' : sup >= dem ? 'ok' : sup >= dem * 0.75 ? 'mid' : 'bad');
 
 function Demand({ s }) {
   const bar = (v, c, l) => (
@@ -46,6 +73,7 @@ export default function App() {
   const cvRef = useRef(null), gameRef = useRef(null);
   const [st, setSt] = useState(null);
   const [tool, setTool] = useState(null);
+  const [cat, setCat] = useState('build');
   const [toast, setToast] = useState('');
   const [cost, setCost] = useState(null);
   const [panel, setPanel] = useState(null);
@@ -57,7 +85,7 @@ export default function App() {
   useEffect(() => {
     const g = new Game(cvRef.current, {
       toast: say,
-      cost: (c, n) => setCost(n ? { c, n } : null),
+      cost: (c, n, name) => setCost(n ? { c, n, name } : null),
       month: (e) => say(`Month closed: ${e.income - e.expense >= 0 ? '+' : ''}${money(e.income - e.expense)}`),
     });
     gameRef.current = g; window.__game = g;
@@ -68,11 +96,15 @@ export default function App() {
   }, [say]);
 
   const g = gameRef.current;
-  const pick = (id) => { setTool(id); g && g.setTool(id); setPanel(null); };
+  const pick = (id) => { setTool(id); g && g.setTool(id); if (id) { setPanel(null); g.setOverlay(null); } };
   const speed = (s) => { g.setSpeed(s); setSt(g.stats()); };
   const setTax = (k, v) => { g.setTax(k, v); setSt(g.stats()); };
   const pickTime = (v) => { setTimeSet(v); g.setTime(v); };
   const newCity = () => { g.newCity(Math.floor(Math.random() * 100000)); setPanel(null); setSt(g.stats()); };
+  const setView = (v) => { g.setOverlay(v); if (v) { setTool(null); g.setTool(null); } setPanel(null); setSt(g.stats()); };
+  const toggle = (p) => setPanel(panel === p ? null : p);
+  const catTools = CATS.find((c) => c.id === cat).tools;
+  const view = st && VIEWS.find((v) => v.id === st.overlay);
 
   return (
     <div className="app">
@@ -82,6 +114,8 @@ export default function App() {
           <header className="top">
             <div className="cash"><Icon n="coin" size={18} /><b>{money(st.money)}</b></div>
             <div className="meta"><b>{st.pop.toLocaleString('en-US')}</b><span>residents</span></div>
+            <div className={'util ' + supplyClass(st.pSup, st.pDem)} title="Power supply / demand"><Icon n="bolt" size={15} fill /><b>{st.pSup}/{st.pDem}</b></div>
+            <div className={'util ' + supplyClass(st.wSup, st.wDem)} title="Water supply / demand"><Icon n="drop" size={15} fill /><b>{st.wSup}/{st.wDem}</b></div>
             <div className="meta hide-s"><b>{st.happy}%</b><span>happy</span></div>
             <div className="date">{st.date}</div>
             <div className="speed" role="group" aria-label="Game speed">
@@ -92,30 +126,50 @@ export default function App() {
             <Demand s={st} />
           </header>
 
-          {cost && tool && <div className="costtag">{cost.n} tiles · {money(cost.c)}</div>}
+          {cost && tool && <div className="costtag">{cost.name ? cost.name + ' · ' : cost.n + ' tiles · '}{money(cost.c)}</div>}
+          {view && <button className="viewtag" onClick={() => setView(null)}>{view.label} view <Icon n="close" size={14} /></button>}
           {toast && <div className="toast" role="status">{toast}</div>}
 
           <nav className="dock" aria-label="Build tools">
-            <div className="tools">
-              {TOOLS.map((t) => (
-                <button key={t.label} className={'tool' + (tool === t.id ? ' on' : '') + (t.zone ? ' z-' + t.zone : '')} onClick={() => pick(t.id)}>
-                  <Icon n={t.icon} /><span>{t.label}</span>{t.cost ? <em>{money(t.cost)}</em> : <em>&nbsp;</em>}
-                </button>
-              ))}
+            <div className="stack">
+              <div className="tabs" role="tablist">
+                {CATS.map((c) => <button key={c.id} role="tab" aria-selected={cat === c.id} className={cat === c.id ? 'on' : ''} onClick={() => setCat(c.id)}>{c.label}</button>)}
+              </div>
+              <div className="tools">
+                {catTools.map((k) => { const t = T[k]; return (
+                  <button key={k} className={'tool' + (tool === t.id ? ' on' : '') + (t.zone ? ' z-' + t.zone : '')} onClick={() => pick(t.id)}>
+                    <Icon n={t.icon} /><span>{t.label}</span>{t.cost ? <em>{money(t.cost)}</em> : <em>&nbsp;</em>}
+                  </button>); })}
+              </div>
             </div>
             <div className="sys">
-              <button className="tool" onClick={() => setPanel(panel === 'budget' ? null : 'budget')}><Icon n="coin" /><span>Budget</span><em>&nbsp;</em></button>
-              <button className="tool" onClick={() => setPanel(panel === 'menu' ? null : 'menu')}><Icon n="menu" /><span>Menu</span><em>&nbsp;</em></button>
+              <button className={'tool' + (st.overlay ? ' on' : '')} onClick={() => toggle('views')}><Icon n="eye" /><span>Views</span><em>&nbsp;</em></button>
+              <button className="tool" onClick={() => toggle('budget')}><Icon n="coin" /><span>Budget</span><em>&nbsp;</em></button>
+              <button className="tool" onClick={() => toggle('menu')}><Icon n="menu" /><span>Menu</span><em>&nbsp;</em></button>
             </div>
           </nav>
 
+          {panel === 'views' && (
+            <section className="sheet" aria-label="Map views">
+              <div className="sheet-h"><h2>Map views</h2><button className="x" onClick={() => setPanel(null)} aria-label="Close"><Icon n="close" size={18} /></button></div>
+              <div className="viewgrid">
+                {VIEWS.map((v) => <button key={v.id} className={'wide' + (st.overlay === v.id ? ' sel' : '')} onClick={() => setView(v.id)}>{v.label}</button>)}
+              </div>
+              <button className="wide" style={{ marginTop: 8, width: '100%' }} onClick={() => setView(null)}>Hide view</button>
+              <p className="hint">Green is good, red is trouble. Power and water views show which buildings are connected.</p>
+            </section>
+          )}
           {panel === 'budget' && (
             <section className="sheet" aria-label="Budget">
               <div className="sheet-h"><h2>Budget</h2><button className="x" onClick={() => setPanel(null)} aria-label="Close"><Icon n="close" size={18} /></button></div>
               <div className="ledger">
                 <div><span>Last month income</span><b className="pos">{money(st.income)}</b></div>
                 <div><span>Last month upkeep</span><b className="neg">{money(-st.expense)}</b></div>
-                <div><span>Roads / parks</span><b>{st.roads} / {st.parks}</b></div>
+                <div><span>Service &amp; utility upkeep</span><b>{money(st.upkeep)}</b></div>
+                <div><span>Power supply / demand</span><b className={supplyClass(st.pSup, st.pDem) === 'ok' ? 'pos' : 'neg'}>{st.pSup} / {st.pDem}</b></div>
+                <div><span>Water supply / demand</span><b className={supplyClass(st.wSup, st.wDem) === 'ok' ? 'pos' : 'neg'}>{st.wSup} / {st.wDem}</b></div>
+                <div><span>Crime / pollution</span><b>{st.crime} / {st.poll}</b></div>
+                <div><span>Police · Fire · Health · School</span><b>{['police', 'fire', 'health', 'edu'].map((k) => Math.round(st.cov[k] * 100) + '%').join(' · ')}</b></div>
                 <div><span>Buildings (R / C / I)</span><b>{st.bld.r} / {st.bld.c} / {st.bld.i}</b></div>
               </div>
               <h3>Tax rates</h3>
@@ -126,7 +180,7 @@ export default function App() {
                   <b>{st.tax[k]}%</b>
                 </label>
               ))}
-              <p className="hint">Higher taxes raise income but slow growth and lower happiness.</p>
+              <p className="hint">Higher taxes raise income but slow growth and lower happiness. Buildings without power or water pay less.</p>
             </section>
           )}
           {panel === 'menu' && (

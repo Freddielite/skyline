@@ -22,9 +22,20 @@ to the `<activity>` tag in `android/app/src/main/AndroidManifest.xml`.
 
 - Move tool: drag to pan. Two fingers (or mouse wheel) to zoom.
 - Road: drag in a straight line. Homes/Shops/Industry/Park/Clear: drag a rectangle.
+- Utilities and services: tap a tile to place (the preview shows the footprint); drag to reposition before lifting.
 - With a build tool active, one finger paints and two fingers move the map.
 
-## Stage 1 (this build)
+## Stage 2 (this build)
+
+- Power: coal plant (2x2) and wind turbines. Power travels along connected roads; buildings need it to grow
+- Water: water towers serve a radius, up to their capacity
+- Services: police, fire, clinic, school. Coverage lifts land value and happiness, crime drops with police
+- Pollution from industry and coal, crime, land value maps
+- Map views: land value, crime, pollution, power, water, and the four service coverages
+- Red bolt / blue drop badges mark buildings without power or water
+- Brownouts when demand exceeds supply, service upkeep in the monthly budget
+
+## Stage 1
 
 - 64x64 procedural terrain (water, sand, trees)
 - Roads with auto-joining junctions and crosswalks
@@ -36,6 +47,7 @@ to the `<activity>` tag in `android/app/src/main/AndroidManifest.xml`.
 ## Layout
 
     src/game/world.js    terrain + tile data
+    src/game/buildings.js utility and service definitions
     src/game/sim.js      economy, demand, growth
     src/game/sprites.js  procedural sprite art (cached per lighting mode)
     src/game/renderer.js isometric draw loop, water, cars, bloom

@@ -1,6 +1,7 @@
 import { hash } from './util.js';
 import { N, T, TERRAIN } from './world.js';
-import { buildingSprite, parkSprite, zoneSprite, terrainSprite, treeSprite, roadSprite } from './sprites.js';
+import { buildingSprite, parkSprite, zoneSprite, terrainSprite, treeSprite, roadSprite, serviceSprite } from './sprites.js';
+import { BT } from './buildings.js';
 
 const BG = [['#2a78a8', '#6fb4d6'], ['#3a4f86', '#c98a78'], ['#050a1f', '#14204a']];
 const CAR_COLS = ['#e0b43a', '#4a7fc7', '#c9372c', '#7a5bd0', '#4aa36a', '#f2f2f2', '#e67e22', '#2c3e50'];
@@ -52,6 +53,7 @@ export class Renderer {
       }
     }
     // objects pass in painter order
+    const badges = [];
     const cars = g.cars.concat(g.people), buckets = new Map();
     for (const c of cars) { const kx = Math.max(0, Math.min(N - 1, Math.floor(c.px))), ky = Math.max(0, Math.min(N - 1, Math.floor(c.py))), key = ky * N + kx; (buckets.get(key) || buckets.set(key, []).get(key)).push(c); }
     for (let s = 0; s < 2 * N - 1; s++) {
@@ -64,6 +66,17 @@ export class Renderer {
         else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) {
           const sp = buildingSprite(k, w.level[i], w.variant[i] % 4, mode);
           ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
+          const lv = w.level[i];
+          if (!g.sim.pw[i]) badges.push([X, Y + 16 * z - [34, 60, 100][lv - 1] * z, 'bolt']);
+          else if (!g.sim.wt[i]) badges.push([X, Y + 16 * z - [34, 60, 100][lv - 1] * z, 'drop']);
+        } else if (k === T.SVC) {
+          const bt = w.bt[i], def = BT[bt], dx = w.bo[i] & 3, dy = w.bo[i] >> 2;
+          if (dx === def.w - 1 && dy === def.d - 1) {
+            const ax = x - dx, ay = y - dy, AX = sx(ax, ay), AY = sy(ax, ay), sp = serviceSprite(bt, mode);
+            ctx.drawImage(sp.c, AX - sp.ox * z, AY - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
+            if (bt === 2) this.blades(ctx, sx(ax + 0.5, ay + 0.5), sy(ax + 0.5, ay + 0.5, 74), z, t, mode);
+            if (def.use && !g.sim.pw[ay * N + ax]) badges.push([sx(ax + def.w / 2, ay + def.d / 2), sy(ax + def.w / 2, ay + def.d / 2, 66), 'bolt']);
+          }
         } else if (k === T.ROAD && mode === 2 && hash(x, y, 3) > 0.72) {
           const gs = this.glowSprite(); ctx.globalCompositeOperation = 'lighter';
           ctx.drawImage(gs, X - 48 * z * 0.8, Y - 8 * z, 96 * z * 0.8, 48 * z * 0.8); ctx.globalCompositeOperation = 'source-over';
@@ -74,6 +87,8 @@ export class Renderer {
         if (cb) for (const c of cb) { if (c.ped) this.person(ctx, c, z, cx, cy, mode, t); else this.car(ctx, c, z, cx, cy, mode); }
       }
     }
+    if (g.overlay) this.overlay(ctx, g, z, cx, cy);
+    for (const b of badges) this.badge(ctx, b[0], b[1] - Math.sin(t * 3 + b[0]) * 1.5 * z, z, b[2]);
     // preview
     if (g.preview) {
       for (const p of g.preview.tiles) {
@@ -92,6 +107,48 @@ export class Renderer {
       ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = mode === 2 ? 0.55 : 0.22; ctx.filter = 'blur(' + (6 * this.dpr) + 'px)';
       ctx.drawImage(this.bloom, 0, 0, this.cv.width, this.cv.height); ctx.restore();
+    }
+  }
+  blades(ctx, X, Y, z, t, mode) {
+    const a0 = t * 1.8, L = 25 * z;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 3; i++) {
+      const a = a0 + (i * 2 * Math.PI) / 3, ex = X + Math.cos(a) * L, ey = Y + Math.sin(a) * L * 0.9;
+      ctx.strokeStyle = mode === 2 ? '#7b8296' : '#f4f6f8'; ctx.lineWidth = 2.6 * z; ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(ex, ey); ctx.stroke();
+    }
+    ctx.fillStyle = mode === 2 ? '#7b8296' : '#cfd4da'; ctx.beginPath(); ctx.arc(X, Y, 3 * z, 0, 6.3); ctx.fill();
+  }
+  badge(ctx, X, Y, z, type) {
+    const r = 8 * z; if (z < 0.6) return;
+    ctx.fillStyle = type === 'bolt' ? '#ef6f5e' : '#3d8bd9'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4 * z;
+    ctx.beginPath(); ctx.arc(X, Y, r, 0, 6.3); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.beginPath();
+    if (type === 'bolt') { ctx.moveTo(X + 1.5 * z, Y - 5 * z); ctx.lineTo(X - 3 * z, Y + 1 * z); ctx.lineTo(X, Y + 1 * z); ctx.lineTo(X - 1.5 * z, Y + 5 * z); ctx.lineTo(X + 3 * z, Y - 1.2 * z); ctx.lineTo(X + 0.2 * z, Y - 1.2 * z); ctx.closePath(); }
+    else { ctx.moveTo(X, Y - 5 * z); ctx.quadraticCurveTo(X + 5 * z, Y + 1 * z, X, Y + 5 * z); ctx.quadraticCurveTo(X - 5 * z, Y + 1 * z, X, Y - 5 * z); }
+    ctx.fill();
+  }
+  overlay(ctx, g, z, cx, cy) {
+    const w = g.world, sim = g.sim, ov = g.overlay, W = this.W, H = this.H;
+    ctx.fillStyle = 'rgba(8,16,30,.4)'; ctx.fillRect(0, 0, W, H);
+    const ramp = (v, a) => `hsla(${Math.round(120 * Math.max(0, Math.min(1, v)))},78%,50%,${a})`;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const X = (x - y) * 32 * z + cx, Y = (x + y) * 16 * z + cy;
+      if (X < -40 * z || X > W + 40 * z || Y < -34 * z || Y > H) continue;
+      const i = y * N + x; let col = null;
+      if (w.terrain[i] === TERRAIN.WATER) continue;
+      switch (ov) {
+        case 'value': col = ramp((sim.lv[i] - 25) / 65, 0.6); break;
+        case 'crime': col = ramp(1 - sim.crime[i] / 70, 0.6); break;
+        case 'pollution': if (sim.poll[i] > 2) col = ramp(1 - sim.poll[i] / 60, 0.62); break;
+        case 'police': if (sim.cov.police[i] > 0.02) col = `rgba(80,140,255,${0.2 + sim.cov.police[i] * 0.5})`; break;
+        case 'fire': if (sim.cov.fire[i] > 0.02) col = `rgba(255,110,70,${0.2 + sim.cov.fire[i] * 0.5})`; break;
+        case 'health': if (sim.cov.health[i] > 0.02) col = `rgba(255,120,170,${0.2 + sim.cov.health[i] * 0.5})`; break;
+        case 'edu': if (sim.cov.edu[i] > 0.02) col = `rgba(240,200,70,${0.2 + sim.cov.edu[i] * 0.5})`; break;
+        case 'power': { const m = sim.powerMap[i]; col = m === 1 ? 'rgba(95,211,166,.7)' : m === 2 ? 'rgba(239,111,94,.8)' : m === 3 ? 'rgba(242,184,75,.4)' : null; break; }
+        case 'water': { const m = sim.waterMap[i]; col = m === 3 ? 'rgba(95,211,166,.7)' : m === 2 ? 'rgba(239,111,94,.8)' : m === 1 ? 'rgba(61,139,217,.32)' : null; break; }
+      }
+      if (!col) continue;
+      ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(X + 32 * z, Y + 16 * z); ctx.lineTo(X, Y + 32 * z); ctx.lineTo(X - 32 * z, Y + 16 * z); ctx.closePath(); ctx.fillStyle = col; ctx.fill();
     }
   }
   drawSlab(ctx, z, cx, cy, mode) {
