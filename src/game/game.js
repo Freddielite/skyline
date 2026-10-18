@@ -10,7 +10,7 @@ import { Disasters } from './disasters.js';
 import { clamp, mulberry32 } from './util.js';
 
 const SAVE_KEY = 'skyline.save.v1';
-const TOOL_COST = { wire: COST.wire, cable: COST.cable, road: COST.road, res: COST.zone, com: COST.zone, ind: COST.zone, park: COST.park, bulldoze: COST.bulldoze };
+const TOOL_COST = { pipe: COST.pipe, wire: COST.wire, cable: COST.cable, road: COST.road, res: COST.zone, com: COST.zone, ind: COST.zone, park: COST.park, bulldoze: COST.bulldoze };
 for (const b of Object.values(BT)) TOOL_COST[b.key] = b.cost;
 
 export class Game {
@@ -18,7 +18,7 @@ export class Game {
     this.cv = canvas; this.hooks = hooks;
     this.cam = { x: 0, y: 0, zoom: 1 };
     this.tool = null; this.speed = 1; this.timeSetting = 'auto'; this.mode = 0; this.clock = 20;
-    this.overlay = null; this.preview = null; this.drag = null; this.pointers = new Map(); this.pinch = null; this.pan = null;
+    this.history = []; this.overlay = null; this.preview = null; this.drag = null; this.pointers = new Map(); this.pinch = null; this.pan = null;
     this.acc = 0; this.last = 0; this.running = false; this.dirtySave = false; this.saveTimer = 0;
     this.renderer = new Renderer(canvas, this);
     this.load() || this.newCity(Math.floor(Math.random() * 100000), true);
@@ -31,7 +31,7 @@ export class Game {
     this.world = new World(seed);
     this.sim = new Sim(this.world); this.sim.defer = true;
     this.traffic = new Traffic(this.world, mulberry32(seed + 3));
-    this.sites = new Map();
+    this.sites = new Map(); this.history = [];
     this.agents = new Agents(this.world, mulberry32(seed + 4), (i) => this.sites.has(i));
     this.garbage = new Trucks(this.world, mulberry32(seed + 5), () => this.sim.facilities);
     this.disasters = new Disasters(this);
@@ -78,6 +78,7 @@ export class Game {
   stats() {
     const s = this.sim;
     return { money: Math.floor(s.money), pop: s.pop, date: s.dateLabel(), rd: s.rd, cd: s.cd, id: s.id, happy: s.happiness, tax: { ...s.tax }, income: s.lastIncome, expense: s.lastExpense, bld: s.bld, roads: s.roads, parks: s.parks, jobs: s.cJobs + s.iJobs, speed: this.speed, mode: this.mode, time: `${String(Math.floor(this.hour)).padStart(2, '0')}:${String(Math.floor((this.hour % 1) * 60)).padStart(2, '0')}`, citizens: this.agents.stats.total, employed: this.agents.stats.employed, tSup: s.net.tSup, tDem: s.net.tDem, wasteUn: s.net.wasteUn, pSup: s.net.pSup, pDem: s.net.pDem, wSup: s.net.wSup, wDem: s.net.wDem, upkeep: Math.round(s.net.upkeep), crime: Math.round(s.net.crimeAvg), poll: Math.round(s.net.pollAvg), cov: { police: s.net.police, fire: s.net.fire, health: s.net.health, edu: s.net.edu, fun: s.net.fun }, overlay: this.overlay,
+      canUndo: this.history.length, undoLabel: this.history.length ? this.history[this.history.length - 1].label : '',
       grant: s.grant || Math.round(Math.max(0, 300 * (1 - s.pop / 1200))), streak: s.streak, ordCost: s.ordCost(), disastersLevel: s.disasters,
       ords: Object.entries(ORD).map(([key, o]) => ({ key, ...o, on: !!s.ord[key] })), goals: s.goalStatus(),
       alerts: [this.disasters.fires.size ? `Fire x${this.disasters.fires.size}` : '', this.disasters.tornado ? 'Tornado' : '', this.disasters.ufo ? 'UFO' : ''].filter(Boolean) };
@@ -153,7 +154,7 @@ export class Game {
     const a = d.start, b = d.cur, out = [];
     const def = BY_KEY[this.tool];
     if (def) { for (let dy = 0; dy < def.d; dy++) for (let dx = 0; dx < def.w; dx++) out.push({ x: b.x + dx, y: b.y + dy }); return out.filter((p) => this.world.inb(p.x, p.y)); }
-    if (this.tool === 'road' || this.tool === 'wire' || this.tool === 'cable') {
+    if (this.tool === 'road' || this.tool === 'wire' || this.tool === 'cable' || this.tool === 'pipe') {
       const dx = b.x - a.x, dy = b.y - a.y;
       if (Math.abs(dx) >= Math.abs(dy)) { const s = Math.sign(dx) || 1; for (let x = a.x; x !== b.x + s; x += s) out.push({ x, y: a.y }); }
       else { const s = Math.sign(dy) || 1; for (let y = a.y; y !== b.y + s; y += s) out.push({ x: a.x, y }); }
@@ -171,22 +172,54 @@ export class Game {
     this.preview = { tiles };
     this.hooks.cost && this.hooks.cost(tiles.filter((t) => t.ok).length * TOOL_COST[this.tool], tiles.length);
   }
+  // ---------- undo ----------
+  snapshot(tiles) {
+    const w = this.world, set = new Set();
+    for (const p of tiles) {
+      if (!w.inb(p.x, p.y)) continue;
+      const i = w.idx(p.x, p.y); set.add(i);
+      if (w.kind[i] === T.SVC) {                       // a building is restored as a whole, not tile by tile
+        const def = BT[w.bt[i]], ax = p.x - (w.bo[i] & 3), ay = p.y - (w.bo[i] >> 2);
+        for (let dy = 0; dy < def.d; dy++) for (let dx = 0; dx < def.w; dx++) set.add(w.idx(ax + dx, ay + dy));
+      }
+    }
+    return [...set].map((i) => ({ i, kind: w.kind[i], level: w.level[i], variant: w.variant[i], tree: w.tree[i], bt: w.bt[i], bo: w.bo[i], wire: w.wire[i], pipe: w.pipe[i] }));
+  }
+  record(snap, spent, label) {
+    this.history.push({ snap, spent, label });
+    if (this.history.length > 40) this.history.shift();
+  }
+  undo() {
+    const h = this.history.pop();
+    if (!h) { this.hooks.toast && this.hooks.toast('Nothing to undo'); return false; }
+    const w = this.world, s = this.sim;
+    for (const t of h.snap) {
+      w.kind[t.i] = t.kind; w.level[t.i] = t.level; w.variant[t.i] = t.variant; w.tree[t.i] = t.tree; w.bt[t.i] = t.bt; w.bo[t.i] = t.bo; w.wire[t.i] = t.wire; w.pipe[t.i] = t.pipe;
+      s.pending.delete(t.i); this.sites.delete(t.i); this.disasters.fires.delete(t.i); this.disasters.rubble.delete(t.i);
+    }
+    s.money += h.spent; s.needAn = true; s.recount(); s.analyze(); this.dirtySave = true;
+    this.hooks.toast && this.hooks.toast(`Undid ${h.label}${h.spent ? ' (+$' + h.spent.toLocaleString('en-US') + ')' : ''}`);
+    return true;
+  }
+
   commit() {
     const def = BY_KEY[this.tool];
     if (def) {
-      const r = this.sim.placeBuilding(this.tool, this.drag.cur.x, this.drag.cur.y);
-      if (r.ok) this.dirtySave = true; else if (r.why) this.hooks.toast && this.hooks.toast(r.why);
+      const x = this.drag.cur.x, y = this.drag.cur.y, snap = this.snapshot(this.dragTiles());
+      const r = this.sim.placeBuilding(this.tool, x, y);
+      if (r.ok) { this.dirtySave = true; this.record(snap, r.cost || 0, def.name); } else if (r.why) this.hooks.toast && this.hooks.toast(r.why);
       this.hooks.cost && this.hooks.cost(0, 0); return;
     }
-    const tiles = this.dragTiles(); let spent = 0, n = 0, why = '';
+    const tiles = this.dragTiles(), snap = this.snapshot(tiles); let spent = 0, n = 0, why = '';
     for (const p of tiles) {
       const r = this.sim.place(this.tool, p.x, p.y);
       if (r.ok) { n++; spent += r.cost || 0; } else if (r.why) { why = r.why; if (r.why === 'Not enough money') break; }
     }
-    if (n) { this.dirtySave = true; this.sim.analyze(); }
+    if (n) { this.dirtySave = true; this.sim.analyze(); this.record(snap, spent, `${this.toolLabel()} \u00d7${n}`); }
     if (!n && why) this.hooks.toast && this.hooks.toast(why);
     this.hooks.cost && this.hooks.cost(0, 0);
   }
+  toolLabel() { return ({ road: 'road', res: 'homes zone', com: 'shops zone', ind: 'industry zone', park: 'park', bulldoze: 'demolition', wire: 'power line', cable: 'cable', pipe: 'pipe' })[this.tool] || this.tool; }
 
   // ---------- loop ----------
   start() {

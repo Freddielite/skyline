@@ -27,7 +27,19 @@ bars, swipe from an edge to peek them, and draws behind the camera cutout). Both
 - Utilities and services: tap a tile to place (the preview shows the footprint); drag to reposition before lifting.
 - With a build tool active, one finger paints and two fingers move the map.
 
-## Stage 3 (this build)
+## Stage 3.2 (this build)
+
+- Undo button (right-hand column, Ctrl+Z on desktop): reverts your last build action, up to 40 steps, and refunds the cost. It restores whole buildings (even multi-tile ones), cancels construction sites, and brings back what you bulldozed
+
+## Stage 3.1
+
+- Water now flows through underground pipes (Power & water tab > Pipe, drag a line, $6/tile). Pipes can run under roads, parks and buildings. Selecting Pipe switches to the water view
+- Water sources must touch a pipe, and buildings get water from pipes within 2 tiles, like power lines. A disconnected source supplies nothing
+- Three water sources: Water tower (small, 140), Pumping station (2x2, 520, needs power), Water treatment plant (3x3, 1,500, needs power). Underpowered plants run at 30%
+- Manhole covers hint at buried pipes in the normal view; the water view shows live pipes in blue and dead ones in gray
+- Older saves have no pipes: connect your towers to the buildings with pipes (you get 90 days before buildings without water start losing upgrades)
+
+## Stage 3
 
 - Economy rebalanced: small towns now turn a profit, a regional grant tapers off as the city grows
 - Ordinances (City > Rules): neighborhood watch, recycling, energy saver, water conservation, smokestack scrubbers, tourism campaign, fireproofing. Each has a monthly cost

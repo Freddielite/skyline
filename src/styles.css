@@ -149,3 +149,13 @@ button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 @keyframes pulse { 50% { opacity: .55; } }
 @media (prefers-reduced-motion: reduce) { .alerts span { animation: none; } }
 @media (orientation: portrait) { .alerts { right: 12px; top: calc(var(--sat) + 150px); } }
+
+.tool:disabled { opacity: .4; cursor: default; }
+.tool.undo:not(:disabled) { color: var(--amber); }
+@media (orientation: landscape) and (max-height: 430px) {
+  .sys { gap: 4px; padding: 5px; }
+  .sys .tool { min-height: 41px; padding: 3px 4px; }
+  .sys .tool em { display: none; }
+  .sys .tool.undo em { display: block; position: absolute; top: 2px; right: 5px; color: var(--amber); font-size: 9px; }
+  .sys .tool.undo { position: relative; }
+}

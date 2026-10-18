@@ -636,7 +636,63 @@ function wte(k) {
   line(P(0.95, 0.2, 50), P(1.45, 0.2, 50), C('#2b2e36'), 0.9);
   box(1.4, 1.45, 0.4, 0.2, 7, faces('#3f8f5a'));
 }
-const SVC_SPR_X = { 8: [policeHQ, 2, 2, 150], 9: [fireHQ, 2, 2, 170], 10: [hospital, 2, 2, 170], 11: [university, 3, 3, 190], 12: [plaza, 2, 2, 100], 13: [library, 1, 1, 100], 14: [museum, 2, 2, 130], 15: [stadium, 3, 3, 150], 16: [dump, 2, 2, 100], 17: [recycle, 2, 2, 100], 18: [wte, 2, 2, 170] };
+
+function pumpStation(k) {
+  const { P, poly, box, faces, sh, C, line, cyl, ell, circ } = k;
+  padRect(k, 2, 2, '#a9a493', ['#8a8574', '#bdb8a6']);
+  const x = 0.12, y = 0.6, w = 1.0, d = 0.85, h = 30;
+  sh(x, y, w, d, h);
+  box(x, y, w, d, h, { l: '#b8856a', r: shade('#b8856a', 0.76), t: '#4f79a8' });
+  k.wins(x, y, w, d, h, 97, { dens: 2.6, rh: 11, wh: 6, base: 9 });
+  poly([P(x + 0.35, y + d, 0), P(x + 0.7, y + d, 0), P(x + 0.7, y + d, 17), P(x + 0.35, y + d, 17)], C('#4a5568'));
+  poly([P(x + 0.1, y + 0.1, h), P(x + 0.55, y + 0.1, h), P(x + 0.55, y + 0.4, h), P(x + 0.1, y + 0.4, h)], C('#3d6fa8'));
+  // manifold: pipes running from the hall to the tank, with flanges and a valve wheel
+  for (const [z0, col] of [[3, '#aeb7c2'], [8, '#9aa6b3']]) { line(P(1.15, 1.0, z0), P(1.55, 0.7, z0), C(col), 4.4); line(P(1.15, 1.2, z0), P(1.55, 1.2, z0), C(col), 4.4); }
+  line(P(1.55, 0.7, 3), P(1.55, 1.2, 3), C('#aeb7c2'), 4.4);
+  for (const u of [1.2, 1.4]) box(u, 0.98, 0.07, 0.07, 9, faces('#6b7280'));
+  circ(P(1.4, 1.2, 14), 3, C('#c9372c')); line(P(1.4, 1.2, 14), P(1.4, 1.2, 8), C('#555'), 1.2);
+  sh(1.25, 0.15, 0.6, 0.6, 40);
+  cyl(1.55, 0.45, 17, 36, '#cfd6de'); cyl(1.55, 0.45, 17.4, 6, '#3d8bd9', 20);
+  line(P(1.4, 0.55, 0), P(1.4, 0.55, 34), C('#8b8f96'), 1);
+  box(1.3, 1.45, 0.45, 0.4, 12, faces('#d3d7de')); box(1.34, 1.49, 0.37, 0.07, 6, faces('#3d8bd9'), 3);
+  for (let i = 0; i <= 8; i++) { const u = i / 4; line(P(u, 1.97), P(u, 1.97, 6), C('#6b7280'), 0.7); line(P(1.97, u), P(1.97, u, 6), C('#6b7280'), 0.7); }
+  line(P(0, 1.97, 6), P(2, 1.97, 6), C('#6b7280'), 0.8); line(P(1.97, 0, 6), P(1.97, 2, 6), C('#6b7280'), 0.8);
+}
+function treatmentPlant(k) {
+  const { P, poly, box, faces, sh, C, line, cyl, ell, circ, tree, ctx } = k;
+  padRect(k, 3, 3, '#b9d9a0', ['#4d8f3c', '#8fd070']);
+  poly([P(0.1, 2.45), P(2.9, 2.45), P(2.9, 2.75), P(0.1, 2.75)], C('#d9cfae'), null, true);
+  // main building with a blue band and a roof lantern
+  sh(0.25, 0.3, 1.3, 0.85, 46);
+  box(0.25, 0.3, 1.3, 0.85, 46, { l: '#e6edf2', r: shade('#e6edf2', 0.78), t: '#8d9aa8' });
+  poly([P(0.25, 1.15, 20), P(1.55, 1.15, 20), P(1.55, 1.15, 27), P(0.25, 1.15, 27)], C('#3d8bd9'));
+  k.wins(0.25, 0.3, 1.3, 0.85, 46, 98, { dens: 3, rh: 11, wh: 6, base: 30 });
+  poly([P(0.5, 1.15, 0), P(0.95, 1.15, 0), P(0.95, 1.15, 17), P(0.5, 1.15, 17)], C(k.store()));
+  box(0.55, 0.45, 0.6, 0.35, 8, faces('#cfd6de'), 46);
+  // clarifier tanks (round basins with a sweeping arm)
+  const basin = (x, y, r) => {
+    const c = P(x, y);
+    ell([c[0], c[1] + 3], r, r * 0.5, C('#9aa3ad')); ell([c[0], c[1] + 1], r, r * 0.5, C('#cfd6de')); ell([c[0], c[1]], r - 3, (r - 3) * 0.5, C('#4da6dc'));
+    ell([c[0], c[1] - 0.5], r - 7, (r - 7) * 0.5, C('#62b6e6'));
+    const a = ((k.mode === 0 ? 0.9 : 0.4)), ex = c[0] + Math.cos(a) * (r - 4), ey = c[1] + Math.sin(a) * (r - 4) * 0.5;
+    line([c[0], c[1]], [ex, ey], C('#f2f2f2'), 1.6); circ([c[0], c[1]], 2, C('#6b7280'));
+  };
+  basin(2.2, 0.7, 36); basin(2.2, 1.55, 36);
+  // filter beds
+  for (let i = 0; i < 4; i++) { const x0 = 0.3 + i * 0.35, y0 = 1.55;
+    box(x0, y0, 0.3, 0.7, 3, { l: '#cfd6de', r: '#aab3bd', t: '#cfd6de' });
+    poly([P(x0 + 0.04, y0 + 0.05, 3), P(x0 + 0.26, y0 + 0.05, 3), P(x0 + 0.26, y0 + 0.65, 3), P(x0 + 0.04, y0 + 0.65, 3)], C(i % 2 ? '#62b6e6' : '#4da6dc'));
+    line(P(x0 + 0.04, y0 + 0.35, 3.2), P(x0 + 0.26, y0 + 0.35, 3.2), 'rgba(255,255,255,.5)', 0.8); }
+  // storage tanks and pipes
+  sh(2.0, 2.2, 0.9, 0.9, 40);
+  cyl(2.5, 2.6, 20, 38, '#cfd6de'); cyl(2.5, 2.6, 20.4, 6, '#3d8bd9', 22);
+  line(P(1.6, 1.3, 3), P(1.85, 1.3, 3), C('#aeb7c2'), 4.4); line(P(1.85, 1.3, 3), P(1.85, 2.6, 3), C('#aeb7c2'), 4.4); line(P(1.85, 2.6, 3), P(2.2, 2.6, 3), C('#aeb7c2'), 4.4);
+  line(P(1.55, 0.75, 4), P(1.95, 0.75, 4), C('#aeb7c2'), 3.6);
+  box(2.75, 0.2, 0.16, 0.16, 74, faces('#e6e6e6')); for (let z = 16; z < 74; z += 20) box(2.75, 0.2, 0.16, 0.16, 8, faces('#3d8bd9'), z);
+  circ(P(2.83, 0.28, 78), 2.2, '#7dffa0');
+  tree(0.2, 2.85, 0, 21); tree(1.2, 2.9, 3, 22); tree(2.85, 2.85, 1, 23);
+}
+const SVC_SPR_X = { 19: [pumpStation, 2, 2, 120], 20: [treatmentPlant, 3, 3, 130], 8: [policeHQ, 2, 2, 150], 9: [fireHQ, 2, 2, 170], 10: [hospital, 2, 2, 170], 11: [university, 3, 3, 190], 12: [plaza, 2, 2, 100], 13: [library, 1, 1, 100], 14: [museum, 2, 2, 130], 15: [stadium, 3, 3, 150], 16: [dump, 2, 2, 100], 17: [recycle, 2, 2, 100], 18: [wte, 2, 2, 170] };
 const SVC_SPR = { 1: [coalPlant, 2, 2, 190], 2: [wind, 1, 1, 130], 3: [waterTower, 1, 1, 130], 4: [police, 1, 1, 100], 5: [fireStation, 1, 1, 130], 6: [clinic, 1, 1, 110], 7: [school, 1, 1, 130], ...SVC_SPR_X };
 export function serviceSprite(id, mode, lit = true) {
   lit = mode === 2 ? !!lit : true;

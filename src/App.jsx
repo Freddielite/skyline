@@ -34,6 +34,8 @@ const I = {
   people: 'M9 11a3 3 0 100-6 3 3 0 000 6zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 11a2.5 2.5 0 100-5M17 14.2c2.2.5 4 2.4 4 5.8',
   clock: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 7v5l3.5 2',
   eyeoff: 'M3 3l18 18M10.6 6.1A9.8 9.8 0 0112 6c6 0 10 6 10 6a17 17 0 01-3.2 3.7M6.5 6.7C3.7 8.6 2 12 2 12s4 7 10 7a9.6 9.6 0 004.2-1M9.9 9.9a3 3 0 004.2 4.2',
+  pipe: 'M3 8h9a3 3 0 013 3v10M3 14h5M15 21h6',
+  undo: 'M9 14L4 9l5-5M4 9h10a6 6 0 010 12h-4',
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10-3a3 3 0 100 6 3 3 0 000-6z',
 };
 const Icon = ({ n, size = 22, fill }) => (
@@ -50,7 +52,10 @@ const T = {
   clear: { id: 'bulldoze', label: 'Clear', icon: 'dozer', cost: 2 },
   coal: { id: 'coal', label: 'Coal plant', icon: 'plant', cost: 3000 },
   wind: { id: 'wind', label: 'Wind', icon: 'wind', cost: 500 },
-  water: { id: 'water', label: 'Water', icon: 'drop', cost: 800 },
+  water: { id: 'water', label: 'Water tower', icon: 'drop', cost: 800 },
+  pump: { id: 'pump', label: 'Pump station', icon: 'drop', cost: 2600 },
+  treat: { id: 'treat', label: 'Treatment', icon: 'drop', cost: 7500 },
+  pipe: { id: 'pipe', label: 'Pipe', icon: 'pipe', cost: 6 },
   police: { id: 'police', label: 'Police', icon: 'shield', cost: 600 },
   fire: { id: 'fire', label: 'Fire', icon: 'flame', cost: 600 },
   clinic: { id: 'clinic', label: 'Clinic', icon: 'cross', cost: 800 },
@@ -71,7 +76,7 @@ const T = {
 };
 const CATS = [
   { id: 'build', label: 'Build', icon: 'road', tools: ['move', 'road', 'res', 'com', 'ind', 'park', 'clear'] },
-  { id: 'util', label: 'Power & water', icon: 'bolt', tools: ['move', 'coal', 'wind', 'water', 'wire', 'cable', 'clear'] },
+  { id: 'util', label: 'Power & water', icon: 'bolt', tools: ['move', 'coal', 'wind', 'wire', 'cable', 'water', 'pump', 'treat', 'pipe', 'clear'] },
   { id: 'waste', label: 'Waste', icon: 'trash', tools: ['move', 'dump', 'recycle', 'wte', 'clear'] },
   { id: 'svc', label: 'Services', icon: 'shield', tools: ['move', 'police', 'police2', 'fire', 'fire2', 'clinic', 'hospital', 'school', 'university', 'clear'] },
   { id: 'fun', label: 'Amenities', icon: 'ball', tools: ['move', 'plaza', 'library', 'museum', 'stadium', 'clear'] },
@@ -125,7 +130,11 @@ export default function App() {
   }, [say]);
 
   const g = gameRef.current;
-  const pick = (id) => { setTool(id); g && g.setTool(id); if (id) { setPanel(null); g.setOverlay(id === 'wire' || id === 'cable' ? 'power' : null); } };
+  useEffect(() => {
+    const onKey = (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && gameRef.current) { e.preventDefault(); gameRef.current.undo(); } };
+    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  const pick = (id) => { setTool(id); g && g.setTool(id); if (id) { setPanel(null); g.setOverlay(id === 'wire' || id === 'cable' ? 'power' : id === 'pipe' ? 'water' : null); } };
   const speed = (s) => { g.setSpeed(s); setSt(g.stats()); };
   const setTax = (k, v) => { g.setTax(k, v); setSt(g.stats()); };
   const pickTime = (v) => { setTimeSet(v); g.setTime(v); };
@@ -178,6 +187,7 @@ export default function App() {
               </div>
             </div>
             <div className="sys">
+              <button className="tool undo" disabled={!st.canUndo} onClick={() => { g.undo(); setSt(g.stats()); }} aria-label="Undo last build" title={st.undoLabel ? 'Undo ' + st.undoLabel : 'Nothing to undo'}><Icon n="undo" /><span>Undo</span><em>{st.canUndo ? '\u00d7' + st.canUndo : '\u00a0'}</em></button>
               <button className={'tool' + (st.overlay ? ' on' : '')} onClick={() => toggle('views')}><Icon n="eye" /><span>Views</span><em>&nbsp;</em></button>
               <button className="tool" onClick={() => toggle('budget')}><Icon n="coin" /><span>City</span><em>&nbsp;</em></button>
               <button className="tool" onClick={() => toggle('menu')}><Icon n="menu" /><span>Menu</span><em>&nbsp;</em></button>

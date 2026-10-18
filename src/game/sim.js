@@ -3,7 +3,7 @@ import { clamp, mulberry32, hash } from './util.js';
 import { BT, BY_KEY, ELEC, WATER, WASTE } from './buildings.js';
 import { ORD, GOALS } from './rules.js';
 
-export const COST = { road: 10, zone: 5, park: 25, bulldoze: 2, wire: 4, cable: 12 };
+export const COST = { road: 10, zone: 5, park: 25, bulldoze: 2, wire: 4, cable: 12, pipe: 6 };
 export const POP_CAP = [0, 8, 24, 70];
 export const COM_CAP = [0, 5, 14, 40];
 export const IND_CAP = [0, 8, 18, 42];
@@ -112,7 +112,7 @@ export class Sim {
     for (const a of plants) { pSup += a.def.power; if (a.comp >= 0) { const r = find(a.comp); out.set(r, (out.get(r) || 0) + a.def.power); } }
     const consumers = [];
     for (const z of zones) consumers.push({ i: z.i, x: z.x, y: z.y, fw: 1, fd: 1, p: Math.ceil(ELEC[z.z][z.l] * (this.ord.energy ? 0.85 : 1)), wa: Math.ceil(WATER[z.z][z.l] * (this.ord.water ? 0.8 : 1)), ws: Math.ceil(WASTE[z.z][z.l] * (this.ord.recycle ? 0.75 : 1)), zone: true });
-    for (const a of anchors) if (!a.def.power && a.def.use) consumers.push({ i: a.i, x: a.x, y: a.y, fw: a.def.w, fd: a.def.d, p: a.def.use, wa: 2, ws: 0 });
+    for (const a of anchors) if (!a.def.power && a.def.use) consumers.push({ i: a.i, x: a.x, y: a.y, fw: a.def.w, fd: a.def.d, p: a.def.use, wa: a.def.water ? 0 : 2, ws: 0 });
     for (const c of consumers) {
       let root = -1; ring(c.x, c.y, c.fw, c.fd, 2, (cc) => { if (root < 0 && cc >= 0) root = find(cc); });
       c.root = root; pDem += c.p;
@@ -138,29 +138,35 @@ export class Sim {
       if (live) this.powerMap[i] = 3;
     }
 
-    // water: towers serve consumers inside their radius, up to capacity
-    const towers = anchors.filter((a) => a.def.water);
-    const load = towers.map(() => 0);
-    this.waterMap.fill(0);
-    for (const t of towers) {
-      const cx = t.x + t.def.w / 2, cy = t.y + t.def.d / 2, R = t.def.radius;
-      for (let y = Math.max(0, Math.floor(cy - R)); y <= Math.min(N - 1, Math.ceil(cy + R)); y++) for (let x = Math.max(0, Math.floor(cx - R)); x <= Math.min(N - 1, Math.ceil(cx + R)); x++) {
-        if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= R) this.waterMap[y * N + x] = 1;
+    // water: sources must touch a pipe; buildings pick up water from pipes within 2 tiles
+    const pc = new Int32Array(n).fill(-1), pp = []; let pn = 0;
+    for (let s0 = 0; s0 < n; s0++) {
+      if (!w.pipe[s0] || pc[s0] >= 0) continue;
+      pc[s0] = pn; pp.push(pn); stack.push(s0);
+      while (stack.length) {
+        const c = stack.pop(), x = c % N, y = (c / N) | 0;
+        for (const [dx, dy] of D4) { const xx = x + dx, yy = y + dy; if (!w.inb(xx, yy)) continue; const q = yy * N + xx; if (w.pipe[q] && pc[q] < 0) { pc[q] = pn; stack.push(q); } }
       }
+      pn++;
     }
-    let wDem = 0, wSup = 0; for (const t of towers) wSup += t.def.water;
+    const pfind = (a) => { while (pp[a] !== a) { pp[a] = pp[pp[a]]; a = pp[a]; } return a; };
+    const punion = (a, b) => { a = pfind(a); b = pfind(b); if (a !== b) pp[b] = a; };
+    const pring = (x0, y0, fw, fd, r, fn) => { for (let y = y0 - r; y < y0 + fd + r; y++) for (let x = x0 - r; x < x0 + fw + r; x++) if (w.inb(x, y)) fn(pc[y * N + x]); };
+    const sources = anchors.filter((a) => a.def.water);
+    for (const a of sources) { let first = -1; pring(a.x, a.y, a.def.w, a.def.d, 1, (c) => { if (c >= 0) { if (first < 0) first = c; else punion(first, c); } }); a.pcomp = first; }
+    const wout = new Map(), wdem = new Map(); let wSup = 0, wDem = 0;
+    for (const a of sources) { wSup += a.def.water; if (a.pcomp >= 0) { const r = pfind(a.pcomp); wout.set(r, (wout.get(r) || 0) + a.def.water * (a.def.use && !this.pw[a.i] ? 0.3 : 1)); } }
     for (const c of consumers) {
-      wDem += c.wa; let best = -1, bd = 1e9;
-      towers.forEach((t, ti) => { const d = Math.hypot(c.x + c.fw / 2 - (t.x + t.def.w / 2), c.y + c.fd / 2 - (t.y + t.def.d / 2)); if (d <= t.def.radius && d < bd) { bd = d; best = ti; } });
-      c.tower = best; if (best >= 0) load[best] += c.wa;
+      wDem += c.wa; let root = -1; pring(c.x, c.y, c.fw, c.fd, 2, (cc) => { if (root < 0 && cc >= 0) root = pfind(cc); });
+      c.wroot = root; if (root >= 0) wdem.set(root, (wdem.get(root) || 0) + c.wa);
     }
-    this.wt.fill(0);
+    this.wt.fill(0); this.waterMap.fill(0);
     for (const c of consumers) {
-      if (c.tower < 0) { this.waterMap[c.i] = 2; continue; }
-      const ratio = Math.min(1, towers[c.tower].def.water / Math.max(1, load[c.tower]));
-      const ok = hash(c.x, c.y, 2) < ratio + 1e-6;
+      const o = c.wroot >= 0 ? wout.get(c.wroot) || 0 : 0, d = wdem.get(c.wroot) || 1, ratio = Math.min(1, o / d);
+      const ok = c.wroot >= 0 && o > 0 && hash(c.x, c.y, 2) < ratio + 1e-6;
       this.wt[c.i] = ok ? 1 : 0; this.waterMap[c.i] = ok ? 3 : 2;
     }
+    for (let i = 0; i < n; i++) if (pc[i] >= 0 && this.waterMap[i] === 0) this.waterMap[i] = (wout.get(pfind(pc[i])) || 0) > 0 ? 4 : 5;
 
     // waste: facilities collect from buildings in range, up to capacity (recycling needs power)
     const fac = this.facilities, fcap = fac.map((f) => f.def.waste * (!f.def.use || this.pw[f.i] ? 1 : 0.3)), fload = fac.map(() => 0);
@@ -275,7 +281,8 @@ export class Sim {
     this.grant = Math.round(Math.max(0, 300 * (1 - this.pop / 1200)));       // regional grant that tapers off as the town grows
     const inc = (this.pop * (this.tax.r / 100) * 22 + this.cJobs * (this.tax.c / 100) * 22 + this.iJobs * (this.tax.i / 100) * 22) * served + this.grant;
     let wires = 0; for (let i = 0; i < N * N; i++) if (this.w.wire[i]) wires += this.w.wire[i] === 2 ? 0.3 : 0.15;
-    const exp = this.roads * 0.4 + this.parks * 1 + this.net.upkeep + wires + this.ordCost();
+    let pipes = 0; for (let i = 0; i < N * N; i++) if (this.w.pipe[i]) pipes += 0.1;
+    const exp = this.roads * 0.4 + this.parks * 1 + this.net.upkeep + wires + pipes + this.ordCost();
     this.lastIncome = Math.round(inc); this.lastExpense = Math.round(exp);
     this.money += this.lastIncome - this.lastExpense;
     this.streak = this.lastIncome > this.lastExpense ? this.streak + 1 : 0;
@@ -327,7 +334,13 @@ export class Sim {
       }
       if (w.tree[i]) { w.tree[i] = 0; return { ok: true, cost: 0 }; }
       if (w.wire[i]) { if (!this.spend(1)) return { ok: false, why: 'Not enough money' }; w.wire[i] = 0; this.needAn = true; return { ok: true, cost: 1 }; }
+      if (w.pipe[i]) { if (!this.spend(1)) return { ok: false, why: 'Not enough money' }; w.pipe[i] = 0; this.needAn = true; return { ok: true, cost: 1 }; }
       return { ok: false };
+    }
+    if (tool === 'pipe') {
+      if (w.pipe[i]) return { ok: false };
+      if (!this.spend(COST.pipe)) return { ok: false, why: 'Not enough money' };
+      w.pipe[i] = 1; this.needAn = true; return { ok: true, cost: COST.pipe };
     }
     if (tool === 'wire' || tool === 'cable') {
       const want = tool === 'wire' ? 1 : 2, cost = COST[tool];

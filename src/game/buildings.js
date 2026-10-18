@@ -3,7 +3,7 @@
 export const BT = {
   1: { id: 1, key: 'coal', name: 'Coal plant', w: 2, d: 2, cost: 3000, upkeep: 70, power: 150, pollute: 35, pr: 8, cat: 'util' },
   2: { id: 2, key: 'wind', name: 'Wind turbine', w: 1, d: 1, cost: 500, upkeep: 6, power: 12, cat: 'util' },
-  3: { id: 3, key: 'water', name: 'Water tower', w: 1, d: 1, cost: 800, upkeep: 18, water: 140, radius: 9, cat: 'util' },
+  3: { id: 3, key: 'water', name: 'Water tower', w: 1, d: 1, cost: 800, upkeep: 18, water: 140, cat: 'util' },
   4: { id: 4, key: 'police', name: 'Police station', w: 1, d: 1, cost: 600, upkeep: 30, radius: 8, use: 2, cov: [['police', 1]], cat: 'svc' },
   5: { id: 5, key: 'fire', name: 'Fire station', w: 1, d: 1, cost: 600, upkeep: 30, radius: 9, use: 2, cov: [['fire', 1]], cat: 'svc' },
   6: { id: 6, key: 'clinic', name: 'Clinic', w: 1, d: 1, cost: 800, upkeep: 38, radius: 9, use: 3, cov: [['health', 1]], cat: 'svc' },
@@ -18,6 +18,8 @@ export const BT = {
   15: { id: 15, key: 'stadium', name: 'Stadium', w: 3, d: 3, cost: 7000, upkeep: 200, radius: 16, use: 12, cov: [['fun', 1.5]], cat: 'fun' },
   16: { id: 16, key: 'dump', name: 'Landfill', w: 2, d: 2, cost: 1200, upkeep: 35, waste: 120, radius: 12, pollute: 12, pr: 6, cat: 'waste' },
   17: { id: 17, key: 'recycle', name: 'Recycling center', w: 2, d: 2, cost: 3200, upkeep: 100, waste: 260, radius: 14, pollute: 3, pr: 4, use: 8, cat: 'waste' },
+  19: { id: 19, key: 'pump', name: 'Pumping station', w: 2, d: 2, cost: 2600, upkeep: 90, water: 520, use: 5, cat: 'util' },
+  20: { id: 20, key: 'treat', name: 'Water treatment', w: 3, d: 3, cost: 7500, upkeep: 260, water: 1500, use: 14, cat: 'util' },
   18: { id: 18, key: 'wte', name: 'Waste-to-energy', w: 2, d: 2, cost: 5200, upkeep: 140, waste: 200, radius: 14, power: 40, pollute: 8, pr: 6, cat: 'waste' },
 };
 export const BY_KEY = Object.fromEntries(Object.values(BT).map((b) => [b.key, b]));

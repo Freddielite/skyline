@@ -93,6 +93,7 @@ export class Renderer {
         if (rub !== undefined && (k === T.EMPTY || (k >= 2 && k <= 4 && !w.level[i]))) this.rubble(ctx, i, X, Y, z, rub, mode);
         const fire = g.disasters.fires.get(i);
         if (fire) this.fire(ctx, fire, X, Y, z, t, mode, k === T.SVC ? 56 : [30, 54, 94][Math.max(0, w.level[i] - 1)] || 40);
+        if (w.pipe[i] && (x + y) % 3 === 0 && !w.tree[i] && (k === T.EMPTY || k === T.ROAD || k === T.PARK)) this.manhole(ctx, X, Y, z, mode);
         if (w.wire[i] === 1) this.pole(ctx, w, x, y, X, Y, z, mode);
         const cb = buckets.get(y * N + x);
         if (cb) for (const c of cb) { if (c.ped) this.person(ctx, c, z, cx, cy, mode, t); else if (c.truck) this.truck(ctx, c, z, cx, cy, mode, t); else this.car(ctx, c, z, cx, cy, mode); }
@@ -121,6 +122,12 @@ export class Renderer {
       ctx.globalAlpha = mode === 2 ? 0.55 : 0.22; ctx.filter = 'blur(' + (6 * this.dpr) + 'px)';
       ctx.drawImage(this.bloom, 0, 0, this.cv.width, this.cv.height); ctx.restore();
     }
+  }
+  manhole(ctx, X, Y, z, mode) {
+    const cx = X, cy = Y + 16 * z, d = mode === 2 ? 0.55 : 1;
+    ctx.fillStyle = `rgba(${60 * d | 0},${66 * d | 0},${76 * d | 0},.95)`; ctx.beginPath(); ctx.ellipse(cx, cy, 4.2 * z, 2.1 * z, 0, 0, 6.3); ctx.fill();
+    ctx.strokeStyle = `rgba(${160 * d | 0},${168 * d | 0},${180 * d | 0},.9)`; ctx.lineWidth = 0.8 * z; ctx.beginPath(); ctx.ellipse(cx, cy, 4.2 * z, 2.1 * z, 0, 0, 6.3); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - 2.6 * z, cy); ctx.lineTo(cx + 2.6 * z, cy); ctx.moveTo(cx, cy - 1.2 * z); ctx.lineTo(cx, cy + 1.2 * z); ctx.stroke();
   }
   fire(ctx, f, X, Y, z, t, mode, hb) {
     const cx = X, cy = Y + 16 * z, n = 3 + Math.min(5, Math.floor(f.dmg / 4)), dim = mode === 2 ? 1 : 0.9;
@@ -266,10 +273,22 @@ export class Renderer {
         case 'waste': { const m = sim.wasteMap[i]; col = m === 3 ? 'rgba(95,211,166,.7)' : m === 2 ? 'rgba(239,111,94,.8)' : m === 1 ? 'rgba(176,132,76,.38)' : null; break; }
         case 'edu': if (sim.cov.edu[i] > 0.02) col = `rgba(240,200,70,${0.2 + sim.cov.edu[i] * 0.5})`; break;
         case 'power': { const m = sim.powerMap[i]; col = m === 1 ? 'rgba(95,211,166,.7)' : m === 2 ? 'rgba(239,111,94,.8)' : m === 3 && w.wire[i] ? 'rgba(242,184,75,.55)' : m === 4 ? 'rgba(160,170,185,.5)' : null; break; }
-        case 'water': { const m = sim.waterMap[i]; col = m === 3 ? 'rgba(95,211,166,.7)' : m === 2 ? 'rgba(239,111,94,.8)' : m === 1 ? 'rgba(61,139,217,.32)' : null; break; }
+        case 'water': { const m = sim.waterMap[i]; col = m === 3 ? 'rgba(95,211,166,.7)' : m === 2 ? 'rgba(239,111,94,.8)' : m === 4 ? 'rgba(80,190,255,.45)' : m === 5 ? 'rgba(160,170,185,.45)' : null; break; }
       }
       if (!col) continue;
       ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(X + 32 * z, Y + 16 * z); ctx.lineTo(X, Y + 32 * z); ctx.lineTo(X - 32 * z, Y + 16 * z); ctx.closePath(); ctx.fillStyle = col; ctx.fill();
+    }
+    if (ov === 'water') {
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+        const i = y * N + x; if (!w.pipe[i]) continue;
+        const X = (x - y) * 32 * z + cx, Y = (x + y) * 16 * z + cy + 16 * z;
+        if (X < -40 * z || X > W + 40 * z || Y < -34 * z || Y > H + 40 * z) continue;
+        const live = sim.waterMap[i] === 4 || sim.waterMap[i] === 3; ctx.strokeStyle = live ? '#5cc8ff' : '#8a93a3'; ctx.lineWidth = 2.6 * z;
+        ctx.beginPath();
+        if (x + 1 < N && w.pipe[i + 1]) { ctx.moveTo(X, Y); ctx.lineTo(X + 32 * z, Y + 16 * z); }
+        if (y + 1 < N && w.pipe[i + N]) { ctx.moveTo(X, Y); ctx.lineTo(X - 32 * z, Y + 16 * z); }
+        ctx.stroke(); ctx.fillStyle = live ? '#5cc8ff' : '#8a93a3'; ctx.beginPath(); ctx.arc(X, Y, 3 * z, 0, 6.3); ctx.fill();
+      }
     }
     if (ov === 'power') {
       for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {

@@ -16,12 +16,12 @@ export const STYLES = {
   earth: { excavator: true, piles: true, wipe: true, workers: 2 },
 };
 const REAL_H = { [T.RES]: [30, 54, 94], [T.COM]: [32, 66, 140], [T.IND]: [30, 46, 104], [T.PARK]: [22, 22, 22] };
-const SVC_H = { coal: 120, wind: 78, water: 66, police: 34, fire: 54, clinic: 48, school: 66, police2: 58, fire2: 92, hospital: 82, university: 104, plaza: 12, library: 40, museum: 60, stadium: 80, dump: 22, recycle: 40, wte: 112 };
+const SVC_H = { pump: 52, treat: 80, coal: 120, wind: 78, water: 66, police: 34, fire: 54, clinic: 48, school: 66, police2: 58, fire2: 92, hospital: 82, university: 104, plaza: 12, library: 40, museum: 60, stadium: 80, dump: 22, recycle: 40, wte: 112 };
 
 export function siteInfo(ev) {
   if (ev.bt) {
     const def = BT[ev.bt], k = def.key;
-    const style = k === 'wind' ? 'turbine' : (k === 'dump' || k === 'plaza') ? 'earth' : (k === 'coal' || k === 'wte' || k === 'recycle') ? 'heavy' : (k === 'stadium' || k === 'hospital' || k === 'university') ? 'crane' : (k === 'water') ? 'frame' : 'civic';
+    const style = k === 'wind' ? 'turbine' : (k === 'dump' || k === 'plaza') ? 'earth' : (k === 'coal' || k === 'wte' || k === 'recycle') ? 'heavy' : (k === 'stadium' || k === 'hospital' || k === 'university' || k === 'treat') ? 'crane' : (k === 'water') ? 'frame' : 'civic';
     return { style, fw: def.w, fd: def.d, hb: SVC_H[k] || 50, dur: k === 'wind' ? 7 : Math.min(24, 8 + def.cost / 600) };
   }
   if (ev.kind === T.PARK) return { style: 'earth', fw: 1, fd: 1, hb: 22, dur: 4.5 };
