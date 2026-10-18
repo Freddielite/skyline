@@ -27,7 +27,7 @@ export class Game {
   get trucks() { return this.garbage.trucks; }
   newCity(seed, silent) {
     this.world = new World(seed);
-    this.sim = new Sim(this.world);
+    this.sim = new Sim(this.world); this.sim.defer = true;
     this.traffic = new Traffic(this.world, mulberry32(seed + 3));
     this.sites = new Map();
     this.agents = new Agents(this.world, mulberry32(seed + 4), (i) => this.sites.has(i));
@@ -54,7 +54,7 @@ export class Game {
       if (!raw) return false;
       const o = JSON.parse(raw);
       this.world = World.fromJSON(o.world);
-      this.sim = new Sim(this.world, o.sim);
+      this.sim = new Sim(this.world, o.sim); this.sim.defer = true;
       this.traffic = new Traffic(this.world, mulberry32(this.world.seed + 3));
       this.sites = new Map();
       this.agents = new Agents(this.world, mulberry32(this.world.seed + 4), (i) => this.sites.has(i));
@@ -207,9 +207,9 @@ export class Game {
       if (ev.type === 'month') this.hooks.month && this.hooks.month(ev);
       else if (ev.type === 'built' && !this.sites.has(ev.i)) { const info = siteInfo(ev); this.sites.set(ev.i, { i: ev.i, kind: ev.kind, from: ev.from, to: ev.to, pv: ev.pv || 0, t: 0, ...info }); }
     }
-    for (const [i, site] of this.sites) { site.t += dt * sp; if (site.t >= site.dur) this.sites.delete(i); }
+    for (const [i, site] of this.sites) { site.t += dt * sp; if (site.t >= site.dur) { this.sites.delete(i); s.finish(i); } }
     this.siteCheck = (this.siteCheck || 0) + dt;
-    if (this.siteCheck > 1) { this.siteCheck = 0; for (const i of this.sites.keys()) { const k = this.world.kind[i]; if (k === T.EMPTY || k === T.ROAD) this.sites.delete(i); } }
+    if (this.siteCheck > 1) { this.siteCheck = 0; for (const i of this.sites.keys()) { const k = this.world.kind[i]; if (k === T.EMPTY || k === T.ROAD) { this.sites.delete(i); s.finish(i); } } for (const i of [...s.pending.keys()]) if (!this.sites.has(i)) s.finish(i); }
     // life scales with the city; people follow real routines (home, work, shops, parks)
     const night = this.mode === 2 ? 0.45 : this.mode === 1 ? 0.8 : 1;
     const carT = Math.min(60, Math.floor((s.pop / 14 + (s.cJobs + s.iJobs) / 30) * night), Math.floor(s.roads / 2));

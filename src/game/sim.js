@@ -30,10 +30,15 @@ export class Sim {
     this.cov = {}; for (const k of COVS) this.cov[k] = new Float32Array(n);
     this.powerMap = new Uint8Array(n); this.waterMap = new Uint8Array(n); this.wasteMap = new Uint8Array(n);
     this.facilities = [];
+    this.pending = new Map();          // tile -> { from } while a building is still under construction
+    this.defer = false;                // set by the game: new buildings only count once finished
     this.net = { pSup: 0, pDem: 0, wSup: 0, wDem: 0, tSup: 0, tDem: 0, unserved: 0, wasteUn: 0, upkeep: 0, crimeAvg: 0, pollAvg: 0, police: 0, fire: 0, health: 0, edu: 0, fun: 0, stadiums: 0 };
     this.recount();
     this.analyze();
   }
+  lvl(i) { const p = this.pending.get(i); return p ? p.from : this.w.level[i]; }     // level that currently counts
+  markBuilt(i, ev) { this.events.push({ type: 'built', i, ...ev }); if (this.defer) this.pending.set(i, { from: ev.from }); }
+  finish(i) { if (this.pending.delete(i)) { this.needAn = true; this.recount(); } }
   get year() { return 2026 + Math.floor(this.day / 360); }
   get month() { return Math.floor((this.day % 360) / 30); }
   get dom() { return (this.day % 30) + 1; }
@@ -44,9 +49,9 @@ export class Sim {
     const w = this.w;
     let pop = 0, cj = 0, ij = 0, roads = 0, parks = 0, rb = 0, cb = 0, ib = 0;
     for (let i = 0; i < N * N; i++) {
-      const k = w.kind[i], l = w.level[i];
+      const k = w.kind[i], l = this.lvl(i);
       if (k === T.ROAD) roads++;
-      else if (k === T.PARK) parks++;
+      else if (k === T.PARK) { if (!this.pending.has(i)) parks++; }
       else if (k === T.RES && l) { pop += POP_CAP[l]; rb++; }
       else if (k === T.COM && l) { cj += COM_CAP[l]; cb++; }
       else if (k === T.IND && l) { ij += IND_CAP[l]; ib++; }
@@ -91,8 +96,8 @@ export class Sim {
     const anchors = [], zones = [], empties = [];
     for (let i = 0; i < n; i++) {
       const k = w.kind[i], x = i % N, y = (i / N) | 0;
-      if (k === T.SVC && w.bo[i] === 0) anchors.push({ x, y, i, def: BT[w.bt[i]] });
-      else if (ZK[k] && w.level[i]) zones.push({ x, y, i, z: ZK[k], l: w.level[i] });
+      if (k === T.SVC && w.bo[i] === 0) { if (!this.pending.has(i)) anchors.push({ x, y, i, def: BT[w.bt[i]] }); }
+      else if (ZK[k] && this.lvl(i)) zones.push({ x, y, i, z: ZK[k], l: this.lvl(i) });
       else if (ZK[k]) empties.push({ x, y, i });
     }
     this.facilities = anchors.filter((a) => a.def.waste);
@@ -200,9 +205,9 @@ export class Sim {
     poll.fill(0); ind.fill(0);
     const spread = (x0, y0, R, fn) => { for (let y = Math.max(0, y0 - R); y <= Math.min(N - 1, y0 + R); y++) for (let x = Math.max(0, x0 - R); x <= Math.min(N - 1, x0 + R); x++) { const d = Math.hypot(x - x0, y - y0); if (d <= R) fn(y * N + x, 1 - d / (R + 0.001)); } };
     for (let i = 0; i < n; i++) {
-      const k = w.kind[i], x = i % N, y = (i / N) | 0, l = w.level[i];
+      const k = w.kind[i], x = i % N, y = (i / N) | 0, l = this.lvl(i);
       if (k === T.IND && l) { spread(x, y, 4, (q, f) => { poll[q] += l * 7 * f; }); spread(x, y, 4, (q) => { ind[q] += 6; }); }
-      else if (k === T.PARK) { spread(x, y, 5, (q) => { parkAcc[q] += 8; }); spread(x, y, 3, (q, f) => { poll[q] -= 8 * f; }); }
+      else if (k === T.PARK && !this.pending.has(i)) { spread(x, y, 5, (q) => { parkAcc[q] += 8; }); spread(x, y, 3, (q, f) => { poll[q] -= 8 * f; }); }
       else if ((k === T.RES || k === T.COM) && l) spread(x, y, 3, (q, f) => { dens[q] += (k === T.RES ? POP_CAP[l] : COM_CAP[l] * 0.5) * f * 0.25; });
       if (ZK[k] && l && !this.ts[i]) spread(x, y, 2, (q, f) => { poll[q] += l * 3 * f; });   // uncollected garbage
     }
@@ -215,7 +220,7 @@ export class Sim {
       let v = 40 + Math.min(24, parkAcc[i]) + (w.roadNear(x, y, 1) ? 8 : 0);
       v += this.cov.police[i] * 5 + this.cov.health[i] * 6 + this.cov.edu[i] * 6 + this.cov.fire[i] * 4 + this.cov.fun[i] * 6 - poll[i] * 0.28 - this.crime[i] * 0.12;
       this.lv[i] = clamp(v, 0, 100);
-      if (w.kind[i] === T.RES && w.level[i]) { const wgt = POP_CAP[w.level[i]]; pv += wgt; polSum += poll[i] * wgt; crSum += this.crime[i] * wgt; for (const k of COVS) covS[k] += this.cov[k][i] * wgt; }
+      if (w.kind[i] === T.RES && this.lvl(i)) { const wgt = POP_CAP[this.lvl(i)]; pv += wgt; polSum += poll[i] * wgt; crSum += this.crime[i] * wgt; for (const k of COVS) covS[k] += this.cov[k][i] * wgt; }
     }
     const pvv = Math.max(1, pv);
     Object.assign(this.net, { pSup, pDem, wSup, wDem, tSup, tDem, unserved: consumers.length ? unpowered / consumers.length : 0, wasteUn: zc ? wUn / zc : 0, upkeep, stadiums, crimeAvg: pv ? crSum / pvv : 0, pollAvg: pv ? polSum / pvv : 0, police: covS.police / pvv, fire: covS.fire / pvv, health: covS.health / pvv, edu: covS.edu / pvv, fun: covS.fun / pvv });
@@ -233,20 +238,21 @@ export class Sim {
       const x = Math.floor(rnd() * N), y = Math.floor(rnd() * N), i = w.idx(x, y);
       const z = w.kind[i];
       if (z !== T.RES && z !== T.COM && z !== T.IND) continue;
+      if (this.pending.has(i)) continue;
       const d = z === T.RES ? this.rd : z === T.COM ? this.cd : this.id;
       const lvl = w.level[i];
       const road = w.roadNear(x, y, 2);
       if (!road) { if (lvl && rnd() < 0.03) w.level[i] = lvl - 1; continue; }
       const pw = this.pw[i], wt = this.wt[i];
       if (lvl === 0) {
-        if (pw && d > -0.05 && rnd() < 0.15 + 0.5 * Math.max(0, d)) { const pv = w.variant[i]; w.level[i] = 1; w.variant[i] = Math.floor(rnd() * 4); this.needAn = true; this.events.push({ type: 'built', i, kind: z, from: 0, to: 1, pv }); }
+        if (pw && d > -0.05 && rnd() < 0.15 + 0.5 * Math.max(0, d)) { const pv = w.variant[i]; w.level[i] = 1; w.variant[i] = Math.floor(rnd() * 4); this.needAn = true; this.markBuilt(i, { kind: z, from: 0, to: 1, pv }); }
         continue;
       }
       if (!pw && this.day > this.grace && rnd() < 0.02) { w.level[i] = lvl - 1; this.needAn = true; continue; }
       if (lvl < 3) {
         const need = lvl === 1 ? 46 : 62;
         const ok = pw && wt && (lvl === 1 || this.ts[i]);
-        if (ok && d > 0.04 && this.landValue(i, z) >= need && rnd() < 0.1 * d + 0.02) { const pv = w.variant[i]; w.level[i] = lvl + 1; w.variant[i] = Math.floor(rnd() * 4); this.needAn = true; this.events.push({ type: 'built', i, kind: z, from: lvl, to: lvl + 1, pv }); }
+        if (ok && d > 0.04 && this.landValue(i, z) >= need && rnd() < 0.1 * d + 0.02) { const pv = w.variant[i]; w.level[i] = lvl + 1; w.variant[i] = Math.floor(rnd() * 4); this.needAn = true; this.markBuilt(i, { kind: z, from: lvl, to: lvl + 1, pv }); }
         else if (d < -0.25 && rnd() < 0.06) { w.level[i] = lvl - 1; this.needAn = true; }
       } else if (d < -0.25 && rnd() < 0.06) { w.level[i] = 2; this.needAn = true; }
       if (lvl === 1 && d < -0.35 && rnd() < 0.05) { w.level[i] = 0; this.needAn = true; }
@@ -287,7 +293,7 @@ export class Sim {
       w.kind[i] = T.SVC; w.bt[i] = def.id; w.bo[i] = dx | (dy << 2); w.level[i] = 0; w.tree[i] = 0;
       if (w.wire[i] === 1) w.wire[i] = 0;      // overhead lines are cleared, buried cable stays
     }
-    this.events.push({ type: 'built', i: w.idx(x, y), bt: def.id, from: 0, to: 1 });
+    this.markBuilt(w.idx(x, y), { bt: def.id, from: 0, to: 1 });
     this.recount(); this.analyze();
     return { ok: true, cost: def.cost };
   }
@@ -299,11 +305,13 @@ export class Sim {
       if (k === T.SVC) {
         const def = BT[w.bt[i]], ax = x - (w.bo[i] & 3), ay = y - (w.bo[i] >> 2), cost = COST.bulldoze * 5;
         if (!this.spend(cost)) return { ok: false, why: 'Not enough money' };
+        this.pending.delete(w.idx(ax, ay));
         for (let dy = 0; dy < def.d; dy++) for (let dx = 0; dx < def.w; dx++) { const q = w.idx(ax + dx, ay + dy); w.kind[q] = T.EMPTY; w.bt[q] = 0; w.bo[q] = 0; }
         this.needAn = true; this.recount(); return { ok: true, cost };
       }
       if (k !== T.EMPTY) {
         if (!this.spend(COST.bulldoze)) return { ok: false, why: 'Not enough money' };
+        this.pending.delete(i);
         w.kind[i] = T.EMPTY; w.level[i] = 0; w.tree[i] = 0; this.needAn = true; this.recount(); return { ok: true, cost: COST.bulldoze };
       }
       if (w.tree[i]) { w.tree[i] = 0; return { ok: true, cost: 0 }; }
@@ -329,7 +337,7 @@ export class Sim {
     if (!this.spend(cost)) return { ok: false, why: 'Not enough money' };
     w.kind[i] = nk; w.level[i] = 0; w.tree[i] = 0; w.variant[i] = Math.floor(this.rnd() * 4);
     if (w.wire[i] === 1 && (nk === T.RES || nk === T.COM || nk === T.IND)) w.wire[i] = 0;
-    if (nk === T.PARK) this.events.push({ type: 'built', i, kind: T.PARK, from: 0, to: 1 });
+    if (nk === T.PARK) this.markBuilt(i, { kind: T.PARK, from: 0, to: 1 });
     this.needAn = true; this.recount();
     return { ok: true, cost };
   }

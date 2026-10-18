@@ -229,6 +229,7 @@ export default function App() {
                 ))}
               </div>
               <div className="rows">
+                <button className="wide" onClick={() => { const el = document.documentElement; if (document.fullscreenElement) document.exitFullscreen && document.exitFullscreen(); else if (el.requestFullscreen) el.requestFullscreen().catch(() => {}); }}>Toggle fullscreen</button>
                 <button className="wide" onClick={() => { g.save(); say('City saved'); setPanel(null); }}>Save city</button>
                 <button className="wide warn" onClick={() => { if (window.confirm('Start a new city? The current one will be replaced.')) newCity(); }}>New city</button>
               </div>

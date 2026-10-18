@@ -15,8 +15,9 @@ Isometric city builder for Android. React + Vite + canvas, packaged with Capacit
     npm run android:sync     # build + copy web assets into the Android project
     npm run android:open     # opens Android Studio -> Build > Build APK(s)
 
-`npm run android:sync` also locks the app to landscape (it patches `AndroidManifest.xml` via
-`scripts/landscape.mjs`). Run `npm run android:landscape` on its own if you only need that.
+`npm run android:sync` also locks the app to landscape (`scripts/landscape.mjs` patches `AndroidManifest.xml`)
+and makes it fullscreen (`scripts/fullscreen.mjs` patches `MainActivity.java`: hides the status and navigation
+bars, swipe from an edge to peek them, and draws behind the camera cutout). Both are safe to re-run.
 
 ## Controls
 
@@ -26,7 +27,12 @@ Isometric city builder for Android. React + Vite + canvas, packaged with Capacit
 - Utilities and services: tap a tile to place (the preview shows the footprint); drag to reposition before lifting.
 - With a build tool active, one finger paints and two fingers move the map.
 
-## Stage 2.6 (this build)
+## Stage 2.7 (this build)
+
+- New buildings, upgrades and services only count (population, jobs, power, taxes, coverage) once their construction animation finishes. Upgrades keep counting at the old level until done; bulldozing a site cancels it
+- Fullscreen on Android (immersive mode, camera-cutout aware) and a fullscreen toggle in the Menu for browsers
+
+## Stage 2.6
 
 - Citizens have homes, jobs and routines: they leave for work in the morning, work through the day, go shopping or to parks and plazas in the evening, and return home at night. Short trips are on foot along the sidewalks, long ones by car
 - Every building has its own construction process: wooden frames with a cement mixer for houses, tower cranes and glass panels for shops and offices, welding and diggers for industry, mobile cranes for services, turbines assembled last, earthworks for parks and landfills. Upgrades build over the old building
