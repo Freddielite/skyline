@@ -27,7 +27,15 @@ bars, swipe from an edge to peek them, and draws behind the camera cutout). Both
 - Utilities and services: tap a tile to place (the preview shows the footprint); drag to reposition before lifting.
 - With a build tool active, one finger paints and two fingers move the map.
 
-## Stage 2.7 (this build)
+## Stage 3 (this build)
+
+- Economy rebalanced: small towns now turn a profit, a regional grant tapers off as the city grows
+- Ordinances (City > Rules): neighborhood watch, recycling, energy saver, water conservation, smokestack scrubbers, tourism campaign, fireproofing. Each has a monthly cost
+- Goals (City > Goals): 15 milestones with cash rewards, from 100 residents to a 10,000-resident metropolis
+- Disasters (Menu > Disasters: Off / Rare / Normal / Chaos, plus Start buttons): fires spread between buildings, fire stations cut the damage and send trucks; tornadoes cut a path across the map; UFOs zap buildings. Destroyed buildings leave rubble
+- Alert chips next to the top bar while a disaster is active
+
+## Stage 2.7
 
 - New buildings, upgrades and services only count (population, jobs, power, taxes, coverage) once their construction animation finishes. Upgrades keep counting at the old level until done; bulldozing a site cancels it
 - Fullscreen on Android (immersive mode, camera-cutout aware) and a fullscreen toggle in the Menu for browsers

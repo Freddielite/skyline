@@ -1,6 +1,7 @@
 import { T, N, TERRAIN } from './world.js';
 import { clamp, mulberry32, hash } from './util.js';
 import { BT, BY_KEY, ELEC, WATER, WASTE } from './buildings.js';
+import { ORD, GOALS } from './rules.js';
 
 export const COST = { road: 10, zone: 5, park: 25, bulldoze: 2, wire: 4, cable: 12 };
 export const POP_CAP = [0, 8, 24, 70];
@@ -21,6 +22,7 @@ export class Sim {
     this.tax = s.tax ?? { r: 9, c: 9, i: 9 };
     this.lastIncome = s.lastIncome ?? 0;
     this.lastExpense = s.lastExpense ?? 0;
+    this.ord = s.ord ?? {}; this.done = new Set(s.done ?? []); this.streak = s.streak ?? 0; this.disasters = s.disasters ?? 1; this.grant = 0;
     this.events = [];
     this.grace = this.day + 90;         // older saves get time to wire up before buildings decay
     const n = N * N;
@@ -43,7 +45,7 @@ export class Sim {
   get month() { return Math.floor((this.day % 360) / 30); }
   get dom() { return (this.day % 30) + 1; }
   dateLabel() { return `${this.dom} ${MONTHS[this.month]} ${this.year}`; }
-  state() { return { money: this.money, day: this.day, tax: this.tax, lastIncome: this.lastIncome, lastExpense: this.lastExpense }; }
+  state() { return { money: this.money, day: this.day, tax: this.tax, lastIncome: this.lastIncome, lastExpense: this.lastExpense, ord: this.ord, done: [...this.done], streak: this.streak, disasters: this.disasters }; }
 
   recount() {
     const w = this.w;
@@ -60,7 +62,7 @@ export class Sim {
     this.bld = { r: rb, c: cb, i: ib };
     const jobs = cj + ij;
     const tm = (t) => -(t - 9) * 0.04 + 0.14;
-    const stad = Math.min(3, this.net.stadiums) * 0.06;
+    const stad = Math.min(3, this.net.stadiums) * 0.06 + (this.ord.tourism ? 0.08 : 0);
     this.rd = clamp((jobs - pop * 0.85 + 18) / (40 + jobs * 0.25) + tm(this.tax.r), -1, 1);
     this.cd = clamp((pop * 0.3 - cj + 4) / (30 + cj * 0.2) + tm(this.tax.c) + stad, -1, 1);
     this.id = clamp((pop * 0.4 - ij + 6) / (30 + ij * 0.2) + tm(this.tax.i), -1, 1);
@@ -109,7 +111,7 @@ export class Sim {
     let pSup = 0, pDem = 0;
     for (const a of plants) { pSup += a.def.power; if (a.comp >= 0) { const r = find(a.comp); out.set(r, (out.get(r) || 0) + a.def.power); } }
     const consumers = [];
-    for (const z of zones) consumers.push({ i: z.i, x: z.x, y: z.y, fw: 1, fd: 1, p: ELEC[z.z][z.l], wa: WATER[z.z][z.l], ws: WASTE[z.z][z.l], zone: true });
+    for (const z of zones) consumers.push({ i: z.i, x: z.x, y: z.y, fw: 1, fd: 1, p: Math.ceil(ELEC[z.z][z.l] * (this.ord.energy ? 0.85 : 1)), wa: Math.ceil(WATER[z.z][z.l] * (this.ord.water ? 0.8 : 1)), ws: Math.ceil(WASTE[z.z][z.l] * (this.ord.recycle ? 0.75 : 1)), zone: true });
     for (const a of anchors) if (!a.def.power && a.def.use) consumers.push({ i: a.i, x: a.x, y: a.y, fw: a.def.w, fd: a.def.d, p: a.def.use, wa: 2, ws: 0 });
     for (const c of consumers) {
       let root = -1; ring(c.x, c.y, c.fw, c.fd, 2, (cc) => { if (root < 0 && cc >= 0) root = find(cc); });
@@ -206,16 +208,16 @@ export class Sim {
     const spread = (x0, y0, R, fn) => { for (let y = Math.max(0, y0 - R); y <= Math.min(N - 1, y0 + R); y++) for (let x = Math.max(0, x0 - R); x <= Math.min(N - 1, x0 + R); x++) { const d = Math.hypot(x - x0, y - y0); if (d <= R) fn(y * N + x, 1 - d / (R + 0.001)); } };
     for (let i = 0; i < n; i++) {
       const k = w.kind[i], x = i % N, y = (i / N) | 0, l = this.lvl(i);
-      if (k === T.IND && l) { spread(x, y, 4, (q, f) => { poll[q] += l * 7 * f; }); spread(x, y, 4, (q) => { ind[q] += 6; }); }
+      if (k === T.IND && l) { spread(x, y, 4, (q, f) => { poll[q] += l * 7 * f * (this.ord.scrub ? 0.7 : 1); }); spread(x, y, 4, (q) => { ind[q] += 6; }); }
       else if (k === T.PARK && !this.pending.has(i)) { spread(x, y, 5, (q) => { parkAcc[q] += 8; }); spread(x, y, 3, (q, f) => { poll[q] -= 8 * f; }); }
       else if ((k === T.RES || k === T.COM) && l) spread(x, y, 3, (q, f) => { dens[q] += (k === T.RES ? POP_CAP[l] : COM_CAP[l] * 0.5) * f * 0.25; });
       if (ZK[k] && l && !this.ts[i]) spread(x, y, 2, (q, f) => { poll[q] += l * 3 * f; });   // uncollected garbage
     }
-    for (const a of anchors) if (a.def.pollute) spread(a.x, a.y, a.def.pr || 6, (q, f) => { poll[q] += a.def.pollute * f; });
+    for (const a of anchors) if (a.def.pollute) spread(a.x, a.y, a.def.pr || 6, (q, f) => { poll[q] += a.def.pollute * f * (this.ord.scrub ? 0.7 : 1); });
     let pv = 0, polSum = 0, crSum = 0; const covS = {}; for (const k of COVS) covS[k] = 0;
     for (let i = 0; i < n; i++) {
       poll[i] = clamp(poll[i], 0, 100);
-      this.crime[i] = clamp(10 + dens[i] * 0.5 + poll[i] * 0.12 - this.cov.police[i] * 55, 0, 100);
+      this.crime[i] = clamp((10 + dens[i] * 0.5 + poll[i] * 0.12 - this.cov.police[i] * 55) * (this.ord.watch ? 0.85 : 1), 0, 100);
       const x = i % N, y = (i / N) | 0;
       let v = 40 + Math.min(24, parkAcc[i]) + (w.roadNear(x, y, 1) ? 8 : 0);
       v += this.cov.police[i] * 5 + this.cov.health[i] * 6 + this.cov.edu[i] * 6 + this.cov.fire[i] * 4 + this.cov.fun[i] * 6 - poll[i] * 0.28 - this.crime[i] * 0.12;
@@ -228,6 +230,12 @@ export class Sim {
     this.updateHappiness();
   }
 
+  ordCost() { let c = 0; for (const k in this.ord) if (this.ord[k] && ORD[k]) c += ORD[k].cost; return c; }
+  setOrd(k, on) { if (!ORD[k]) return; this.ord[k] = !!on; this.needAn = true; this.recount(); }
+  countServed(kind) { let n = 0; const w = this.w; for (let i = 0; i < N * N; i++) { const k = w.kind[i]; if ((k === T.RES || k === T.COM || k === T.IND) && this.lvl(i) && this[kind][i]) n++; } return n; }
+  countBuilt(key) { const id = BY_KEY[key].id, w = this.w; let n = 0; for (let i = 0; i < N * N; i++) if (w.kind[i] === T.SVC && w.bt[i] === id && w.bo[i] === 0 && !this.pending.has(i)) n++; return n; }
+  goalStatus() { return GOALS.map((g) => { const v = g.v(this); return { id: g.id, title: g.title, desc: g.desc, reward: g.reward, done: this.done.has(g.id), progress: Math.min(1, v / g.t), label: g.fmt ? g.fmt(v) : Math.min(v, g.t) + ' / ' + g.t }; }); }
+  checkGoals() { for (const g of GOALS) { if (this.done.has(g.id)) continue; if (g.v(this) >= g.t) { this.done.add(g.id); this.money += g.reward; this.events.push({ type: 'goal', title: g.title, reward: g.reward }); } } }
   landValue(i, z) { return this.lv[i] - (z === T.RES ? Math.min(24, this.indPen[i]) : 0); }
 
   tick() {
@@ -258,16 +266,19 @@ export class Sim {
       if (lvl === 1 && d < -0.35 && rnd() < 0.05) { w.level[i] = 0; this.needAn = true; }
     }
     this.recount();
+    if (this.day % 5 === 0) this.checkGoals();
     if (this.day % 30 === 0) this.monthly();
   }
 
   monthly() {
     const served = 0.5 + 0.5 * (1 - this.net.unserved);
-    const inc = (this.pop * (this.tax.r / 100) * 14 + this.cJobs * (this.tax.c / 100) * 16 + this.iJobs * (this.tax.i / 100) * 16) * served;
-    let wires = 0; for (let i = 0; i < N * N; i++) if (this.w.wire[i]) wires += this.w.wire[i] === 2 ? 0.4 : 0.2;
-    const exp = this.roads * 0.6 + this.parks * 1.5 + this.net.upkeep + wires;
+    this.grant = Math.round(Math.max(0, 300 * (1 - this.pop / 1200)));       // regional grant that tapers off as the town grows
+    const inc = (this.pop * (this.tax.r / 100) * 22 + this.cJobs * (this.tax.c / 100) * 22 + this.iJobs * (this.tax.i / 100) * 22) * served + this.grant;
+    let wires = 0; for (let i = 0; i < N * N; i++) if (this.w.wire[i]) wires += this.w.wire[i] === 2 ? 0.3 : 0.15;
+    const exp = this.roads * 0.4 + this.parks * 1 + this.net.upkeep + wires + this.ordCost();
     this.lastIncome = Math.round(inc); this.lastExpense = Math.round(exp);
     this.money += this.lastIncome - this.lastExpense;
+    this.streak = this.lastIncome > this.lastExpense ? this.streak + 1 : 0;
     this.events.push({ type: 'month', income: this.lastIncome, expense: this.lastExpense });
   }
 

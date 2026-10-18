@@ -1,10 +1,12 @@
 import { World, N, T } from './world.js';
 import { Sim, COST } from './sim.js';
 import { BY_KEY, BT } from './buildings.js';
+import { ORD } from './rules.js';
 import { Renderer } from './renderer.js';
 import { Traffic, Trucks } from './cars.js';
 import { Agents } from './agents.js';
 import { siteInfo } from './construction.js';
+import { Disasters } from './disasters.js';
 import { clamp, mulberry32 } from './util.js';
 
 const SAVE_KEY = 'skyline.save.v1';
@@ -24,7 +26,7 @@ export class Game {
   }
   get cars() { return this.traffic.cars.concat(this.agents.drivers); }
   get people() { return this.agents.walkers; }
-  get trucks() { return this.garbage.trucks; }
+  get trucks() { return this.garbage.trucks.concat(this.disasters.responders); }
   newCity(seed, silent) {
     this.world = new World(seed);
     this.sim = new Sim(this.world); this.sim.defer = true;
@@ -32,6 +34,7 @@ export class Game {
     this.sites = new Map();
     this.agents = new Agents(this.world, mulberry32(seed + 4), (i) => this.sites.has(i));
     this.garbage = new Trucks(this.world, mulberry32(seed + 5), () => this.sim.facilities);
+    this.disasters = new Disasters(this);
     this.fitCamera();
     this.dirtySave = true;
     if (!silent) this.hooks.toast && this.hooks.toast('New city founded');
@@ -59,6 +62,7 @@ export class Game {
       this.sites = new Map();
       this.agents = new Agents(this.world, mulberry32(this.world.seed + 4), (i) => this.sites.has(i));
       this.garbage = new Trucks(this.world, mulberry32(this.world.seed + 5), () => this.sim.facilities);
+      this.disasters = new Disasters(this);
       if (o.cam) this.cam = o.cam; else this.fitCamera();
       this.clock = o.clock || 20;
       return true;
@@ -68,9 +72,15 @@ export class Game {
   setSpeed(s) { this.speed = s; }
   setTime(s) { this.timeSetting = s; }
   setOverlay(o) { this.overlay = o; }
+  setOrd(k, on) { this.sim.setOrd(k, on); this.dirtySave = true; }
+  setDisasters(v) { this.sim.disasters = v; this.dirtySave = true; }
+  trigger(k) { this.disasters.trigger(k); }
   stats() {
     const s = this.sim;
-    return { money: Math.floor(s.money), pop: s.pop, date: s.dateLabel(), rd: s.rd, cd: s.cd, id: s.id, happy: s.happiness, tax: { ...s.tax }, income: s.lastIncome, expense: s.lastExpense, bld: s.bld, roads: s.roads, parks: s.parks, jobs: s.cJobs + s.iJobs, speed: this.speed, mode: this.mode, time: `${String(Math.floor(this.hour)).padStart(2, '0')}:${String(Math.floor((this.hour % 1) * 60)).padStart(2, '0')}`, citizens: this.agents.stats.total, employed: this.agents.stats.employed, tSup: s.net.tSup, tDem: s.net.tDem, wasteUn: s.net.wasteUn, pSup: s.net.pSup, pDem: s.net.pDem, wSup: s.net.wSup, wDem: s.net.wDem, upkeep: Math.round(s.net.upkeep), crime: Math.round(s.net.crimeAvg), poll: Math.round(s.net.pollAvg), cov: { police: s.net.police, fire: s.net.fire, health: s.net.health, edu: s.net.edu, fun: s.net.fun }, overlay: this.overlay };
+    return { money: Math.floor(s.money), pop: s.pop, date: s.dateLabel(), rd: s.rd, cd: s.cd, id: s.id, happy: s.happiness, tax: { ...s.tax }, income: s.lastIncome, expense: s.lastExpense, bld: s.bld, roads: s.roads, parks: s.parks, jobs: s.cJobs + s.iJobs, speed: this.speed, mode: this.mode, time: `${String(Math.floor(this.hour)).padStart(2, '0')}:${String(Math.floor((this.hour % 1) * 60)).padStart(2, '0')}`, citizens: this.agents.stats.total, employed: this.agents.stats.employed, tSup: s.net.tSup, tDem: s.net.tDem, wasteUn: s.net.wasteUn, pSup: s.net.pSup, pDem: s.net.pDem, wSup: s.net.wSup, wDem: s.net.wDem, upkeep: Math.round(s.net.upkeep), crime: Math.round(s.net.crimeAvg), poll: Math.round(s.net.pollAvg), cov: { police: s.net.police, fire: s.net.fire, health: s.net.health, edu: s.net.edu, fun: s.net.fun }, overlay: this.overlay,
+      grant: s.grant || Math.round(Math.max(0, 300 * (1 - s.pop / 1200))), streak: s.streak, ordCost: s.ordCost(), disastersLevel: s.disasters,
+      ords: Object.entries(ORD).map(([key, o]) => ({ key, ...o, on: !!s.ord[key] })), goals: s.goalStatus(),
+      alerts: [this.disasters.fires.size ? `Fire x${this.disasters.fires.size}` : '', this.disasters.tornado ? 'Tornado' : '', this.disasters.ufo ? 'UFO' : ''].filter(Boolean) };
   }
   setTax(k, v) { this.sim.tax[k] = clamp(v, 0, 20); this.sim.recount(); this.dirtySave = true; }
 
@@ -205,6 +215,7 @@ export class Game {
     while (s.events.length) {
       const ev = s.events.shift();
       if (ev.type === 'month') this.hooks.month && this.hooks.month(ev);
+      else if (ev.type === 'goal') this.hooks.goal && this.hooks.goal(ev);
       else if (ev.type === 'built' && !this.sites.has(ev.i)) { const info = siteInfo(ev); this.sites.set(ev.i, { i: ev.i, kind: ev.kind, from: ev.from, to: ev.to, pv: ev.pv || 0, t: 0, ...info }); }
     }
     for (const [i, site] of this.sites) { site.t += dt * sp; if (site.t >= site.dur) { this.sites.delete(i); s.finish(i); } }
@@ -216,6 +227,7 @@ export class Game {
     this.traffic.update(dt * sp, Math.floor(carT * 0.3));
     this.agents.update(dt * sp, dt, this.abs, Math.min(140, Math.floor(s.pop / 4)));
     this.garbage.update(dt * sp, Math.min(10, s.facilities.length * 2));
+    this.disasters.update(dt * sp);
     this.saveTimer += dt;
     if (this.saveTimer > 20) { this.saveTimer = 0; if (this.dirtySave) this.save(); }
   }

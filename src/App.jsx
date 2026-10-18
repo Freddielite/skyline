@@ -103,6 +103,7 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [cost, setCost] = useState(null);
   const [panel, setPanel] = useState(null);
+  const [tab, setTab] = useState('budget');
   const [timeSet, setTimeSet] = useState('auto');
   const [ui, setUi] = useState(() => { try { return localStorage.getItem('skyline.hideui') !== '1'; } catch (e) { return true; } });
   const toastT = useRef(0);
@@ -113,6 +114,7 @@ export default function App() {
     const g = new Game(cvRef.current, {
       toast: say,
       cost: (c, n, name) => setCost(n ? { c, n, name } : null),
+      goal: (e) => say(`Goal complete: ${e.title}  +${money(e.reward)}`),
       month: (e) => say(`Month closed: ${e.income - e.expense >= 0 ? '+' : ''}${money(e.income - e.expense)}`),
     });
     gameRef.current = g; window.__game = g;
@@ -159,6 +161,7 @@ export default function App() {
 
           {ui && cost && tool && <div className="costtag">{cost.name ? cost.name + ' · ' : cost.n + ' tiles · '}{money(cost.c)}</div>}
           {ui && view && <button className="viewtag" onClick={() => setView(null)}>{view.label} view <Icon n="close" size={14} /></button>}
+          {ui && st.alerts.length > 0 && <div className="alerts" role="alert">{st.alerts.map((a) => <span key={a}>{a}</span>)}</div>}
           {toast && <div className="toast" role="status">{toast}</div>}
 
           {ui && <nav className="dock" aria-label="Build tools">
@@ -176,7 +179,7 @@ export default function App() {
             </div>
             <div className="sys">
               <button className={'tool' + (st.overlay ? ' on' : '')} onClick={() => toggle('views')}><Icon n="eye" /><span>Views</span><em>&nbsp;</em></button>
-              <button className="tool" onClick={() => toggle('budget')}><Icon n="coin" /><span>Budget</span><em>&nbsp;</em></button>
+              <button className="tool" onClick={() => toggle('budget')}><Icon n="coin" /><span>City</span><em>&nbsp;</em></button>
               <button className="tool" onClick={() => toggle('menu')}><Icon n="menu" /><span>Menu</span><em>&nbsp;</em></button>
               <button className="tool" onClick={flipUi} aria-label="Hide interface"><Icon n="eyeoff" /><span>Hide</span><em>&nbsp;</em></button>
             </div>
@@ -193,30 +196,62 @@ export default function App() {
             </section>
           )}
           {ui && panel === 'budget' && (
-            <section className="sheet" aria-label="Budget">
-              <div className="sheet-h"><h2>Budget</h2><button className="x" onClick={() => setPanel(null)} aria-label="Close"><Icon n="close" size={18} /></button></div>
-              <div className="ledger">
-                <div><span>Last month income</span><b className="pos">{money(st.income)}</b></div>
-                <div><span>Last month upkeep</span><b className="neg">{money(-st.expense)}</b></div>
-                <div><span>Service &amp; utility upkeep</span><b>{money(st.upkeep)}</b></div>
-                <div><span>Power supply / demand</span><b className={supplyClass(st.pSup, st.pDem) === 'ok' ? 'pos' : 'neg'}>{st.pSup} / {st.pDem}</b></div>
-                <div><span>Water supply / demand</span><b className={supplyClass(st.wSup, st.wDem) === 'ok' ? 'pos' : 'neg'}>{st.wSup} / {st.wDem}</b></div>
-                <div><span>Waste capacity / output</span><b className={supplyClass(st.tSup, st.tDem) === 'ok' ? 'pos' : 'neg'}>{st.tSup} / {st.tDem}</b></div>
-                <div><span>Uncollected waste</span><b className={st.wasteUn > 0.2 ? 'neg' : ''}>{Math.round(st.wasteUn * 100)}% of buildings</b></div>
-                <div><span>Crime / pollution</span><b>{st.crime} / {st.poll}</b></div>
-                <div><span>Police · Fire · Health · School · Fun</span><b>{['police', 'fire', 'health', 'edu', 'fun'].map((k) => Math.round(st.cov[k] * 100) + '%').join(' · ')}</b></div>
-                <div><span>Citizens · with a job</span><b>{st.citizens} · {st.employed}</b></div>
-                <div><span>Buildings (R / C / I)</span><b>{st.bld.r} / {st.bld.c} / {st.bld.i}</b></div>
+            <section className="sheet" aria-label="City">
+              <div className="sheet-h"><h2>City</h2><button className="x" onClick={() => setPanel(null)} aria-label="Close"><Icon n="close" size={18} /></button></div>
+              <div className="seg three">
+                {[['budget', 'Budget'], ['rules', 'Rules'], ['goals', 'Goals']].map(([k, l]) => (
+                  <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}{k === 'goals' ? ` ${st.goals.filter((x) => x.done).length}/${st.goals.length}` : ''}</button>
+                ))}
               </div>
-              <h3>Tax rates</h3>
-              {[['r', 'Residential', '#4caf50'], ['c', 'Commercial', '#3d8bd9'], ['i', 'Industrial', '#e0b526']].map(([k, l, c]) => (
-                <label className="tax" key={k}>
-                  <span><i style={{ background: c }} />{l}</span>
-                  <input type="range" min="0" max="20" value={st.tax[k]} onChange={(e) => setTax(k, +e.target.value)} />
-                  <b>{st.tax[k]}%</b>
-                </label>
-              ))}
-              <p className="hint">Higher taxes raise income but slow growth and lower happiness. Buildings without power or water pay less, and uncollected garbage hurts happiness.</p>
+              {tab === 'budget' && (<>
+                <div className="ledger">
+                  <div><span>Last month income</span><b className="pos">{money(st.income)}</b></div>
+                  <div><span>Last month upkeep</span><b className="neg">{money(-st.expense)}</b></div>
+                  <div><span>Regional grant (fades as you grow)</span><b>{money(st.grant)}</b></div>
+                  <div><span>Service &amp; utility upkeep</span><b>{money(st.upkeep)}</b></div>
+                  <div><span>Ordinances</span><b>{money(st.ordCost)}</b></div>
+                  <div><span>Power supply / demand</span><b className={supplyClass(st.pSup, st.pDem) === 'ok' ? 'pos' : 'neg'}>{st.pSup} / {st.pDem}</b></div>
+                  <div><span>Water supply / demand</span><b className={supplyClass(st.wSup, st.wDem) === 'ok' ? 'pos' : 'neg'}>{st.wSup} / {st.wDem}</b></div>
+                  <div><span>Waste capacity / output</span><b className={supplyClass(st.tSup, st.tDem) === 'ok' ? 'pos' : 'neg'}>{st.tSup} / {st.tDem}</b></div>
+                  <div><span>Uncollected waste</span><b className={st.wasteUn > 0.2 ? 'neg' : ''}>{Math.round(st.wasteUn * 100)}% of buildings</b></div>
+                  <div><span>Crime / pollution</span><b>{st.crime} / {st.poll}</b></div>
+                  <div><span>Police · Fire · Health · School · Fun</span><b>{['police', 'fire', 'health', 'edu', 'fun'].map((k) => Math.round(st.cov[k] * 100) + '%').join(' · ')}</b></div>
+                  <div><span>Citizens · with a job</span><b>{st.citizens} · {st.employed}</b></div>
+                  <div><span>Buildings (R / C / I)</span><b>{st.bld.r} / {st.bld.c} / {st.bld.i}</b></div>
+                </div>
+                <h3>Tax rates</h3>
+                {[['r', 'Residential', '#4caf50'], ['c', 'Commercial', '#3d8bd9'], ['i', 'Industrial', '#e0b526']].map(([k, l, c]) => (
+                  <label className="tax" key={k}>
+                    <span><i style={{ background: c }} />{l}</span>
+                    <input type="range" min="0" max="20" value={st.tax[k]} onChange={(e) => setTax(k, +e.target.value)} />
+                    <b>{st.tax[k]}%</b>
+                  </label>
+                ))}
+                <p className="hint">Higher taxes raise income but slow growth and lower happiness. Buildings without power or water pay less, and uncollected garbage hurts happiness.</p>
+              </>)}
+              {tab === 'rules' && (<>
+                <p className="hint">Ordinances cost money every month. Pick the ones that fix your city&rsquo;s biggest problem.</p>
+                <div className="ords">
+                  {st.ords.map((o) => (
+                    <button key={o.key} className={'ord' + (o.on ? ' on' : '')} onClick={() => { g.setOrd(o.key, !o.on); setSt(g.stats()); }} aria-pressed={o.on}>
+                      <span><b>{o.name}</b><em>{o.desc}</em></span>
+                      <span className="sw"><i /></span><small>{money(o.cost)}/mo</small>
+                    </button>
+                  ))}
+                </div>
+              </>)}
+              {tab === 'goals' && (
+                <div className="goals">
+                  {st.goals.map((x) => (
+                    <div key={x.id} className={'goal' + (x.done ? ' done' : '')}>
+                      <div className="gh"><b>{x.title}</b><span>{x.done ? 'Done' : '+' + money(x.reward)}</span></div>
+                      <p>{x.desc}</p>
+                      <div className="bar"><i style={{ width: Math.round(x.progress * 100) + '%' }} /></div>
+                      {!x.done && <small>{x.label}</small>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           )}
           {ui && panel === 'menu' && (
@@ -226,6 +261,17 @@ export default function App() {
               <div className="seg">
                 {[['auto', 'Auto'], [0, 'Day'], [1, 'Dusk'], [2, 'Night']].map(([v, l]) => (
                   <button key={l} className={timeSet === v ? 'on' : ''} onClick={() => pickTime(v)}>{l}</button>
+                ))}
+              </div>
+              <h3>Disasters</h3>
+              <div className="seg">
+                {[[0, 'Off'], [1, 'Rare'], [2, 'Normal'], [3, 'Chaos']].map(([v, l]) => (
+                  <button key={l} className={st.disastersLevel === v ? 'on' : ''} onClick={() => { g.setDisasters(v); setSt(g.stats()); }}>{l}</button>
+                ))}
+              </div>
+              <div className="seg three" style={{ marginTop: 6 }}>
+                {[['fire', 'Fire'], ['tornado', 'Tornado'], ['ufo', 'UFO']].map(([k, l]) => (
+                  <button key={k} onClick={() => { g.trigger(k); setPanel(null); }}>Start {l}</button>
                 ))}
               </div>
               <div className="rows">
