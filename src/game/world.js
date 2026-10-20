@@ -1,19 +1,19 @@
 import { mulberry32, clamp } from './util.js';
 
-export const N = 64;
+export const N = 96;
 export const T = { EMPTY: 0, ROAD: 1, RES: 2, COM: 3, IND: 4, PARK: 5, SVC: 6 };
 export const TERRAIN = { GRASS: 0, WATER: 1, SAND: 2 };
 
 function makeNoise(seed) {
   const rnd = mulberry32(seed);
-  const g = new Float32Array(33 * 33);
+  const g = new Float32Array(80 * 80);
   for (let i = 0; i < g.length; i++) g[i] = rnd();
   const sm = (t) => t * t * (3 - 2 * t);
   return (x, y) => {
     const xi = Math.floor(x), yi = Math.floor(y);
     const fx = sm(x - xi), fy = sm(y - yi);
-    const a = g[(yi % 33) * 33 + (xi % 33)], b = g[(yi % 33) * 33 + ((xi + 1) % 33)];
-    const c = g[((yi + 1) % 33) * 33 + (xi % 33)], d = g[((yi + 1) % 33) * 33 + ((xi + 1) % 33)];
+    const a = g[(yi % 80) * 80 + (xi % 80)], b = g[(yi % 80) * 80 + ((xi + 1) % 80)];
+    const c = g[((yi + 1) % 80) * 80 + (xi % 80)], d = g[((yi + 1) % 80) * 80 + ((xi + 1) % 80)];
     return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
   };
 }
@@ -69,11 +69,16 @@ export class World {
   }
   toJSON() {
     const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); };
-    return { seed: this.seed, terrain: b64(this.terrain), tree: b64(this.tree), kind: b64(this.kind), level: b64(this.level), variant: b64(this.variant), bt: b64(this.bt), bo: b64(this.bo), wire: b64(this.wire), pipe: b64(this.pipe) };
+    return { n: N, seed: this.seed, terrain: b64(this.terrain), tree: b64(this.tree), kind: b64(this.kind), level: b64(this.level), variant: b64(this.variant), bt: b64(this.bt), bo: b64(this.bo), wire: b64(this.wire), pipe: b64(this.pipe) };
   }
   static fromJSON(o) {
-    const w = new World(o.seed);
-    const un = (s, arr) => { const b = atob(s); for (let i = 0; i < arr.length && i < b.length; i++) arr[i] = b.charCodeAt(i); };
+    const on = o.n || 64, w = new World(o.seed), off = (N - on) >> 1;
+    w.migrated = on !== N;          // a smaller city from an older version is placed in the middle of the bigger map
+    const un = (str, arr) => {
+      const b = atob(str);
+      if (!w.migrated) { for (let i = 0; i < arr.length && i < b.length; i++) arr[i] = b.charCodeAt(i); return; }
+      for (let y = 0; y < on; y++) for (let x = 0; x < on; x++) arr[(y + off) * N + x + off] = b.charCodeAt(y * on + x);
+    };
     un(o.terrain, w.terrain); un(o.tree, w.tree); un(o.kind, w.kind); un(o.level, w.level); un(o.variant, w.variant);
     if (o.bt) { un(o.bt, w.bt); un(o.bo, w.bo); }
     if (o.wire) un(o.wire, w.wire);

@@ -16,7 +16,7 @@ export const STYLES = {
   earth: { excavator: true, piles: true, wipe: true, workers: 2 },
 };
 const REAL_H = { [T.RES]: [30, 54, 94], [T.COM]: [32, 66, 140], [T.IND]: [30, 46, 104], [T.PARK]: [22, 22, 22] };
-const SVC_H = { pump: 52, treat: 80, coal: 120, wind: 78, water: 66, police: 34, fire: 54, clinic: 48, school: 66, police2: 58, fire2: 92, hospital: 82, university: 104, plaza: 12, library: 40, museum: 60, stadium: 80, dump: 22, recycle: 40, wte: 112 };
+const SVC_H = { busstop: 30, busterm: 46, pump: 52, treat: 80, coal: 120, wind: 78, water: 66, police: 34, fire: 54, clinic: 48, school: 66, police2: 58, fire2: 92, hospital: 82, university: 104, plaza: 12, library: 40, museum: 60, stadium: 80, dump: 22, recycle: 40, wte: 112 };
 
 export function siteInfo(ev) {
   if (ev.bt) {

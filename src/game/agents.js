@@ -2,6 +2,7 @@
 import { N, T } from './world.js';
 import { BT } from './buildings.js';
 import { POP_CAP, COM_CAP, IND_CAP } from './sim.js';
+import { mustStop } from './traffic.js';
 
 const D4 = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 const WALK = 0.55, DRIVE = 1.7, CAR_ABOVE = 7;       // tiles per second, trip length (tiles) above which people drive
@@ -11,7 +12,8 @@ export class Agents {
   constructor(world, rnd, busy) {
     this.w = world; this.rnd = rnd; this.busy = busy || (() => false);
     this.list = []; this.walkers = []; this.drivers = []; this.cache = new Map();
-    this.homes = []; this.jobs = []; this.spots = []; this.jobAt = new Map(); this.refreshT = 99; this.stats = { employed: 0, moving: 0, total: 0 };
+    this.homes = []; this.jobs = []; this.spots = []; this.jobAt = new Map(); this.refreshT = 99; this.stats = { employed: 0, moving: 0, total: 0, riding: 0 };
+    this.transit = null; this.sigT = 0;
   }
 
   // ---- what exists in the city ----
@@ -51,7 +53,7 @@ export class Agents {
     return best;
   }
   bfs(s, e) {
-    const key = s * 4096 + e, hit = this.cache.get(key); if (hit !== undefined) return hit;
+    const key = s * N * N + e, hit = this.cache.get(key); if (hit !== undefined) return hit;
     const w = this.w, prev = new Int16Array(N * N).fill(-1), q = [s]; prev[s] = s;
     for (let h = 0; h < q.length; h++) {
       const c = q[h]; if (c === e) break;
@@ -94,14 +96,30 @@ export class Agents {
   // ---- trips ----
   go(a, dest, st, abs) {
     const src = st === 'toHome' ? (a.st === 'out' ? a.spot : a.work) : a.st === 'out' ? a.spot : a.home;
-    const pts = this.route(src || a.home, dest); if (!pts) return false;
+    const from = src || a.home;
+    const pts = this.route(from, dest); if (!pts) return false;
     const tiles = pts.length - 2;
-    a.pts = pts; a.seg = 0; a.t = 0; a.vis = true; a.idle = false; a.st = st;
+    a.vis = true; a.idle = false; a.still = false;
+    // long trips without a car (or by choice) go by bus when stops are close at both ends
+    if (tiles > 9 && this.transit && this.transit.ready && (!a.hasCar || this.rnd() < 0.12)) {
+      const plan = this.transit.plan(from, dest);
+      const p1 = plan && this.route(from, plan.A);
+      if (p1) {
+        a.plan = { A: plan.A, B: plan.B, dest, final: st }; a.pts = p1; a.seg = 0; a.t = 0; a.st = 'toStop';
+        a.ped = true; a.speed = WALK * (0.9 + this.rnd() * 0.25); a.dest = dest; return true;
+      }
+    }
+    a.pts = pts; a.seg = 0; a.t = 0; a.st = st; a.plan = null;
     a.ped = !(a.hasCar && tiles > CAR_ABOVE); a.speed = a.ped ? WALK * (0.9 + this.rnd() * 0.25) : DRIVE * (0.85 + this.rnd() * 0.3);
     a.dest = dest; return true;
   }
   arrive(a, abs) {
-    a.vis = false; a.pts = null; a.idle = false;
+    a.vis = false; a.pts = null; a.idle = false; a.still = false;
+    if (a.st === 'toStop') {
+      const A = a.plan.A; a.st = 'waiting'; a.vis = true; a.still = true; a.ped = true; a.waitUntil = abs + 3;
+      a.px = A.x + A.w / 2 + rr(this.rnd, -0.25, 0.25); a.py = A.y + A.d / 2 + rr(this.rnd, -0.25, 0.25); return;
+    }
+    if (a.st === 'fromStop') { a.st = a.plan.final; a.plan = null; }
     if (a.st === 'toWork') a.st = 'work';
     else if (a.st === 'toHome') a.st = 'home';
     else if (a.st === 'toOut') {
@@ -110,7 +128,7 @@ export class Agents {
     }
   }
   pickSpot(a) {
-    const shops = this.jobs.filter((j) => j.shop), pool = this.spots.concat(shops, shops);
+    const shops = this.jobs.filter((j) => j.shop), big = this.spots.filter((p) => !p.park && p.w >= 2), pool = this.spots.concat(shops, shops, big, big);
     if (!pool.length) return null;
     return pool[Math.floor(this.rnd() * pool.length)];
   }
@@ -124,6 +142,11 @@ export class Agents {
       }
     } else if (a.st === 'work') {
       if (hour >= a.endWork || hour < a.goWork - 2) this.go(a, a.home, 'toHome', abs);
+    } else if (a.st === 'waiting') {
+      if (abs >= a.waitUntil) {                            // no bus came: walk the whole way
+        const pts = this.route(a.plan.A, a.plan.dest);
+        if (pts) { a.pts = pts; a.seg = 0; a.t = 0; a.st = 'fromStop'; a.vis = true; a.still = false; a.ped = true; } else { a.st = a.plan.final === 'toWork' ? 'work' : 'home'; a.vis = false; a.plan = null; }
+      }
     } else if (a.st === 'out') {
       if (abs >= a.stayUntil || hour >= 22.5) { if (!this.go(a, a.home, 'toHome', abs)) { a.st = 'home'; a.vis = false; } }
     }
@@ -131,8 +154,13 @@ export class Agents {
 
   move(a, dist, abs) {
     const p = a.pts;
+    if (a.hold && !a.ped) dist = 0;                                   // queueing behind another vehicle
     while (dist > 0 && a.pts) {
       const A = p[a.seg], B = p[a.seg + 1], len = Math.hypot(B[0] - A[0], B[1] - A[1]) || 0.001, left = (1 - a.t) * len;
+      if (!a.ped && a.seg + 1 < p.length - 1 && a.t < 0.46 && (1 - a.t) * len > 0) {      // stop line before a red signal
+        const ux = Math.sign(B[0] - A[0]), uy = Math.sign(B[1] - A[1]);
+        if (mustStop(this.w, Math.floor(B[0]), Math.floor(B[1]), ux, uy, this.sigT) && a.t + dist / len > 0.46) { dist = Math.max(0, (0.46 - a.t) * len); a.t = Math.min(0.46, a.t + dist / len); dist = 0; break; }
+      }
       if (dist < left) { a.t += dist / len; dist = 0; }
       else { dist -= left; a.seg++; a.t = 0; if (a.seg >= p.length - 1) { this.arrive(a, abs); return; } }
     }
@@ -151,14 +179,15 @@ export class Agents {
   }
 
   // dt: game-time seconds, realDt: wall seconds, abs: absolute clock hours
-  update(dt, realDt, abs, target) {
+  update(dt, realDt, abs, target, sigT = 0) {
+    this.sigT = sigT;
     const hour = abs % 24, day = Math.floor(abs / 24);
     this.refreshT += realDt;
     if (this.refreshT > 2) { this.refreshT = 0; this.refresh(); }
     // keep the head-count in line with the population
     if (this.list.length < target && this.homes.length) { for (let k = 0; k < 2 && this.list.length < target; k++) this.spawn(hour, day); }
     else if (this.list.length > target) { const k = this.list.findIndex((a) => !a.vis); if (k >= 0) this.list.splice(k, 1); }
-    let moving = 0, emp = 0;
+    let moving = 0, emp = 0, riding = 0;
     this.walkers.length = 0; this.drivers.length = 0;
     for (const a of this.list) {
       if (a.work) emp++;
@@ -167,8 +196,9 @@ export class Agents {
         else this.think(a, hour, day, abs);
         if (a.idle) this.wander(a, dt);
       }
+      if (a.st === 'riding') riding++;
       if (a.vis) { moving++; (a.ped ? this.walkers : this.drivers).push(a); }
     }
-    this.stats = { employed: emp, moving, total: this.list.length };
+    this.stats = { employed: emp, moving, total: this.list.length, riding };
   }
 }

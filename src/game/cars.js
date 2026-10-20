@@ -1,4 +1,5 @@
 import { N } from './world.js';
+import { mustStop } from './traffic.js';
 const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 
 class Mover {
@@ -42,7 +43,10 @@ class Mover {
     for (let i = this.list.length - 1; i >= 0; i--) {
       const c = this.list[i];
       if (!this.w.isRoad(c.tx, c.ty)) { this.list.splice(i, 1); continue; }
-      c.t += dt * c.speed;
+      let nt = c.t + (c.hold ? 0 : dt * c.speed);
+      const nx = c.tx + DIRS[c.d][0], ny = c.ty + DIRS[c.d][1];
+      if (nt > 0.8 && c.t <= 0.8 && mustStop(this.w, nx, ny, DIRS[c.d][0], DIRS[c.d][1], this.sigT || 0)) nt = 0.8;   // wait at the stop line
+      c.t = nt;
       while (c.t >= 1) {
         c.t -= 1;
         c.tx += DIRS[c.d][0]; c.ty += DIRS[c.d][1];
@@ -67,7 +71,7 @@ export class Traffic extends Mover {
   constructor(world, rnd) { super(world, rnd); this.needBuilt = false; }
   get cars() { return this.list; }
   make(x, y, d) { return { tx: x, ty: y, d, t: this.rnd() * 0.8, speed: 0.9 + this.rnd() * 0.7, col: Math.floor(this.rnd() * 8), px: 0, py: 0, dx: DIRS[d][0], dy: DIRS[d][1], off: 0.13 }; }
-  update(dt, target) { this.balance(dt, target, 0.35); this.step(dt, 0); }
+  update(dt, target, sigT) { this.sigT = sigT; this.balance(dt, target, 0.35); this.step(dt, 0); }
 }
 
 export class Walkers extends Mover {
@@ -94,5 +98,5 @@ export class Trucks extends Mover {
     }
     return super.spawn(false);
   }
-  update(dt, target) { this.balance(dt, target, 0.8); this.step(dt, 0); }
+  update(dt, target, sigT) { this.sigT = sigT; this.balance(dt, target, 0.8); this.step(dt, 0); }
 }

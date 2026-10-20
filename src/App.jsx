@@ -36,6 +36,7 @@ const I = {
   eyeoff: 'M3 3l18 18M10.6 6.1A9.8 9.8 0 0112 6c6 0 10 6 10 6a17 17 0 01-3.2 3.7M6.5 6.7C3.7 8.6 2 12 2 12s4 7 10 7a9.6 9.6 0 004.2-1M9.9 9.9a3 3 0 004.2 4.2',
   pipe: 'M3 8h9a3 3 0 013 3v10M3 14h5M15 21h6',
   undo: 'M9 14L4 9l5-5M4 9h10a6 6 0 010 12h-4',
+  bus: 'M5 4h14a1 1 0 011 1v11H4V5a1 1 0 011-1zM4 11h16M7 16v3m10-3v3M7.5 13.5h.01M16.5 13.5h.01',
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10-3a3 3 0 100 6 3 3 0 000-6z',
 };
 const Icon = ({ n, size = 22, fill }) => (
@@ -69,6 +70,8 @@ const T = {
   fire2: { id: 'fire2', label: 'Fire HQ', icon: 'flame', cost: 2400 },
   hospital: { id: 'hospital', label: 'Hospital', icon: 'cross', cost: 3400 },
   university: { id: 'university', label: 'University', icon: 'book', cost: 6500 },
+  busstop: { id: 'busstop', label: 'Bus stop', icon: 'bus', cost: 150 },
+  busterm: { id: 'busterm', label: 'Terminal', icon: 'bus', cost: 2200 },
   plaza: { id: 'plaza', label: 'Plaza', icon: 'tree', cost: 900 },
   library: { id: 'library', label: 'Library', icon: 'book', cost: 700 },
   museum: { id: 'museum', label: 'Museum', icon: 'bank', cost: 2200 },
@@ -79,10 +82,11 @@ const CATS = [
   { id: 'util', label: 'Power & water', icon: 'bolt', tools: ['move', 'coal', 'wind', 'wire', 'cable', 'water', 'pump', 'treat', 'pipe', 'clear'] },
   { id: 'waste', label: 'Waste', icon: 'trash', tools: ['move', 'dump', 'recycle', 'wte', 'clear'] },
   { id: 'svc', label: 'Services', icon: 'shield', tools: ['move', 'police', 'police2', 'fire', 'fire2', 'clinic', 'hospital', 'school', 'university', 'clear'] },
+  { id: 'transit', label: 'Transit', icon: 'bus', tools: ['move', 'busstop', 'busterm', 'clear'] },
   { id: 'fun', label: 'Amenities', icon: 'ball', tools: ['move', 'plaza', 'library', 'museum', 'stadium', 'clear'] },
 ];
 const VIEWS = [
-  { id: 'value', label: 'Land value' }, { id: 'crime', label: 'Crime' }, { id: 'pollution', label: 'Pollution' },
+  { id: 'traffic', label: 'Traffic' }, { id: 'transit', label: 'Transit' }, { id: 'value', label: 'Land value' }, { id: 'crime', label: 'Crime' }, { id: 'pollution', label: 'Pollution' },
   { id: 'power', label: 'Power' }, { id: 'water', label: 'Water' },
   { id: 'waste', label: 'Waste' }, { id: 'fun', label: 'Amenities' },
   { id: 'police', label: 'Police' }, { id: 'fire', label: 'Fire' }, { id: 'health', label: 'Health' }, { id: 'edu', label: 'Education' },
@@ -187,7 +191,7 @@ export default function App() {
               </div>
             </div>
             <div className="sys">
-              <button className="tool undo" disabled={!st.canUndo} onClick={() => { g.undo(); setSt(g.stats()); }} aria-label="Undo last build" title={st.undoLabel ? 'Undo ' + st.undoLabel : 'Nothing to undo'}><Icon n="undo" /><span>Undo</span><em>{st.canUndo ? '\u00d7' + st.canUndo : '\u00a0'}</em></button>
+              {st.canUndo > 0 && <button className="tool undo" onClick={() => { g.undo(); setSt(g.stats()); }} aria-label="Undo last build" title={'Undo ' + st.undoLabel}><Icon n="undo" /><span>Undo</span><em>{st.undoLeft}s</em></button>}
               <button className={'tool' + (st.overlay ? ' on' : '')} onClick={() => toggle('views')}><Icon n="eye" /><span>Views</span><em>&nbsp;</em></button>
               <button className="tool" onClick={() => toggle('budget')}><Icon n="coin" /><span>City</span><em>&nbsp;</em></button>
               <button className="tool" onClick={() => toggle('menu')}><Icon n="menu" /><span>Menu</span><em>&nbsp;</em></button>
@@ -271,6 +275,12 @@ export default function App() {
               <div className="seg">
                 {[['auto', 'Auto'], [0, 'Day'], [1, 'Dusk'], [2, 'Night']].map(([v, l]) => (
                   <button key={l} className={timeSet === v ? 'on' : ''} onClick={() => pickTime(v)}>{l}</button>
+                ))}
+              </div>
+              <h3>Weather</h3>
+              <div className="seg three">
+                {[['auto', 'Auto'], ['clear', 'Clear'], ['rain', 'Rain']].map(([v, l]) => (
+                  <button key={v} className={st.weather === v ? 'on' : ''} onClick={() => { g.setWeather(v); setSt(g.stats()); }}>{l}</button>
                 ))}
               </div>
               <h3>Disasters</h3>

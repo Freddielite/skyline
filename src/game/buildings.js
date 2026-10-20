@@ -20,6 +20,8 @@ export const BT = {
   17: { id: 17, key: 'recycle', name: 'Recycling center', w: 2, d: 2, cost: 3200, upkeep: 100, waste: 260, radius: 14, pollute: 3, pr: 4, use: 8, cat: 'waste' },
   19: { id: 19, key: 'pump', name: 'Pumping station', w: 2, d: 2, cost: 2600, upkeep: 90, water: 520, use: 5, cat: 'util' },
   20: { id: 20, key: 'treat', name: 'Water treatment', w: 3, d: 3, cost: 7500, upkeep: 260, water: 1500, use: 14, cat: 'util' },
+  21: { id: 21, key: 'busstop', name: 'Bus stop', w: 1, d: 1, cost: 150, upkeep: 4, radius: 6, cov: [['transit', 0.5]], road: true, cat: 'transit' },
+  22: { id: 22, key: 'busterm', name: 'Bus terminal', w: 2, d: 2, cost: 2200, upkeep: 100, radius: 12, use: 4, cov: [['transit', 1.2]], road: true, cat: 'transit' },
   18: { id: 18, key: 'wte', name: 'Waste-to-energy', w: 2, d: 2, cost: 5200, upkeep: 140, waste: 200, radius: 14, power: 40, pollute: 8, pr: 6, cat: 'waste' },
 };
 export const BY_KEY = Object.fromEntries(Object.values(BT).map((b) => [b.key, b]));

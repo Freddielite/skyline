@@ -7,9 +7,13 @@ import { Traffic, Trucks } from './cars.js';
 import { Agents } from './agents.js';
 import { siteInfo } from './construction.js';
 import { Disasters } from './disasters.js';
+import { Transit } from './transit.js';
+import { Ambient } from './ambient.js';
+import { followPass } from './traffic.js';
 import { clamp, mulberry32 } from './util.js';
 
 const SAVE_KEY = 'skyline.save.v1';
+const UNDO_MS = 20000;                 // a build can only be undone shortly after you make it
 const TOOL_COST = { pipe: COST.pipe, wire: COST.wire, cable: COST.cable, road: COST.road, res: COST.zone, com: COST.zone, ind: COST.zone, park: COST.park, bulldoze: COST.bulldoze };
 for (const b of Object.values(BT)) TOOL_COST[b.key] = b.cost;
 
@@ -24,7 +28,13 @@ export class Game {
     this.load() || this.newCity(Math.floor(Math.random() * 100000), true);
     this.bind();
   }
-  get cars() { return this.traffic.cars.concat(this.agents.drivers); }
+  initWorldLife(seed) {
+    this.transit = new Transit(this.world, this.sim, this.agents, mulberry32(seed + 7));
+    this.agents.transit = this.transit;
+    this.ambient = new Ambient(this.world, mulberry32(seed + 8));
+    this.density = new Float32Array(N * N);
+  }
+  get cars() { return this.traffic.cars.concat(this.agents.drivers, this.transit.buses); }
   get people() { return this.agents.walkers; }
   get trucks() { return this.garbage.trucks.concat(this.disasters.responders); }
   newCity(seed, silent) {
@@ -34,7 +44,7 @@ export class Game {
     this.sites = new Map(); this.history = [];
     this.agents = new Agents(this.world, mulberry32(seed + 4), (i) => this.sites.has(i));
     this.garbage = new Trucks(this.world, mulberry32(seed + 5), () => this.sim.facilities);
-    this.disasters = new Disasters(this);
+    this.disasters = new Disasters(this); this.initWorldLife(seed);
     this.fitCamera();
     this.dirtySave = true;
     if (!silent) this.hooks.toast && this.hooks.toast('New city founded');
@@ -62,8 +72,8 @@ export class Game {
       this.sites = new Map();
       this.agents = new Agents(this.world, mulberry32(this.world.seed + 4), (i) => this.sites.has(i));
       this.garbage = new Trucks(this.world, mulberry32(this.world.seed + 5), () => this.sim.facilities);
-      this.disasters = new Disasters(this);
-      if (o.cam) this.cam = o.cam; else this.fitCamera();
+      this.disasters = new Disasters(this); this.initWorldLife(this.world.seed);
+      if (o.cam && !this.world.migrated) this.cam = o.cam; else this.fitCamera();
       this.clock = o.clock || 20;
       return true;
     } catch (e) { return false; }
@@ -72,13 +82,15 @@ export class Game {
   setSpeed(s) { this.speed = s; }
   setTime(s) { this.timeSetting = s; }
   setOverlay(o) { this.overlay = o; }
+  setWeather(v) { this.ambient.setting = v; }
   setOrd(k, on) { this.sim.setOrd(k, on); this.dirtySave = true; }
   setDisasters(v) { this.sim.disasters = v; this.dirtySave = true; }
   trigger(k) { this.disasters.trigger(k); }
   stats() {
     const s = this.sim;
     return { money: Math.floor(s.money), pop: s.pop, date: s.dateLabel(), rd: s.rd, cd: s.cd, id: s.id, happy: s.happiness, tax: { ...s.tax }, income: s.lastIncome, expense: s.lastExpense, bld: s.bld, roads: s.roads, parks: s.parks, jobs: s.cJobs + s.iJobs, speed: this.speed, mode: this.mode, time: `${String(Math.floor(this.hour)).padStart(2, '0')}:${String(Math.floor((this.hour % 1) * 60)).padStart(2, '0')}`, citizens: this.agents.stats.total, employed: this.agents.stats.employed, tSup: s.net.tSup, tDem: s.net.tDem, wasteUn: s.net.wasteUn, pSup: s.net.pSup, pDem: s.net.pDem, wSup: s.net.wSup, wDem: s.net.wDem, upkeep: Math.round(s.net.upkeep), crime: Math.round(s.net.crimeAvg), poll: Math.round(s.net.pollAvg), cov: { police: s.net.police, fire: s.net.fire, health: s.net.health, edu: s.net.edu, fun: s.net.fun }, overlay: this.overlay,
-      canUndo: this.history.length, undoLabel: this.history.length ? this.history[this.history.length - 1].label : '',
+      canUndo: this.history.length, undoLabel: this.history.length ? this.history[this.history.length - 1].label : '', undoLeft: this.history.length ? Math.max(1, Math.ceil((UNDO_MS - (performance.now() - this.history[this.history.length - 1].t)) / 1000)) : 0,
+      weather: this.ambient.setting, rain: this.ambient.weather.k, buses: this.transit.buses.length, riders: this.agents.stats.riding, heavyRoads: (() => { let n = 0; for (let i = 0; i < this.density.length; i++) if (this.density[i] > 1.3) n++; return n; })(),
       grant: s.grant || Math.round(Math.max(0, 300 * (1 - s.pop / 1200))), streak: s.streak, ordCost: s.ordCost(), disastersLevel: s.disasters,
       ords: Object.entries(ORD).map(([key, o]) => ({ key, ...o, on: !!s.ord[key] })), goals: s.goalStatus(),
       alerts: [this.disasters.fires.size ? `Fire x${this.disasters.fires.size}` : '', this.disasters.tornado ? 'Tornado' : '', this.disasters.ufo ? 'UFO' : ''].filter(Boolean) };
@@ -91,7 +103,7 @@ export class Game {
     return { x: Math.floor((u / 32 + v / 16) / 2), y: Math.floor((v / 16 - u / 32) / 2) };
   }
   zoomAt(px, py, f) {
-    const c = this.cam, nz = clamp(c.zoom * f, 0.35, 2.6), k = nz / c.zoom;
+    const c = this.cam, nz = clamp(c.zoom * f, 0.25, 2.6), k = nz / c.zoom;
     c.x = px - (px - c.x) * k; c.y = py - (py - c.y) * k; c.zoom = nz; this.clampCam();
   }
   clampCam() {
@@ -186,10 +198,12 @@ export class Game {
     return [...set].map((i) => ({ i, kind: w.kind[i], level: w.level[i], variant: w.variant[i], tree: w.tree[i], bt: w.bt[i], bo: w.bo[i], wire: w.wire[i], pipe: w.pipe[i] }));
   }
   record(snap, spent, label) {
-    this.history.push({ snap, spent, label });
+    this.history.push({ snap, spent, label, t: performance.now() });
     if (this.history.length > 40) this.history.shift();
   }
+  pruneHistory() { const now = performance.now(); while (this.history.length && now - this.history[0].t > UNDO_MS) this.history.shift(); }
   undo() {
+    this.pruneHistory();
     const h = this.history.pop();
     if (!h) { this.hooks.toast && this.hooks.toast('Nothing to undo'); return false; }
     const w = this.world, s = this.sim;
@@ -237,6 +251,7 @@ export class Game {
   get hour() { return this.abs % 24; }
   update(dt) {
     const sp = this.speed;
+    this.pruneHistory();
     this.clock += dt * sp;
     if (this.timeSetting === 'auto') { const ph = (this.clock / 180) % 1; this.mode = ph < 0.55 ? 0 : ph < 0.62 ? 1 : ph < 0.9 ? 2 : 1; }
     else this.mode = this.timeSetting;
@@ -257,9 +272,16 @@ export class Game {
     // life scales with the city; people follow real routines (home, work, shops, parks)
     const night = this.mode === 2 ? 0.45 : this.mode === 1 ? 0.8 : 1;
     const carT = Math.min(60, Math.floor((s.pop / 14 + (s.cJobs + s.iJobs) / 30) * night), Math.floor(s.roads / 2));
-    this.traffic.update(dt * sp, Math.floor(carT * 0.3));
-    this.agents.update(dt * sp, dt, this.abs, Math.min(140, Math.floor(s.pop / 4)));
-    this.garbage.update(dt * sp, Math.min(10, s.facilities.length * 2));
+    const sig = this.clock, veh = this.traffic.cars.concat(this.agents.drivers, this.transit.buses);
+    followPass(veh);                                                       // vehicles queue behind each other
+    this.traffic.update(dt * sp, Math.floor(carT * 0.3), sig);
+    this.agents.update(dt * sp, dt, this.abs, Math.min(240, Math.floor(s.pop / 4)), sig);
+    this.transit.update(dt * sp, dt, sig);
+    this.garbage.update(dt * sp, Math.min(10, s.facilities.length * 2), sig);
+    this.ambient.update(sp > 0 ? dt : 0, this.mode);
+    // congestion map: smoothed vehicle count per road tile
+    { const dn = this.density, a = 1 - Math.exp(-dt * 0.6); for (let i = 0; i < dn.length; i++) if (dn[i] > 0.001) dn[i] -= dn[i] * a;
+      for (const v of veh) { const i = Math.max(0, Math.min(N - 1, Math.floor(v.py))) * N + Math.max(0, Math.min(N - 1, Math.floor(v.px))); dn[i] += a; } }
     this.disasters.update(dt * sp);
     this.saveTimer += dt;
     if (this.saveTimer > 20) { this.saveTimer = 0; if (this.dirtySave) this.save(); }

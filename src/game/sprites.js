@@ -92,7 +92,7 @@ function kit(ctx, mode, ox, oy, lit = true) {
     poly([P(0, 0), P(1, 0), P(1, 1), P(0, 1)], C(col), null, true);
     if (speck) for (let i = 0; i < 9; i++) { const p = P(hash(i, 1, 4) * 0.9 + 0.05, hash(i, 2, 5) * 0.9 + 0.05); line(p, [p[0] + 1.8, p[1] - 1.4], C(speck[i % speck.length]), 0.9); }
   };
-  const smoke = (p, n = 3) => { for (let i = 0; i < n; i++) circ([p[0] + i * 7, p[1] - i * 12], 6 + i * 2.5, mode === 2 ? `rgba(141,150,173,${0.7 - i * 0.2})` : `rgba(236,239,243,${0.85 - i * 0.25})`); };
+  const smoke = () => {};   // smoke is animated at draw time (see smoke.js)
   const store = () => C(mode === 2 && lit ? '#ffd98c' : '#35566b');
   return { C, P, path, poly, line, circ, ell, faces, box, sh, win, wins, cyl, tree, pad, smoke, ctx, mode, lit, store };
 }
@@ -692,7 +692,38 @@ function treatmentPlant(k) {
   circ(P(2.83, 0.28, 78), 2.2, '#7dffa0');
   tree(0.2, 2.85, 0, 21); tree(1.2, 2.9, 3, 22); tree(2.85, 2.85, 1, 23);
 }
-const SVC_SPR_X = { 19: [pumpStation, 2, 2, 120], 20: [treatmentPlant, 3, 3, 130], 8: [policeHQ, 2, 2, 150], 9: [fireHQ, 2, 2, 170], 10: [hospital, 2, 2, 170], 11: [university, 3, 3, 190], 12: [plaza, 2, 2, 100], 13: [library, 1, 1, 100], 14: [museum, 2, 2, 130], 15: [stadium, 3, 3, 150], 16: [dump, 2, 2, 100], 17: [recycle, 2, 2, 100], 18: [wte, 2, 2, 170] };
+
+function busStop(k) {
+  const { P, poly, box, faces, C, line, circ, cyl, sh } = k;
+  padRect(k, 1, 1, '#cfd1d4', null);
+  poly([P(0, 0.88), P(1, 0.88), P(1, 1), P(0, 1)], C('#8f959c'), null, true);
+  sh(0.18, 0.3, 0.64, 0.34, 20);
+  for (const [x, y] of [[0.2, 0.32], [0.78, 0.32], [0.2, 0.6], [0.78, 0.6]]) box(x - 0.02, y - 0.02, 0.04, 0.04, 17, faces('#5a6370'));
+  poly([P(0.2, 0.32, 5), P(0.8, 0.32, 5), P(0.8, 0.32, 17), P(0.2, 0.32, 17)], 'rgba(150,200,230,.55)');
+  poly([P(0.2, 0.32, 5), P(0.2, 0.62, 5), P(0.2, 0.62, 17), P(0.2, 0.32, 17)], 'rgba(150,200,230,.4)');
+  box(0.14, 0.26, 0.72, 0.42, 2.2, { l: '#3d8bd9', r: '#2f6fb0', t: '#4e9be8' }, 17);
+  box(0.3, 0.38, 0.4, 0.1, 2, { l: '#8a5a34', r: '#6b4426', t: '#a06a3c' }, 3); box(0.3, 0.38, 0.4, 0.02, 4, { l: '#8a5a34', r: '#6b4426', t: '#a06a3c' }, 5);
+  poly([P(0.28, 0.66, 8), P(0.42, 0.66, 8), P(0.42, 0.66, 14), P(0.28, 0.66, 14)], C('#f4f1e8'));
+  const pole = P(0.9, 0.78); line(pole, [pole[0], pole[1] - 24], C('#6b7280'), 1.4); circ([pole[0], pole[1] - 26], 5.5, C('#2e86c1'));
+  k.ctx.fillStyle = '#fff'; k.ctx.fillRect(pole[0] - 3.2, pole[1] - 29, 6.4, 5); k.ctx.fillStyle = C('#2e86c1'); k.ctx.fillRect(pole[0] - 2.4, pole[1] - 27.6, 4.8, 1.6);
+  cyl(0.12, 0.8, 2.6, 6, '#4a8f5a');
+}
+function busTerminal(k) {
+  const { P, poly, box, faces, C, line, circ, sh } = k;
+  padRect(k, 2, 2, '#50565f', ['#3f444c', '#666c75']);
+  for (let i = 1; i < 4; i++) line(P(0.1 + i * 0.45, 0.95), P(0.1 + i * 0.45, 1.85), 'rgba(240,224,138,.85)', 1, [3, 2]);
+  sh(0.1, 0.1, 1.8, 0.55, 34);
+  box(0.1, 0.1, 1.8, 0.55, 34, { l: '#e6ecf1', r: shade('#e6ecf1', 0.76), t: '#8f9aa8' });
+  poly([P(0.15, 0.65, 3), P(1.85, 0.65, 3), P(1.85, 0.65, 24), P(0.15, 0.65, 24)], C(k.store()));
+  for (let i = 1; i < 9; i++) line(P(0.15 + i * 0.19, 0.65, 3), P(0.15 + i * 0.19, 0.65, 24), 'rgba(255,255,255,.5)', 0.7);
+  poly([P(0.1, 0.65, 28), P(1.9, 0.65, 28), P(1.9, 0.65, 34), P(0.1, 0.65, 34)], C('#2e86c1'));
+  // canopy over the bays
+  for (const x of [0.15, 1.0, 1.85]) box(x - 0.03, 1.05, 0.06, 0.06, 20, faces('#6b7280'));
+  box(0.05, 0.95, 1.9, 0.95, 2.5, { l: '#e8ecef', r: '#b9c0c8', t: '#d3d9df' }, 20);
+  for (const [x, c] of [[0.2, '#e8a521'], [1.05, '#3a9d6e']]) { box(x, 1.2, 0.7, 0.22, 11, faces(c)); poly([P(x + 0.05, 1.42, 4), P(x + 0.65, 1.42, 4), P(x + 0.65, 1.42, 9), P(x + 0.05, 1.42, 9)], C('#cfe6f3')); }
+  box(1.75, 0.8, 0.12, 0.12, 40, faces('#2e86c1')); poly([P(1.7, 0.92, 34), P(1.92, 0.92, 34), P(1.92, 0.92, 44), P(1.7, 0.92, 44)], C('#ffffff'));
+}
+const SVC_SPR_X = { 21: [busStop, 1, 1, 70], 22: [busTerminal, 2, 2, 100], 19: [pumpStation, 2, 2, 120], 20: [treatmentPlant, 3, 3, 130], 8: [policeHQ, 2, 2, 150], 9: [fireHQ, 2, 2, 170], 10: [hospital, 2, 2, 170], 11: [university, 3, 3, 190], 12: [plaza, 2, 2, 100], 13: [library, 1, 1, 100], 14: [museum, 2, 2, 130], 15: [stadium, 3, 3, 150], 16: [dump, 2, 2, 100], 17: [recycle, 2, 2, 100], 18: [wte, 2, 2, 170] };
 const SVC_SPR = { 1: [coalPlant, 2, 2, 190], 2: [wind, 1, 1, 130], 3: [waterTower, 1, 1, 130], 4: [police, 1, 1, 100], 5: [fireStation, 1, 1, 130], 6: [clinic, 1, 1, 110], 7: [school, 1, 1, 130], ...SVC_SPR_X };
 export function serviceSprite(id, mode, lit = true) {
   lit = mode === 2 ? !!lit : true;

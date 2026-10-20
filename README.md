@@ -27,9 +27,19 @@ bars, swipe from an edge to peek them, and draws behind the camera cutout). Both
 - Utilities and services: tap a tile to place (the preview shows the footprint); drag to reposition before lifting.
 - With a build tool active, one finger paints and two fingers move the map.
 
-## Stage 3.2 (this build)
+## Stage 4 (this build)
 
-- Undo button (right-hand column, Ctrl+Z on desktop): reverts your last build action, up to 40 steps, and refunds the cost. It restores whole buildings (even multi-tile ones), cancels construction sites, and brings back what you bulldozed
+- Bigger map: 96x96 (was 64x64). Saves from older versions are placed in the middle of the new map
+- Traffic lights at every junction (3+ roads). Cars, buses, trucks and commuters stop at the stop line on red and queue behind each other
+- Bus stops and a bus terminal (Transit tab; stops and terminals must sit next to a road). Each powered terminal runs buses in a loop through every stop it can reach. Citizens without a car wait at a stop, ride, and walk on. Stops and terminals raise land value and happiness
+- Congestion follows the day: rush hours, lunchtime shopping, evening outings and stadium or museum crowds. New Traffic and Transit map views
+- Animated smoke and steam (factories, plants, waste-to-energy, landfill) drifting with the wind, plus evening chimney smoke from houses
+- Graphics pass: trees sway in the wind, animated waves and sparkles on water, cloud shadows, bird flocks, boats on lakes, neon glow on shops at night, vignette, rain with lightning (Menu > Weather: Auto / Clear / Rain), waiting passengers and flashing emergency lights
+- Level-of-detail: tiny details (people, poles, manholes, signals) are skipped when zoomed far out
+
+## Stage 3.2
+
+- Undo button (right-hand column, Ctrl+Z on desktop): appears for 20 seconds after you build and reverts that action (stacking up to 40 recent steps), refunding the cost. It disappears once the window passes. It restores whole buildings (even multi-tile ones), cancels construction sites, and brings back what you bulldozed
 
 ## Stage 3.1
 

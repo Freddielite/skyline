@@ -3,6 +3,8 @@ import { N, T, TERRAIN } from './world.js';
 import { buildingSprite, parkSprite, zoneSprite, terrainSprite, treeSprite, roadSprite, serviceSprite } from './sprites.js';
 import { BT } from './buildings.js';
 import { drawConstruction } from './construction.js';
+import { drawSmoke, SMOKE } from './smoke.js';
+import { isSignal, light } from './traffic.js';
 
 const BG = [['#2a78a8', '#6fb4d6'], ['#3a4f86', '#c98a78'], ['#050a1f', '#14204a']];
 const CAR_COLS = ['#e0b43a', '#4a7fc7', '#c9372c', '#7a5bd0', '#4aa36a', '#f2f2f2', '#e67e22', '#2c3e50'];
@@ -11,7 +13,7 @@ export class Renderer {
   constructor(canvas, game) {
     this.cv = canvas; this.ctx = canvas.getContext('2d'); this.game = game;
     this.dpr = 1; this.W = 0; this.H = 0;
-    this.glow = null; this.bloom = document.createElement('canvas'); this.bctx = this.bloom.getContext('2d');
+    this.rain = null; this.glow = null; this.bloom = document.createElement('canvas'); this.bctx = this.bloom.getContext('2d');
     this.resize();
   }
   resize() {
@@ -30,6 +32,7 @@ export class Renderer {
     return (this.glow = c);
   }
   draw(t) {
+    if (!this.rain) this.rain = this.game.ambient.drops;
     const g = this.game, w = g.world, ctx = this.ctx, z = g.cam.zoom, mode = g.mode, W = this.W, H = this.H;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     const bg = ctx.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, BG[mode][0]); bg.addColorStop(1, BG[mode][1]);
@@ -53,8 +56,9 @@ export class Renderer {
         const zs = zoneSprite(k, mode); ctx.drawImage(zs.c, X - 32 * z, Y, 64 * z, 32 * z);
       }
     }
-    // objects pass in painter order
-    const badges = [];
+    // life on the water, then the objects pass in painter order
+    this.boats(ctx, g, z, cx, cy, t, mode);
+    const badges = [], smokeList = [], neon = [], wind = 0.7 + 0.5 * Math.sin(t * 0.07);
     const cars = g.cars.concat(g.people, g.trucks), buckets = new Map();
     for (const c of cars) { const kx = Math.max(0, Math.min(N - 1, Math.floor(c.px))), ky = Math.max(0, Math.min(N - 1, Math.floor(c.py))), key = ky * N + kx; (buckets.get(key) || buckets.set(key, []).get(key)).push(c); }
     for (let s = 0; s < 2 * N - 1; s++) {
@@ -62,13 +66,22 @@ export class Renderer {
         const y = s - x, X = sx(x, y), Y = sy(x, y);
         if (X < -mX * 3 || X > W + mX * 3 || Y < top || Y > H + 60 * z) continue;
         const i = y * N + x, k = w.kind[i];
-        if (k === T.EMPTY && w.tree[i]) { const sp = treeSprite(w.tree[i], mode); ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
+        if (k === T.EMPTY && w.tree[i]) {
+          const sp = treeSprite(w.tree[i], mode), rainK = g.ambient.weather.k, sw = Math.sin(t * (1.3 + rainK * 1.2) + x * 0.7 + y * 1.3) * (0.022 + rainK * 0.03) * (0.6 + wind * 0.5);
+          ctx.save(); ctx.translate(X, Y + 16 * z); ctx.rotate(sw);
+          ctx.drawImage(sp.c, -sp.ox * z, -sp.oy * z - 16 * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); ctx.restore();
+        }
         else if (k === T.PARK) { const sp = parkSprite(w.variant[i] % 4, mode), site = g.sites.get(i); if (site) drawConstruction(ctx, site, X, Y, z, mode, t, sp, null); else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
         else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) {
           const sp = buildingSprite(k, w.level[i], w.variant[i] % 4, mode, g.sim.pw[i] === 1);
           const site = g.sites.get(i), lv = w.level[i];
           if (site) { const so = site.from > 0 ? buildingSprite(k, site.from, site.pv % 4, mode, g.sim.pw[i] === 1) : null; drawConstruction(ctx, site, X, Y, z, mode, t, sp, so); }
           else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
+          if (!site) {
+            const sm = SMOKE[`${k}${lv}`];
+            if (sm && (k !== T.IND || g.sim.pw[i]) && (k !== T.RES || (mode >= 1 && hash(x, y, 9) > 0.35))) smokeList.push([sm, X, Y, hash(x, y, 4)]);
+            if (k === T.COM && mode === 2 && g.sim.pw[i]) neon.push([X, Y + 16 * z, lv, x, y]);
+          }
           if (site) { /* no status badges while building */ }
           else if (!g.sim.pw[i]) badges.push([X, Y + 16 * z - [34, 60, 100][lv - 1] * z, 'bolt']);
           else if (!g.sim.wt[i]) badges.push([X, Y + 16 * z - [34, 60, 100][lv - 1] * z, 'drop']);
@@ -80,6 +93,7 @@ export class Renderer {
             const site = g.sites.get(ay * N + ax);
             if (site) drawConstruction(ctx, site, AX, AY, z, mode, t, sp, null);
             else ctx.drawImage(sp.c, AX - sp.ox * z, AY - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
+            if (!site) { const sm = SMOKE['s' + bt]; if (sm && (def.power || bt === 16 || g.sim.pw[ay * N + ax] === 1)) smokeList.push([sm, AX, AY, hash(ax, ay, 4)]); }
             if (bt === 2 && (!site || site.t / site.dur > 0.93)) this.blades(ctx, sx(ax + 0.5, ay + 0.5), sy(ax + 0.5, ay + 0.5, 74), z, t, mode);
             if (!site && def.use && !g.sim.pw[ay * N + ax]) badges.push([sx(ax + def.w / 2, ay + def.d / 2), sy(ax + def.w / 2, ay + def.d / 2, 66), 'bolt']);
           }
@@ -89,16 +103,21 @@ export class Renderer {
           ctx.strokeStyle = '#3a3d44'; ctx.lineWidth = 1.4 * z; ctx.beginPath(); ctx.moveTo(X, Y + 16 * z); ctx.lineTo(X, Y + 16 * z - 16 * z); ctx.stroke();
           ctx.fillStyle = '#fff2b8'; ctx.beginPath(); ctx.arc(X, Y + 16 * z - 17 * z, 2 * z, 0, 6.3); ctx.fill();
         }
+        if (z >= 0.5 && k === T.ROAD && isSignal(w, x, y)) this.signal(ctx, x, y, X, Y, z, g.clock, mode);
         const rub = g.disasters.rubble.get(i);
         if (rub !== undefined && (k === T.EMPTY || (k >= 2 && k <= 4 && !w.level[i]))) this.rubble(ctx, i, X, Y, z, rub, mode);
         const fire = g.disasters.fires.get(i);
         if (fire) this.fire(ctx, fire, X, Y, z, t, mode, k === T.SVC ? 56 : [30, 54, 94][Math.max(0, w.level[i] - 1)] || 40);
-        if (w.pipe[i] && (x + y) % 3 === 0 && !w.tree[i] && (k === T.EMPTY || k === T.ROAD || k === T.PARK)) this.manhole(ctx, X, Y, z, mode);
-        if (w.wire[i] === 1) this.pole(ctx, w, x, y, X, Y, z, mode);
+        if (z >= 0.5 && w.pipe[i] && (x + y) % 3 === 0 && !w.tree[i] && (k === T.EMPTY || k === T.ROAD || k === T.PARK)) this.manhole(ctx, X, Y, z, mode);
+        if (z >= 0.45 && w.wire[i] === 1) this.pole(ctx, w, x, y, X, Y, z, mode);
         const cb = buckets.get(y * N + x);
-        if (cb) for (const c of cb) { if (c.ped) this.person(ctx, c, z, cx, cy, mode, t); else if (c.truck) this.truck(ctx, c, z, cx, cy, mode, t); else this.car(ctx, c, z, cx, cy, mode); }
+        if (cb) for (const c of cb) { if (c.ped) { if (z >= 0.5) this.person(ctx, c, z, cx, cy, mode, t); } else if (c.truck) this.truck(ctx, c, z, cx, cy, mode, t); else if (c.bus) this.bus(ctx, c, z, cx, cy, mode); else this.car(ctx, c, z, cx, cy, mode); }
       }
     }
+    if (z >= 0.35) for (const [list, X, Y, seed] of smokeList) drawSmoke(ctx, list, X, Y, z, t, mode, seed, wind);
+    if (neon.length) this.neon(ctx, neon, z, t);
+    this.clouds(ctx, g, z, cx, cy, t, mode);
+    if (z >= 0.4) this.birds(ctx, g, z, cx, cy, t, mode);
     if (g.disasters.tornado) this.tornado(ctx, g.disasters.tornado, z, cx, cy, t, mode);
     if (g.disasters.ufo) this.ufo(ctx, g.disasters.ufo, z, cx, cy, t, mode);
     if (g.overlay) this.overlay(ctx, g, z, cx, cy);
@@ -122,6 +141,94 @@ export class Renderer {
       ctx.globalAlpha = mode === 2 ? 0.55 : 0.22; ctx.filter = 'blur(' + (6 * this.dpr) + 'px)';
       ctx.drawImage(this.bloom, 0, 0, this.cv.width, this.cv.height); ctx.restore();
     }
+    this.weather(ctx, g, t, mode);
+    this.vignette(ctx, mode);
+  }
+  signal(ctx, x, y, X, Y, z, sigT, mode) {
+    const P = (lx, ly, h = 0) => [X + (lx - ly) * 32 * z, Y + (lx + ly) * 16 * z - h * z];
+    const heads = [[0.94, 0.07, true], [0.07, 0.94, false]], d = mode === 2 ? 0.6 : 1;
+    for (const [lx, ly, vertical] of heads) {
+      const b = P(lx, ly), t = P(lx, ly, 26), st = light(sigT, x, y, vertical);
+      ctx.strokeStyle = `rgb(${70 * d | 0},${74 * d | 0},${82 * d | 0})`; ctx.lineWidth = 1.5 * z; ctx.beginPath(); ctx.moveTo(b[0], b[1]); ctx.lineTo(t[0], t[1]); ctx.stroke();
+      ctx.fillStyle = `rgb(${34 * d | 0},${37 * d | 0},${44 * d | 0})`; ctx.fillRect(t[0] - 2.6 * z, t[1] - 3 * z, 5.2 * z, 12 * z);
+      const cols = [['r', '#ff4b3e', 2.4], ['y', '#ffc93a', 6.6], ['g', '#3ddc6a', 10.8]];
+      for (const [k, c, dy] of cols) {
+        const on = st === k; ctx.fillStyle = on ? c : `rgba(70,74,84,${0.9})`; ctx.beginPath(); ctx.arc(t[0], t[1] - 3 * z + dy * z * 0.95, 1.5 * z, 0, 6.3); ctx.fill();
+        if (on && (mode > 0 || k === 'r')) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; const gl = ctx.createRadialGradient(t[0], t[1] - 3 * z + dy * z * 0.95, 0, t[0], t[1] - 3 * z + dy * z * 0.95, 9 * z); gl.addColorStop(0, c + 'aa'); gl.addColorStop(1, c + '00'); ctx.fillStyle = gl; ctx.fillRect(t[0] - 9 * z, t[1] - 12 * z, 18 * z, 22 * z); ctx.restore(); }
+      }
+    }
+  }
+  bus(ctx, c, z, cx, cy, mode) {
+    const P = (x, y, h = 0) => [(x - y) * 32 * z + cx, (x + y) * 16 * z + cy - h * z], d = mode === 2 ? 0.45 : mode === 1 ? 0.85 : 1;
+    const sh = (hex, f) => { const h = parseInt(hex.slice(1), 16); return `rgb(${Math.min(255, ((h >> 16) & 255) * f * d) | 0},${Math.min(255, ((h >> 8) & 255) * f * d) | 0},${Math.min(255, (h & 255) * f * d) | 0})`; };
+    const poly = (a, f) => { ctx.beginPath(); ctx.moveTo(a[0][0], a[0][1]); for (let i = 1; i < a.length; i++) ctx.lineTo(a[i][0], a[i][1]); ctx.closePath(); ctx.fillStyle = f; ctx.fill(); };
+    const horiz = c.dx !== 0, l = 0.64, wd = 0.19, bw = horiz ? l : wd, bd = horiz ? wd : l, x = c.px - bw / 2, y = c.py - bd / 2, h1 = 10.5, col = c.col;
+    poly([P(x, y + bd, 1), P(x + bw, y + bd, 1), P(x + bw, y + bd, h1), P(x, y + bd, h1)], sh(col, 1));
+    poly([P(x + bw, y, 1), P(x + bw, y + bd, 1), P(x + bw, y + bd, h1), P(x + bw, y, h1)], sh(col, 0.76));
+    poly([P(x, y, h1), P(x + bw, y, h1), P(x + bw, y + bd, h1), P(x, y + bd, h1)], sh('#dfe3e8', 1));
+    const win = mode === 2 ? '#ffe9a8' : '#cfe6f3';
+    if (horiz) poly([P(x + 0.04, y + bd, 5), P(x + bw - 0.04, y + bd, 5), P(x + bw - 0.04, y + bd, 9.4), P(x + 0.04, y + bd, 9.4)], sh(win, 1));
+    else poly([P(x + bw, y + 0.04, 5), P(x + bw, y + bd - 0.04, 5), P(x + bw, y + bd - 0.04, 9.4), P(x + bw, y + 0.04, 9.4)], sh(win, 0.9));
+    ctx.fillStyle = sh('#2b2e36', 1); const q = P(c.px - c.dx * 0.2, c.py - c.dy * 0.2); ctx.beginPath(); ctx.ellipse(q[0], q[1], 2.6 * z, 1.3 * z, 0, 0, 6.3); ctx.fill();
+    if (mode === 2) { const p = P(c.px + c.dx * 0.34, c.py + c.dy * 0.34); ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(this.glowSprite(), p[0] - 20 * z, p[1] - 9 * z, 40 * z, 20 * z); ctx.restore(); }
+  }
+  boats(ctx, g, z, cx, cy, t, mode) {
+    const d = mode === 2 ? 0.5 : mode === 1 ? 0.85 : 1;
+    for (const b of g.ambient.boats) {
+      const X = (b.x - b.y) * 32 * z + cx, Y = (b.x + b.y) * 16 * z + cy;
+      if (X < -60 || X > this.W + 60 || Y < -60 || Y > this.H + 60) continue;
+      const ang = Math.atan2((Math.cos(b.a) + Math.sin(b.a)) * 16, (Math.cos(b.a) - Math.sin(b.a)) * 32), bob = Math.sin(t * 2 + b.col) * 0.8 * z;
+      ctx.save(); ctx.translate(X, Y + bob); ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.beginPath(); ctx.ellipse(-Math.cos(ang) * 9 * z, -Math.sin(ang) * 4.5 * z, 12 * z, 4 * z, ang, 0, 6.3); ctx.fill();
+      ctx.rotate(ang); ctx.fillStyle = `rgb(${(b.col % 2 ? 235 : 60) * d | 0},${(b.col % 2 ? 235 : 90) * d | 0},${(b.col % 2 ? 230 : 140) * d | 0})`; ctx.beginPath(); ctx.ellipse(0, 0, 8 * z, 3 * z, 0, 0, 6.3); ctx.fill();
+      ctx.fillStyle = `rgb(${120 * d | 0},${80 * d | 0},${50 * d | 0})`; ctx.fillRect(-4 * z, -1 * z, 8 * z, 1.2 * z);
+      if (b.sail) { ctx.rotate(-ang); ctx.fillStyle = `rgb(${250 * d | 0},${250 * d | 0},${250 * d | 0})`; ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 0.6 * z; ctx.beginPath(); ctx.moveTo(0, -2 * z); ctx.lineTo(0, -17 * z); ctx.lineTo(8 * z, -4 * z); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-1 * z, -3 * z); ctx.lineTo(-1 * z, -13 * z); ctx.lineTo(-7 * z, -4 * z); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+      ctx.restore();
+    }
+  }
+  birds(ctx, g, z, cx, cy, t, mode) {
+    for (const f of g.ambient.birds) {
+      for (let k = 0; k < f.n; k++) {
+        const row = Math.ceil(k / 2) * (k % 2 ? 1 : -1), bx = f.x - f.vx * 0.12 * Math.abs(row) + f.vy * 0.1 * row, by = f.y - f.vy * 0.12 * Math.abs(row) - f.vx * 0.1 * row;
+        const X = (bx - by) * 32 * z + cx, Y = (bx + by) * 16 * z + cy - (f.h + Math.sin(t + k) * 3) * z, fl = Math.sin(t * 11 + k * 1.7 + f.seed) * 3.2 * z;
+        ctx.fillStyle = 'rgba(0,0,0,.1)'; ctx.beginPath(); ctx.ellipse(X, Y + f.h * z, 3 * z, 1.2 * z, 0, 0, 6.3); ctx.fill();
+        ctx.strokeStyle = mode === 2 ? '#aab' : '#2b2e36'; ctx.lineWidth = 1.2 * z; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(X - 5 * z, Y - fl); ctx.lineTo(X, Y); ctx.lineTo(X + 5 * z, Y - fl); ctx.stroke();
+      }
+    }
+  }
+  clouds(ctx, g, z, cx, cy, t, mode) {
+    const k = g.ambient.weather.k, a = (mode === 0 ? 0.075 : mode === 1 ? 0.06 : 0.03) + k * 0.05;
+    ctx.save(); ctx.fillStyle = `rgba(8,22,40,${a})`;
+    for (let i = 0; i < 6; i++) {
+      const wx = (((i * 37 + t * 0.32) % (N + 40)) - 20), wy = (i * 29.7 + Math.sin(i) * 8) % N, X = (wx - wy) * 32 * z + cx, Y = (wx + wy) * 16 * z + cy;
+      ctx.beginPath(); ctx.ellipse(X, Y, (170 + i * 26) * z, (66 + i * 8) * z, 0, 0, 6.3); ctx.fill();
+    }
+    ctx.restore();
+  }
+  neon(ctx, list, z, t) {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const cols = ['255,79,163', '79,209,255', '255,210,79', '120,255,160'];
+    for (const [X, Y, lv, x, y] of list) {
+      const c = cols[(x * 3 + y) % 4], fl = 0.7 + 0.3 * Math.sin(t * 3.1 + x * 1.7 + y), hh = [20, 36, 60][lv - 1] * z, r = (13 + lv * 4) * z;
+      const gl = ctx.createRadialGradient(X + 8 * z, Y - hh * 0.4 + 8 * z, 0, X + 8 * z, Y - hh * 0.4 + 8 * z, r); gl.addColorStop(0, `rgba(${c},${0.42 * fl})`); gl.addColorStop(1, `rgba(${c},0)`);
+      ctx.fillStyle = gl; ctx.fillRect(X + 8 * z - r, Y - hh * 0.4 + 8 * z - r, r * 2, r * 2);
+    }
+    ctx.restore();
+  }
+  weather(ctx, g, t, mode) {
+    const wt = g.ambient.weather, k = wt.k, W = this.W, H = this.H;
+    if (k > 0.01) {
+      ctx.fillStyle = `rgba(28,40,62,${0.24 * k})`; ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = `rgba(196,214,238,${0.4 * k})`; ctx.lineWidth = 1; ctx.beginPath();
+      const n = Math.floor(this.rain.length * Math.min(1, k * 1.2));
+      for (let i = 0; i < n; i++) { const d = this.rain[i], x = ((d.x * W + t * 40 * d.v) % (W + 40)) - 10, y = ((d.y + t * 1.35 * d.v) % 1) * H; ctx.moveTo(x, y); ctx.lineTo(x - 4, y + 13 * d.v); }
+      ctx.stroke();
+    }
+    if (wt.flash > 0.02) { ctx.fillStyle = `rgba(235,240,255,${0.42 * wt.flash})`; ctx.fillRect(0, 0, W, H); }
+  }
+  vignette(ctx, mode) {
+    const W = this.W, H = this.H, a = mode === 2 ? 0.42 : mode === 1 ? 0.28 : 0.15;
+    const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.72);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(0,0,12,${a})`); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   }
   manhole(ctx, X, Y, z, mode) {
     const cx = X, cy = Y + 16 * z, d = mode === 2 ? 0.55 : 1;
@@ -269,6 +376,8 @@ export class Renderer {
         case 'police': if (sim.cov.police[i] > 0.02) col = `rgba(80,140,255,${0.2 + sim.cov.police[i] * 0.5})`; break;
         case 'fire': if (sim.cov.fire[i] > 0.02) col = `rgba(255,110,70,${0.2 + sim.cov.fire[i] * 0.5})`; break;
         case 'health': if (sim.cov.health[i] > 0.02) col = `rgba(255,120,170,${0.2 + sim.cov.health[i] * 0.5})`; break;
+        case 'traffic': if (w.kind[i] === T.ROAD) col = ramp(1 - Math.min(1, g.density[i] / 2.2), 0.75); break;
+        case 'transit': if (sim.cov.transit[i] > 0.02) col = `rgba(70,200,190,${0.2 + sim.cov.transit[i] * 0.5})`; break;
         case 'fun': if (sim.cov.fun[i] > 0.02) col = `rgba(190,120,255,${0.2 + sim.cov.fun[i] * 0.5})`; break;
         case 'waste': { const m = sim.wasteMap[i]; col = m === 3 ? 'rgba(95,211,166,.7)' : m === 2 ? 'rgba(239,111,94,.8)' : m === 1 ? 'rgba(176,132,76,.38)' : null; break; }
         case 'edu': if (sim.cov.edu[i] > 0.02) col = `rgba(240,200,70,${0.2 + sim.cov.edu[i] * 0.5})`; break;
@@ -319,11 +428,13 @@ export class Renderer {
     a = P(N, 0, -10); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
   }
   water(ctx, x, y, X, Y, z, t, w, mode) {
-    const a = 0.25 + 0.35 * Math.sin(t * 1.6 + hash(x, y, 1) * 6.28);
-    ctx.strokeStyle = `rgba(190,230,250,${Math.max(0.05, a)})`; ctx.lineWidth = 1.1 * z; ctx.lineCap = 'round';
-    const ox = hash(x, y, 2) * 14;
-    ctx.beginPath(); ctx.moveTo(X - 10 * z + ox * z * 0.4, Y + 14 * z); ctx.lineTo(X + 4 * z + ox * z * 0.4, Y + 14 * z);
-    ctx.moveTo(X - 2 * z, Y + 21 * z); ctx.lineTo(X + 12 * z, Y + 21 * z); ctx.stroke();
+    const h = hash(x, y, 1), day = mode === 0 ? 1 : mode === 1 ? 0.8 : 0.45;
+    ctx.lineCap = 'round'; ctx.lineWidth = 1.1 * z;
+    for (let k = 0; k < 2; k++) {
+      const off = (((t * 5 + h * 40 + k * 21) % 42) - 21) * z, a = Math.max(0.05, 0.38 * Math.sin(((off / z + 21) / 42) * Math.PI)) * day;
+      ctx.strokeStyle = `rgba(200,235,252,${a})`; ctx.beginPath(); ctx.moveTo(X - 8 * z + off, Y + (11 + k * 9) * z + off * 0.5); ctx.lineTo(X + 6 * z + off, Y + (11 + k * 9) * z + off * 0.5); ctx.stroke();
+    }
+    if (mode !== 2 && hash(x, y, Math.floor(t * 1.6)) > 0.955) { ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.fillRect(X - 6 * z + hash(y, x, Math.floor(t * 1.6)) * 12 * z, Y + (8 + hash(x, x, 3) * 14) * z, 1.6 * z, 1.6 * z); }
     // foam where water meets land
     const land = (xx, yy) => xx >= 0 && yy >= 0 && xx < N && yy < N && w.terrain[yy * N + xx] !== TERRAIN.WATER;
     ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1.6 * z; ctx.beginPath();
@@ -335,7 +446,7 @@ export class Renderer {
   }
   person(ctx, c, z, cx, cy, mode, t) {
     const X = (c.px - c.py) * 32 * z + cx, Y = (c.px + c.py) * 16 * z + cy;
-    const d = mode === 2 ? 0.5 : mode === 1 ? 0.85 : 1, bob = c.idle ? 0 : Math.abs(Math.sin(t * 7 + c.col * 3)) * 0.8 * z;
+    const d = mode === 2 ? 0.5 : mode === 1 ? 0.85 : 1, bob = c.idle || c.still ? 0 : Math.abs(Math.sin(t * 7 + c.col * 3)) * 0.8 * z;
     const cols = ['#e0483f', '#3a7bd5', '#f4c542', '#8e44ad', '#27ae60', '#e67e22', '#34495e', '#e86f9b'];
     const hex = cols[c.col % 8], h = parseInt(hex.slice(1), 16);
     const body = `rgb(${(((h >> 16) & 255) * d) | 0},${(((h >> 8) & 255) * d) | 0},${((h & 255) * d) | 0})`;

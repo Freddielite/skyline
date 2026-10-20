@@ -10,7 +10,7 @@ export const IND_CAP = [0, 8, 18, 42];
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const D4 = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 const ZK = { [T.RES]: 'r', [T.COM]: 'c', [T.IND]: 'i' };
-const COVS = ['police', 'fire', 'health', 'edu', 'fun'];
+const COVS = ['police', 'fire', 'health', 'edu', 'fun', 'transit'];
 
 export class Sim {
   constructor(world, state) {
@@ -34,7 +34,7 @@ export class Sim {
     this.facilities = [];
     this.pending = new Map();          // tile -> { from } while a building is still under construction
     this.defer = false;                // set by the game: new buildings only count once finished
-    this.net = { pSup: 0, pDem: 0, wSup: 0, wDem: 0, tSup: 0, tDem: 0, unserved: 0, wasteUn: 0, upkeep: 0, crimeAvg: 0, pollAvg: 0, police: 0, fire: 0, health: 0, edu: 0, fun: 0, stadiums: 0 };
+    this.net = { pSup: 0, pDem: 0, wSup: 0, wDem: 0, tSup: 0, tDem: 0, unserved: 0, wasteUn: 0, upkeep: 0, crimeAvg: 0, pollAvg: 0, police: 0, fire: 0, health: 0, edu: 0, fun: 0, transit: 0, stadiums: 0 };
     this.recount();
     this.analyze();
   }
@@ -72,7 +72,7 @@ export class Sim {
     const n = this.net, avgTax = (this.tax.r + this.tax.c + this.tax.i) / 3;
     const parkBonus = Math.min(18, (this.parks * 400) / (this.pop + 100));
     let h = 58 - (avgTax - 9) * 3.2 + parkBonus - Math.max(0, -this.rd) * 12;
-    h += n.police * 7 + n.health * 7 + n.edu * 6 + n.fire * 3 + n.fun * 8 - n.crimeAvg * 0.18 - n.pollAvg * 0.16 - n.unserved * 30 - n.wasteUn * 18;
+    h += n.police * 7 + n.health * 7 + n.edu * 6 + n.fire * 3 + n.fun * 8 + n.transit * 4 - n.crimeAvg * 0.18 - n.pollAvg * 0.16 - n.unserved * 30 - n.wasteUn * 18;
     this.happiness = clamp(Math.round(h), 0, 100);
   }
 
@@ -226,12 +226,12 @@ export class Sim {
       this.crime[i] = clamp((10 + dens[i] * 0.5 + poll[i] * 0.12 - this.cov.police[i] * 55) * (this.ord.watch ? 0.85 : 1), 0, 100);
       const x = i % N, y = (i / N) | 0;
       let v = 40 + Math.min(24, parkAcc[i]) + (w.roadNear(x, y, 1) ? 8 : 0);
-      v += this.cov.police[i] * 5 + this.cov.health[i] * 6 + this.cov.edu[i] * 6 + this.cov.fire[i] * 4 + this.cov.fun[i] * 6 - poll[i] * 0.28 - this.crime[i] * 0.12;
+      v += this.cov.police[i] * 5 + this.cov.health[i] * 6 + this.cov.edu[i] * 6 + this.cov.fire[i] * 4 + this.cov.fun[i] * 6 + this.cov.transit[i] * 5 - poll[i] * 0.28 - this.crime[i] * 0.12;
       this.lv[i] = clamp(v, 0, 100);
       if (w.kind[i] === T.RES && this.lvl(i)) { const wgt = POP_CAP[this.lvl(i)]; pv += wgt; polSum += poll[i] * wgt; crSum += this.crime[i] * wgt; for (const k of COVS) covS[k] += this.cov[k][i] * wgt; }
     }
     const pvv = Math.max(1, pv);
-    Object.assign(this.net, { pSup, pDem, wSup, wDem, tSup, tDem, unserved: consumers.length ? unpowered / consumers.length : 0, wasteUn: zc ? wUn / zc : 0, upkeep, stadiums, crimeAvg: pv ? crSum / pvv : 0, pollAvg: pv ? polSum / pvv : 0, police: covS.police / pvv, fire: covS.fire / pvv, health: covS.health / pvv, edu: covS.edu / pvv, fun: covS.fun / pvv });
+    Object.assign(this.net, { pSup, pDem, wSup, wDem, tSup, tDem, unserved: consumers.length ? unpowered / consumers.length : 0, wasteUn: zc ? wUn / zc : 0, upkeep, stadiums, crimeAvg: pv ? crSum / pvv : 0, pollAvg: pv ? polSum / pvv : 0, police: covS.police / pvv, fire: covS.fire / pvv, health: covS.health / pvv, edu: covS.edu / pvv, fun: covS.fun / pvv, transit: covS.transit / pvv });
     this.needAn = false;
     this.updateHappiness();
   }
@@ -293,6 +293,11 @@ export class Sim {
   spend(c) { if (this.money < c) return false; this.money -= c; return true; }
   canPlaceBuilding(key, x, y) {
     const def = BY_KEY[key], w = this.w;
+    if (def.road) {                                   // bus stops and terminals must sit beside a road
+      let ok = false;
+      for (let yy = y - 1; yy <= y + def.d && !ok; yy++) for (let xx = x - 1; xx <= x + def.w; xx++) if (w.isRoad(xx, yy)) { ok = true; break; }
+      if (!ok) return { ok: false, why: 'Must be next to a road' };
+    }
     for (let dy = 0; dy < def.d; dy++) for (let dx = 0; dx < def.w; dx++) {
       const xx = x + dx, yy = y + dy;
       if (!w.inb(xx, yy)) return { ok: false, why: 'Out of bounds' };
