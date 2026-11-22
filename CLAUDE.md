@@ -2,7 +2,7 @@
 
 Isometric city builder for Android. React + Vite + canvas, packaged with Capacitor.
 Project folder on Freddie's machine: `/home/freddielite/Downloads/skyline`
-App ID: `com.wyntek.skyline` · Current version: **0.5.14**
+App ID: `com.wyntek.skyline` · Current version: **0.5.16**
 
 This file is the handover: what has been built, how to push it to the phone, and the rules for future changes.
 Anyone (person or AI assistant) working on this project should read it first.
@@ -12,7 +12,7 @@ Anyone (person or AI assistant) working on this project should read it first.
 ## Rules for every change
 
 1. **Always end with the push command.** Every fix or feature, however small, ends with the full push command below, written out exactly, so it can be copied and run without looking anything up.
-2. **Always bump the version** in `package.json` (0.5.14 → 0.5.15 and so on). The game shows "Updated to version X" on first launch and the version in Menu, which is how we confirm the phone really got the new build.
+2. **Always bump the version** in `package.json` (0.5.16 → 0.5.17 and so on). The game shows "Updated to version X" on first launch and the version in Menu, which is how we confirm the phone really got the new build.
 3. **Deliver the whole project as `skyline.zip`**, with the files at the top level of the zip (no `skyline/` folder inside), and without `node_modules/`, `dist/` or `android/`.
 4. **Add a short entry to the change history** at the bottom of this file and to `README.md`.
 5. **Check performance on a slow phone.** The test phone is an Infinix HOT. Do heavy work once and cache it in sprites. The main view is drawn on the GPU (see "Drawing engine" below): `ctx.filter` (blur) does nothing there, and additive glow (`'lighter'`) is free.
@@ -45,7 +45,7 @@ The `&&` means each step only runs if the one before succeeded. If one fails, th
 
 ## Troubleshooting
 
-**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.5.14 · built (date) UTC`.
+**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.5.16 · built (date) UTC`.
 
 **Check the project folder has the new code:**
 ```bash
@@ -108,6 +108,10 @@ adb install android/app/build/outputs/apk/debug/app-debug.apk
 | Harbor ships | Test tools → +$50,000 and Unlock all. Zone industry along the sea (Coastline map) and along an inland lake (Lakeland), connect them to the highway and let them grow. Sea harbors: container ships sail in from the map edge, tie up at the quay, then sail out (each round trip takes a few minutes). Lake harbors: a tug pushes a barge between harbors, or across the lake and back. With no tool picked, tap a harbor: "Ships to the sea" says Yes, or "inland water". Build a bridge that cuts a harbor off from the sea: the row says a bridge blocks the way, City → Advisors warns, and its ships switch to barges. Night: running lights. |
 | Interface | Top left: money, residents, happiness and a utilities chip (mint icons when power, water and garbage are fine; a shortage shows its numbers in amber or red). Tap money or the chip for City → Budget. Top right: clock and date, speed, R/C/I demand. Left rail: tap a category to open its tools, tap it again or ✕ or the map to close. Picking a tool closes the pop-out and shows a chip ("Road $10 ✕"); tap the chip to change tool, ✕ to stop building. Undo appears under the chip. Right column: Views, City, Menu, Hide. Panels and the Inspector open next to the right column. |
 | Landfill | Waste → Landfill. It fills its 2×2 lot: grassed cell, soil-capped cell, active cell with a compactor and gulls, gravel yard with office and skips, fence along the front. |
+| Shore buildings | Test tools → +$50,000 and Unlock all. Fun → Pier on any shore with 2 rows of open water in front; Fun → Beach (2×2) on sand by the water; Fun → Marina (2×2) by a lake or the sea with 3 rows of open water; Transit → Ferry pier next to a road, by a lake or the sea. Each faces the water by itself and reaches out over it. A bad spot gives a message saying why. Build a second ferry pier on the same water: a ferry runs between them, the Inspector says "Ferry route: Yes", and Views → Transit shows coverage around both (a lone ferry pier serves nothing, and Advisors say so). Yachts sail out from the marina and back. Bridges can't be built over a pier, beach or marina's water, and ships steer around them. |
+| Building detail | Zone a neighbourhood and let it grow (new buildings pick from 8 looks). Zoom in: some flat roofs have solar panels, a roof garden, a water tank with air-conditioning units, or a plant room with vents; some apartments have balconies with washing; some houses have a hedge, picket fence and a car in the drive; some shops have a rooftop sign and bins. Older cities keep their buildings until they grow again. |
+| Seasons | Menu → Seasons → Follow the calendar. Test tools → End month until September: trees turn orange, red and yellow, grass goes golden. December: bare trees with snow on the branches, frosted grass, snow on pine branches, chimney smoke all day. March: green again. Always summer turns it off. |
+| Small life | Police HQ, Fire HQ and University flags wave (still on Smooth). Gulls circle over harbors, piers and beaches (not on Smooth). |
 | Moving vans | Set taxes to 20% so people leave: cars with boxes on the roof drive from the homes to the highway and fade out at the map edge. When homes grow, vans drive in from the highway. Homes not linked to the highway send no vans. |
 
 ---
@@ -225,12 +229,27 @@ Freddie found the interface covered too much of the map (about 40% in landscape)
 - **Right column** (`.side`): Views, City, Menu, Hide as compact buttons under the top-right pill; sheets, the Inspector and alerts open beside it (`--below`, `--side-w`). On narrow portrait screens the right pill drops below the left one.
 - **Landfill** (`dump()` in `sprites.js`): four terraced cells inside the 2×2 diamond (grassed with a gas vent, soil-capped, active cell with muted waste, bin bags, a compactor and gulls, gravel yard with office, skips and weighbridge) and a chain-link fence with a gate.
 
-## What's next (agreed order)
+## Shore buildings (built in 0.5.15, Water part 2, second half)
 
-1. **Water, part 2, second half** (below, planned as 0.5.15): pier, beach, marina, ferry pier. Barges on a lake with one harbor should go to the marina once it exists (`Ships.destination`).
-2. **Graphics step 3** (below): richer building art and small signs of life.
+- **Definitions** (`buildings.js`, ids 23–26): `pier` (1×1, $400, fun 0.45, any shore), `beach` (2×2 on sand, $600, fun 0.8, unlocks at 300), `marina` (2×2, $3,000, fun 1.1, lake or sea, unlocks at 1,000), `ferry` (1×1, $1,500, transit 1.0, lake or sea, next to a road, unlocks at 600). `shore` says what water it needs, `reach` how many rows of water the structure covers, `dock` adds a berth row of open water for boats.
+- **Facing:** the footprint is on land; `sim.shoreFace()` picks the first side (0 +x, 1 +y, 2 −x, 3 −y) with enough open water in front (no bridges, not used by another shore building) and stores it in `world.variant` of the footprint tiles. Local coordinates (u out from the water edge, v along the shore) come from `shoreXY()`; `frontTiles()` and `berthTile()` give the water tiles.
+- **Water in use:** `sim.decks()` marks water under a structure (1) and berths (2). Bridges can't be built there; ships don't sail under structures (`Ships.rebuild`, re-run when a bridge or shore building changes).
+- **Pictures** (`sprites.js`, `shoreKit`, `pier`, `beach`, `marina`, `ferryPier`): cached per face. Shore sprites get a canvas padded by the reach (`SVC_SPR_SHORE`, last number), and draw the water part first when the water is behind (faces 2, 3).
+- **Ferries:** `sim.labelWater()` numbers each open stretch of water; `linkFerries()` links ferry piers on the same stretch. A ferry pier gives transit coverage (longer commute reach, like bus coverage) only when linked. In `ships.js` the first pier on each stretch (and the third, with four or more) runs a ferry that calls at every pier in turn.
+- **Marina boats:** two yachts sail out up to about 14 tiles and back. A lake harbor with no other harbor sends its barge to the marina if the lake has one.
 
-## Water, part 2 (planned, not built yet)
+## Graphics step 3 (built in 0.5.16)
+
+- **8 looks per building** (`sim.js` grow: `variant` 0..7; renderer uses `% 8`). Variants 0..3 are the old pictures, so existing cities look the same until buildings grow. Variants 4..7 add detail in `sprites.js`: `roofDress()` (solar panels, roof garden, water tank and AC units, plant room with vents and antenna) on apartments, shops and offices; `balconies()` with washing on apartments; `yard()` (hedge, picket fence, mailbox, car in the drive) on houses; a rooftop sign and bins on shops. Level 3 towers, level 4 and waterfront buildings are unchanged.
+- **Seasons** (`SEASON` in `sprites.js`, set each frame by `game.js` from the month via `SEASON_OF`; setting `game.seasons`, Menu → Seasons): 0 spring/summer, 1 autumn (Sep–Nov), 2 winter (Dec–Feb). Only trees (`kit.tree`, when the sprite is made with a season), grass and sand tiles (`terrainSprite`, `gtint`), parks and the ground cache change, so a change of season redraws a few dozen small pictures, not the city (a season lasts 72 s at normal speed). `seasonal()` keeps showing the previous season's tree or park until the new one is made. Building lawns and trees inside building pictures stay as they are. In winter house chimneys smoke all day.
+- **Flags** wave live: `SVC_FLAGS` in `sprites.js` lists flag positions per service building (Police HQ, Fire HQ, University); the pictures have only the poles and `renderer.flag()` draws the cloth (still on Smooth).
+- **Gulls** (`renderer.gulls()`): three per harbor berth, pier and beach, circling and mostly gliding, with shadows. Positions looked up every 5 s. Skipped on Smooth.
+
+## What's next
+
+Nothing agreed yet. Ideas to discuss with Freddie: snow on roofs in winter (would mean a winter copy of every building picture, so check memory on the Infinix first), more variety for level 3 towers and level 4 buildings, people walking on piers and beaches.
+
+## Water, part 2 (built in 0.5.13 and 0.5.15; the original plan)
 
 The rest of the water plan, carried over from 0.5.6. Keep the three water styles in mind: big ships only on lake and sea harbors.
 
@@ -252,7 +271,7 @@ Each unlocks at a population level, like other buildings, and sits on the shorel
 - New buildings on water must work with the ground cache in `renderer.js` (`updateGround`, redraws changed tiles and their neighbors) and with `shoreMask` / `waterRegions`.
 - Boats already hide under bridges (`renderer.boats`); harbor ships should do the same.
 
-## Graphics step 3 (planned, not built yet)
+## Graphics step 3 (the original plan, built in 0.5.16)
 
 The last step of the graphics plan agreed on 22 Nov 2026 (step 1 = GPU drawing, 0.5.9; step 2 = light and water, 0.5.11). Same "living miniature" look, more detail and life. All art stays cached sprites drawn by code; check heat and the stutter readout on the Infinix after each part.
 - **Richer buildings:** more detail on roofs (vents, water tanks, solar panels, roof gardens), walls (balconies, signs, awnings, window frames) and ground (paths, hedges, parked cars, bins), and more variants per building so streets don't repeat (today: 4 variants per kind and level).
@@ -283,6 +302,8 @@ src/App.jsx              all interface panels: top pills, category rail and tool
 
 ## Change history
 
+- **0.5.16:** graphics step 3. Buildings pick from 8 looks, with solar panels, roof gardens, water tanks, balconies with washing, garden fences, cars in drives and shop signs. Seasons: autumn colours and winter frost with bare trees (Menu → Seasons). Waving flags and gulls over the water.
+- **0.5.15:** shore buildings. Fishing pier, beach, marina (with yachts) and ferry pier, each facing the water and reaching out over it. Two ferry piers on the same water run a ferry and extend commute reach like buses. Bridges and ships keep clear of them.
 - **0.5.14:** cleaner interface and a new landfill. Two small pills on top instead of a full-width bar, power/water/garbage folded into one chip that only shows numbers when short, a slim category rail with tools in a pop-out, an active-tool chip with ✕, and a compact right column. The map shows about twice as much at once. The landfill is redrawn as a fenced, terraced lot that fits its footprint.
 - **0.5.13:** harbor ships. Container ships sail in from the sea to sea harbors and back out; barges shuttle on inland lakes. Ships can't pass bridges; the Inspector and Advisors say when a bridge cuts a harbor off. A harbor that reaches the sea ships goods out like the highway, and a sea port raises industry demand a little.
 - **0.5.12:** cooler phone, longer battery. Auto frame rate (60 while touching, 30 when still, 20 when paused, never above 60 on fast screens), a Frame rate setting (Auto / 30 / 60), and Pretty at 1.25x resolution on phones. Plan for Water part 2 and Graphics step 3 written down above.

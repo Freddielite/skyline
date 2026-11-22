@@ -15,7 +15,8 @@ import { Transit } from './transit.js';
 import { Ambient } from './ambient.js';
 import { followPass } from './traffic.js';
 import { clamp, mulberry32 } from './util.js';
-import { spriteBudget } from './sprites.js';
+import { spriteBudget, setSeason, getSeason } from './sprites.js';
+const SEASON_OF = [2, 2, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2];   // by month: winter Dec-Feb, autumn Sep-Nov
 
 const SAVE_KEY = 'skyline.save.v1';
 const UNDO_MS = 20000;                 // a build can only be undone shortly after you make it
@@ -31,6 +32,7 @@ export class Game {
     this.acc = 0; this.last = 0; this.running = false; this.dirtySave = false; this.saveTimer = 0;
     this.renderer = new Renderer(canvas, this);
     try { this.quality = localStorage.getItem('skyline.quality') || 'auto'; } catch (e) { this.quality = 'auto'; }
+    try { this.seasons = localStorage.getItem('skyline.seasons') === 'off' ? 'off' : 'auto'; } catch (e) { this.seasons = 'auto'; }
     try { const f = localStorage.getItem('skyline.fps'); this.fpsSetting = f === '30' ? 30 : f === '60' ? 60 : 'auto'; } catch (e) { this.fpsSetting = 'auto'; }
     this.fast = this.quality === 'fast'; this.frameAvg = 16; this.slowT = 0; this.runT = 0; this.perf = { n: 0, sum: 0, worst: 0, at: 0, avg: 0, fps: 0, max: 0 };
     this.renderer.resize();
@@ -210,7 +212,7 @@ export class Game {
   trigger(k) { this.disasters.trigger(k); }
   stats() {
     const s = this.sim;
-    return { fpsSetting: this.fpsSetting, fpsNow: this.fpsNow, engine: this.renderer.engine, hitches: this.hitchInfo(), pages: this.renderer.ctx.pages ? this.renderer.ctx.pages.length : 0, money: Math.floor(s.money), pop: s.pop, date: s.dateLabel(), rd: s.rd, cd: s.cd, id: s.id, happy: s.happiness, tax: { ...s.tax }, income: s.lastIncome, expense: s.lastExpense, bld: s.bld, roads: s.roads, parks: s.parks, jobs: s.cJobs + s.iJobs, speed: this.speed, mode: this.mode, time: `${String(Math.floor(this.hour)).padStart(2, '0')}:${String(Math.floor((this.hour % 1) * 60)).padStart(2, '0')}`, citizens: this.agents.stats.total, employed: this.agents.stats.employed, tSup: s.net.tSup, tDem: s.net.tDem, wasteUn: s.net.wasteUn, pSup: s.net.pSup, pDem: s.net.pDem, wSup: s.net.wSup, wDem: s.net.wDem, upkeep: Math.round(s.net.upkeep), crime: Math.round(s.net.crimeAvg), poll: Math.round(s.net.pollAvg), cov: { police: s.net.police, fire: s.net.fire, health: s.net.health, edu: s.net.edu, fun: s.net.fun }, overlay: this.overlay,
+    return { seasons: this.seasons, season: getSeason(), fpsSetting: this.fpsSetting, fpsNow: this.fpsNow, engine: this.renderer.engine, hitches: this.hitchInfo(), pages: this.renderer.ctx.pages ? this.renderer.ctx.pages.length : 0, money: Math.floor(s.money), pop: s.pop, date: s.dateLabel(), rd: s.rd, cd: s.cd, id: s.id, happy: s.happiness, tax: { ...s.tax }, income: s.lastIncome, expense: s.lastExpense, bld: s.bld, roads: s.roads, parks: s.parks, jobs: s.cJobs + s.iJobs, speed: this.speed, mode: this.mode, time: `${String(Math.floor(this.hour)).padStart(2, '0')}:${String(Math.floor((this.hour % 1) * 60)).padStart(2, '0')}`, citizens: this.agents.stats.total, employed: this.agents.stats.employed, tSup: s.net.tSup, tDem: s.net.tDem, wasteUn: s.net.wasteUn, pSup: s.net.pSup, pDem: s.net.pDem, wSup: s.net.wSup, wDem: s.net.wDem, upkeep: Math.round(s.net.upkeep), crime: Math.round(s.net.crimeAvg), poll: Math.round(s.net.pollAvg), cov: { police: s.net.police, fire: s.net.fire, health: s.net.health, edu: s.net.edu, fun: s.net.fun }, overlay: this.overlay,
       canUndo: this.history.length, undoLabel: this.history.length ? this.history[this.history.length - 1].label : '', undoLeft: this.history.length ? Math.max(1, Math.ceil((UNDO_MS - (performance.now() - this.history[this.history.length - 1].t)) / 1000)) : 0,
       weather: this.ambient.setting, rain: this.ambient.weather.k, buses: this.transit.buses.length, riders: this.agents.stats.riding, heavyRoads: (() => { let n = 0; for (let i = 0; i < this.density.length; i++) if (this.density[i] > 1.3) n++; return n; })(),
       grant: s.grant || Math.round(Math.max(0, 300 * (1 - s.pop / 1200))), streak: s.streak, ordCost: s.ordCost(), disastersLevel: s.disasters,
@@ -434,6 +436,7 @@ export class Game {
     if (this.pointers.size > 0 || now - (this.lastInput || 0) < 1500 || this.disasters.tornado || this.disasters.ufo) return 60;
     return this.speed === 0 ? 20 : 30;
   }
+  setSeasons(v) { this.seasons = v; try { localStorage.setItem('skyline.seasons', v); } catch (e) { /* ignore */ } }
   setFps(v) { this.fpsSetting = v; try { localStorage.setItem('skyline.fps', String(v)); } catch (e) { /* ignore */ } }
   background(away) {
     if (away === !!this.away) return;
@@ -454,6 +457,7 @@ export class Game {
     this.clock += dt * sp;
     if (this.timeSetting === 'auto') { const ph = (this.clock / 180) % 1; this.mode = ph < 0.55 ? 0 : ph < 0.62 ? 1 : ph < 0.9 ? 2 : 1; }
     else this.mode = this.timeSetting;
+    setSeason(this.seasons === 'off' ? 0 : SEASON_OF[this.sim.month]);   // trees, grass and parks follow the calendar (cached per season)
     if (sp > 0) {
       this.acc += dt * sp;
       while (this.acc >= 0.8) { this.acc -= 0.8; this.sim.tick(); this.dirtySave = true; }

@@ -35,7 +35,9 @@ export const GOALS = [
 
 // Buildings unlock as the city grows (by the highest population it has reached, so a bad year never locks them again)
 export const UNLOCK = {
-  plaza: 300, library: 300, busterm: 300,
+  plaza: 300, library: 300, busterm: 300, beach: 300,
+  ferry: 600,
+  marina: 1000,
   pump: 600, police2: 600, fire2: 600, recycle: 600,
   hospital: 1000, museum: 1000,
   university: 1500, wte: 1500, treat: 1500,

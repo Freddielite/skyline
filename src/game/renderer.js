@@ -1,6 +1,6 @@
 import { hash } from './util.js';
 import { N, T, TERRAIN } from './world.js';
-import { spriteBudget, buildingSprite, parkSprite, zoneSprite, terrainSprite, treeSprite, roadSprite, serviceSprite, mip, bridgeUnder, bridgeTop } from './sprites.js';
+import { SVC_FLAGS, getSeason, spriteBudget, buildingSprite, parkSprite, zoneSprite, terrainSprite, treeSprite, roadSprite, serviceSprite, mip, bridgeUnder, bridgeTop } from './sprites.js';
 import { tint } from './util.js';
 import { BT } from './buildings.js';
 import { drawConstruction } from './construction.js';
@@ -96,7 +96,7 @@ export class Renderer {
       if (X < -mX * 3 || X > W + mX * 3 || Y < top || Y > H + 200 * z) continue;
       const k = w.kind[i]; let sp = null;
       if (k === T.EMPTY && w.tree[i]) sp = treeSprite(w.tree[i], mode);
-      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i] && !g.sites.has(i)) sp = buildingSprite(k, w.level[i], w.variant[i] % 4, mode, g.sim.pw[i] === 1, w.shore[i]);
+      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i] && !g.sites.has(i)) sp = buildingSprite(k, w.level[i], w.variant[i] % 8, mode, g.sim.pw[i] === 1, w.shore[i]);
       else if (k === T.PARK) sp = parkSprite(w.variant[i] % 4, mode);
       sp = mip(sp, lvl); if (!sp) continue;
       const hh = (sp.c.height / sp.S) * z, ww = (sp.c.width / sp.S) * z, top0 = Y - sp.oy * z, cut = Y + 10 * z, mirror = Y + 26 * z;
@@ -152,18 +152,18 @@ export class Renderer {
         }
         else if (k === T.PARK) { const sp = mip(parkSprite(w.variant[i] % 4, mode), lvl), site = g.sites.get(i); if (!sp) { /* next frame */ } else if (site) drawConstruction(ctx, site, X, Y, z, mode, t, sp, null); else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
         else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) {
-          const shr = w.shore[i], sp = mip(buildingSprite(k, w.level[i], w.variant[i] % 4, mode, g.sim.pw[i] === 1, shr), lvl);
+          const shr = w.shore[i], sp = mip(buildingSprite(k, w.level[i], w.variant[i] % 8, mode, g.sim.pw[i] === 1, shr), lvl);
           const site = g.sites.get(i), lv = w.level[i];
           if (mode === 2 && ctx.gpu && !g.fast && g.sim.pw[i] === 1 && !site) {
             const r = (40 + lv * 10) * z; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.2 + lv * 0.03;
             ctx.drawImage(this.poolSprite(), X - r, Y + 16 * z - r * 0.5, r * 2, r); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
           }
           if (!sp) { /* picture not made yet: it appears in a frame or two */ }
-          else if (site) { const so = site.from > 0 ? mip(buildingSprite(k, site.from, site.pv % 4, mode, g.sim.pw[i] === 1, shr), lvl) : null; drawConstruction(ctx, site, X, Y, z, mode, t, sp, so); }
+          else if (site) { const so = site.from > 0 ? mip(buildingSprite(k, site.from, site.pv % 8, mode, g.sim.pw[i] === 1, shr), lvl) : null; drawConstruction(ctx, site, X, Y, z, mode, t, sp, so); }
           else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
           if (!site) {
             const sm = shr ? WF_SMOKE[`${shr}${k}${lv}`] : SMOKE[`${k}${lv}`];
-            if (sm && (k !== T.IND || g.sim.pw[i]) && (k !== T.RES || (mode >= 1 && hash(x, y, 9) > 0.35))) smokeList.push([sm, X, Y, hash(x, y, 4)]);
+            if (sm && (k !== T.IND || g.sim.pw[i]) && (k !== T.RES || ((mode >= 1 || getSeason() === 2) && hash(x, y, 9) > 0.35))) smokeList.push([sm, X, Y, hash(x, y, 4)]);
             if (k === T.COM && mode === 2 && g.sim.pw[i]) neon.push([X, Y + 16 * z, lv, x, y]);
           }
           if (site) { /* no status badges while building */ }
@@ -173,12 +173,13 @@ export class Renderer {
         } else if (k === T.SVC) {
           const bt = w.bt[i], def = BT[bt], dx = w.bo[i] & 3, dy = w.bo[i] >> 2;
           if (dx === def.w - 1 && dy === def.d - 1) {
-            const ax = x - dx, ay = y - dy, AX = sx(ax, ay), AY = sy(ax, ay), sp = mip(serviceSprite(bt, mode, def.power ? true : g.sim.pw[ay * N + ax] === 1), lvl);
+            const ax = x - dx, ay = y - dy, AX = sx(ax, ay), AY = sy(ax, ay), sp = mip(serviceSprite(bt, mode, def.power ? true : g.sim.pw[ay * N + ax] === 1, def.reach ? w.variant[ay * N + ax] : 0), lvl);
             const site = g.sites.get(ay * N + ax);
             if (!sp) { /* next frame */ }
             else if (site) drawConstruction(ctx, site, AX, AY, z, mode, t, sp, null);
             else ctx.drawImage(sp.c, AX - sp.ox * z, AY - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
             if (!site) { const sm = SMOKE['s' + bt]; if (sm && (def.power || bt === 16 || g.sim.pw[ay * N + ax] === 1)) smokeList.push([sm, AX, AY, hash(ax, ay, 4)]); }
+            if (!site && SVC_FLAGS[bt] && z >= 0.4) for (const f of SVC_FLAGS[bt]) this.flag(ctx, sx(ax + f[0], ay + f[1]), sy(ax + f[0], ay + f[1], f[2]), z, t, mode, f[3], g.fast, hash(ax, ay, f[0] * 7));
             if (bt === 2 && (!site || site.t / site.dur > 0.93)) this.blades(ctx, sx(ax + 0.5, ay + 0.5), sy(ax + 0.5, ay + 0.5, 74), z, t, mode);
             if (!site && g.sim.closed(def)) badges.push([sx(ax + def.w / 2, ay + def.d / 2), sy(ax + def.w / 2, ay + def.d / 2, 66), 'closed']);
             else if (!site && def.use && !g.sim.pw[ay * N + ax]) badges.push([sx(ax + def.w / 2, ay + def.d / 2), sy(ax + def.w / 2, ay + def.d / 2, 66), 'bolt']);
@@ -209,6 +210,7 @@ export class Renderer {
     if (neon.length) this.neon(ctx, neon, z, t);
     this.clouds(ctx, g, z, cx, cy, t, mode);
     if (z >= 0.4) this.birds(ctx, g, z, cx, cy, t, mode);
+    if (z >= 0.45 && !g.fast && g.ships) this.gulls(ctx, g, z, cx, cy, t, mode);
     if (g.disasters.tornado) this.tornado(ctx, g.disasters.tornado, z, cx, cy, t, mode);
     if (g.disasters.ufo) this.ufo(ctx, g.disasters.ufo, z, cx, cy, t, mode);
     if (g.overlay) this.overlay(ctx, g, z, cx, cy);
@@ -246,8 +248,8 @@ export class Renderer {
       const i = y * N + x, k = w.kind[i];
       if (k === T.EMPTY && w.tree[i]) send(mip(treeSprite(w.tree[i], mode), lvl));
       else if (k === T.PARK) send(mip(parkSprite(w.variant[i] % 4, mode), lvl));
-      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) send(mip(buildingSprite(k, w.level[i], w.variant[i] % 4, mode, g.sim.pw[i] === 1, w.shore[i]), lvl));
-      else if (k === T.SVC && w.bo[i] === 0) { const def = BT[w.bt[i]]; send(mip(serviceSprite(w.bt[i], mode, def.power ? true : g.sim.pw[i] === 1), lvl)); }
+      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) send(mip(buildingSprite(k, w.level[i], w.variant[i] % 8, mode, g.sim.pw[i] === 1, w.shore[i]), lvl));
+      else if (k === T.SVC && w.bo[i] === 0) { const def = BT[w.bt[i]]; send(mip(serviceSprite(w.bt[i], mode, def.power ? true : g.sim.pw[i] === 1, def.reach ? w.variant[i] : 0), lvl)); }
     }
   }
   // Color grading: aerial haze toward the far (upper) part of the view and a soft sunlight wash.
@@ -364,8 +366,8 @@ export class Renderer {
       const X = (s.x - s.y) * 32 * z + cx, Y = (s.x + s.y) * 16 * z + cy;
       if (X < -160 * z || X > this.W + 160 * z || Y < -120 * z || Y > this.H + 120 * z) return;
       const ang = Math.atan2((Math.cos(s.a) + Math.sin(s.a)) * 16, (Math.cos(s.a) - Math.sin(s.a)) * 32), ca = Math.cos(ang), sa = Math.sin(ang);
-      const bob = Math.sin(t * 1.3 + s.col) * 0.35 * z, cargo = s.kind === 'cargo';
-      const L = cargo ? [13, 13, 13, 17, 21][s.size] : 11, Wd = cargo ? [3.4, 3.4, 3.4, 4, 4.6][s.size] : 3.2;
+      const bob = Math.sin(t * 1.3 + s.col) * 0.35 * z, cargo = s.kind === 'cargo', yacht = s.kind === 'yacht', ferry = s.kind === 'ferry';
+      const L = cargo ? [13, 13, 13, 17, 21][s.size] : yacht ? 6 : ferry ? 9 : 11, Wd = cargo ? [3.4, 3.4, 3.4, 4, 4.6][s.size] : yacht ? 2 : ferry ? 3.3 : 3.2;
       ctx.save(); ctx.globalAlpha = Math.max(0, Math.min(1, s.fade)); ctx.translate(X, Y + bob);
       if (s.moving) {                                      // wake: a long soft trail and a V of foam
         ctx.fillStyle = 'rgba(255,255,255,.22)'; ctx.beginPath(); ctx.ellipse(-ca * (L + 10) * z, -sa * (L + 10) * z, (12 + L * 0.4) * z, (2.4 + Wd * 0.3) * z, ang, 0, 6.3); ctx.fill();
@@ -375,7 +377,13 @@ export class Renderer {
       }
       ctx.save(); ctx.rotate(ang);
       ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(1.2 * z, 1.4 * z, (L + 1) * z, (Wd + 0.6) * z, 0, 0, 6.3); ctx.fill();   // shadow on the water
-      if (cargo) {
+      if (yacht || ferry) {                                 // a white hull, pointed at the bow
+        ctx.fillStyle = rgb(244, 244, 240); ctx.beginPath(); ctx.moveTo(-L * z, -Wd * z); ctx.lineTo(L * 0.55 * z, -Wd * z); ctx.quadraticCurveTo(L * z, -Wd * 0.4 * z, L * 1.08 * z, 0);
+        ctx.quadraticCurveTo(L * z, Wd * 0.4 * z, L * 0.55 * z, Wd * z); ctx.lineTo(-L * z, Wd * z); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = ferry ? rgb(47, 111, 168) : rgb(...HULL[s.col]); ctx.fillRect(-L * z, (Wd - 0.6) * z, L * 1.5 * z, 0.6 * z);
+        if (yacht) { ctx.fillStyle = rgb(196, 160, 110); ctx.fillRect(-L * 0.8 * z, -(Wd - 0.6) * z, L * 0.7 * z, (Wd - 0.6) * 2 * z); }
+        else { ctx.fillStyle = rgb(236, 238, 240); ctx.fillRect(-L * 0.75 * z, -(Wd - 0.6) * z, L * 1.35 * z, (Wd - 0.6) * 2 * z); }
+      } else if (cargo) {
         const hc = HULL[s.col];
         ctx.fillStyle = rgb(...hc); ctx.beginPath();
         ctx.moveTo(-L * z, -Wd * z); ctx.lineTo(L * 0.62 * z, -Wd * z); ctx.quadraticCurveTo(L * z, -Wd * 0.5 * z, L * 1.05 * z, 0);
@@ -397,7 +405,14 @@ export class Renderer {
       }
       ctx.restore();
       // superstructure stands upright: the bridge at the stern of a cargo ship, the tug's cabin behind a barge
-      if (cargo) {
+      if (yacht) {                                          // mast and a furled sail, or the sail set when under way
+        ctx.strokeStyle = rgb(220, 220, 220); ctx.lineWidth = 0.8 * z; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -16 * z); ctx.stroke();
+        if (s.moving) { ctx.fillStyle = rgb(250, 250, 250); ctx.beginPath(); ctx.moveTo(0, -2 * z); ctx.lineTo(0, -15 * z); ctx.lineTo(6 * z * (ca >= 0 ? 1 : -1), -3 * z); ctx.closePath(); ctx.fill(); }
+      } else if (ferry) {                                   // two decks of windows and a blue funnel
+        ctx.fillStyle = rgb(240, 242, 244); ctx.fillRect(-5 * z, -6 * z, 10 * z, 5.5 * z);
+        ctx.fillStyle = mode === 2 ? '#ffe7a0' : rgb(60, 95, 130); ctx.fillRect(-4.4 * z, -5.2 * z, 8.8 * z, 1.2 * z); ctx.fillRect(-4.4 * z, -2.8 * z, 8.8 * z, 1.2 * z);
+        ctx.fillStyle = rgb(47, 111, 168); ctx.fillRect(-0.9 * z, -8.6 * z, 1.8 * z, 2.7 * z);
+      } else if (cargo) {
         const px = -ca * L * 0.78 * z, py = -sa * L * 0.78 * z, bh = (4 + s.size) * z;
         ctx.fillStyle = rgb(236, 236, 230); ctx.fillRect(px - 2.6 * z, py - bh, 5.2 * z, bh);
         ctx.fillStyle = mode === 2 ? '#ffe7a0' : rgb(70, 110, 140); ctx.fillRect(px - 2.2 * z, py - bh + 0.8 * z, 4.4 * z, 1.1 * z);
@@ -410,15 +425,47 @@ export class Renderer {
       }
       ctx.restore();
       if (mode >= 1) {                                     // running lights at dusk and night: a white masthead light and a warm glow
-        const k = mode === 2 ? 1 : 0.5, hx = X - ca * L * 0.78 * z * (cargo ? 1 : 0) - (cargo ? 0 : ca * (L + 3.8) * z), hy = Y + bob - sa * L * 0.78 * z * (cargo ? 1 : 0) - (cargo ? 0 : sa * (L + 3.8) * z);
+        const k = mode === 2 ? 1 : 0.5, back = cargo ? L * 0.78 : yacht || ferry ? 0 : L + 3.8, hx = X - ca * back * z, hy = Y + bob - sa * back * z;
         ctx.save(); ctx.globalAlpha = s.fade * k; ctx.globalCompositeOperation = 'lighter';
         ctx.drawImage(this.glowSprite(), hx - 12 * z, hy - 9 * z, 24 * z, 12 * z);
         ctx.drawImage(this.glowSprite(), X + ca * L * z - 6 * z, Y + bob + sa * L * z - 4 * z, 12 * z, 6 * z); ctx.restore();
-        ctx.fillStyle = `rgba(255,244,210,${0.95 * s.fade * k})`; ctx.fillRect(hx - 0.8 * z, hy - (cargo ? 8 + s.size : 5) * z, 1.6 * z, 1.6 * z);
+        ctx.fillStyle = `rgba(255,244,210,${0.95 * s.fade * k})`; ctx.fillRect(hx - 0.8 * z, hy - (cargo ? 8 + s.size : yacht ? 17 : ferry ? 10 : 5) * z, 1.6 * z, 1.6 * z);
       }
     }
   }
 
+  // A flag waving in the wind: three bands that ripple along the cloth. Smooth graphics draws it still.
+  flag(ctx, X, Y, z, t, mode, col, still, ph) {
+    const L = 11 * z, H = 7 * z, n = 6;
+    const wv = (i) => (still ? 0 : Math.sin(t * 5 + ph * 6 + i * 1.1) * (i / n) * 1.6 * z);
+    ctx.fillStyle = tint(col, mode); ctx.beginPath(); ctx.moveTo(X, Y);
+    for (let i = 1; i <= n; i++) ctx.lineTo(X + (L * i) / n, Y + (3 * z * i) / n + wv(i));
+    for (let i = n; i >= 0; i--) ctx.lineTo(X + (L * i) / n, Y + H - (1.5 * z * i) / n + wv(i));
+    ctx.closePath(); ctx.fill();
+  }
+  // Gulls circling over harbors, piers, beaches and marinas (where boats and people are), with their shadows on the water.
+  gulls(ctx, g, z, cx, cy, t, mode) {
+    if (!this.gullT || t - this.gullT > 5) {                  // where they gather is looked up every few seconds, not every frame
+      this.gullT = t; const spots = [];
+      for (const h of g.ships.harbors.values()) spots.push(h.dock);
+      const w = g.world; for (let i = 0; i < N * N && spots.length < 24; i++) if (w.kind[i] === T.SVC && w.bo[i] === 0 && (w.bt[i] === 23 || w.bt[i] === 24)) spots.push(i);
+      this.gullSpots = spots;
+    }
+    const col = mode === 2 ? 'rgba(220,225,235,.8)' : '#f7f7f2';
+    for (let s = 0; s < this.gullSpots.length; s++) {
+      const q = this.gullSpots[s], qx = q % N + 0.5, qy = ((q / N) | 0) + 0.5;
+      for (let j = 0; j < 3; j++) {
+        const ph = hash(q, j, 5) * 6.28, r = 0.9 + hash(q, j, 6) * 1.4, sp = (0.25 + hash(q, j, 7) * 0.2) * (j % 2 ? 1 : -1), a = t * sp + ph;
+        const bx = qx + Math.cos(a) * r, by = qy + Math.sin(a) * r * 0.8, hgt = 34 + hash(q, j, 8) * 18 + Math.sin(t * 0.7 + ph) * 4;
+        const X = (bx - by) * 32 * z + cx, Y = (bx + by) * 16 * z + cy;
+        if (X < -20 || X > this.W + 20 || Y < -60 || Y > this.H + 20) continue;
+        ctx.fillStyle = 'rgba(0,0,0,.08)'; ctx.beginPath(); ctx.ellipse(X, Y, 2.6 * z, 1 * z, 0, 0, 6.3); ctx.fill();
+        const flap = Math.sin(t * 9 + ph * 3) > 0.6 ? 2.4 : 0.6, yy = Y - hgt * z;   // mostly gliding, a few wingbeats
+        ctx.strokeStyle = col; ctx.lineWidth = 1.1 * z; ctx.lineCap = 'round'; ctx.beginPath();
+        ctx.moveTo(X - 4.5 * z, yy - flap * z); ctx.quadraticCurveTo(X - 2 * z, yy - 1.6 * z, X, yy); ctx.quadraticCurveTo(X + 2 * z, yy - 1.6 * z, X + 4.5 * z, yy - flap * z); ctx.stroke();
+      }
+    }
+  }
   birds(ctx, g, z, cx, cy, t, mode) {
     for (const f of g.ambient.birds) {
       for (let k = 0; k < f.n; k++) {
@@ -874,7 +921,8 @@ export class Renderer {
     if (!this.gc) { this.gc = document.createElement('canvas'); this.gc.width = this.gc.height = S; this.gcx = this.gc.getContext('2d'); this.gkey = new Uint8Array(N * N); }
     const key = this.gkey, x = this.gcx;
     const kOf = (i) => { const k = w.kind[i]; return 1 + k * 2 + ((k === T.RES || k === T.COM || k === T.IND) && !w.level[i] ? 1 : 0); };
-    if (!this.gJob && (this.gFor !== w || this.gMode !== mode)) this.gJob = { w, mode, row: 0, fresh: this.gFor !== w };
+    const season = getSeason();
+    if (!this.gJob && (this.gFor !== w || this.gMode !== mode || this.gSeason !== season)) this.gJob = { w, mode, season, row: 0, fresh: this.gFor !== w };
     const job = this.gJob;
     if (job) {
       if (job.w !== w) { this.gJob = null; this.gFor = null; return false; }   // a new city replaced the one being drawn
@@ -887,7 +935,7 @@ export class Renderer {
       for (let i = r0 * N; i < r1 * N; i++) key[i] = kOf(i);
       job.row = r1; this.gc2ok = false;
       if (r1 < N) return !job.fresh;                          // still working: show the old picture unless there is none
-      this.gJob = null; this.gFor = w; this.gMode = job.mode;
+      this.gJob = null; this.gFor = w; this.gMode = job.mode; this.gSeason = job.season;
       if (job.mode !== mode) return true;                     // the light changed again meanwhile; the next frame starts over
     }
     let regions = null;

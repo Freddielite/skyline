@@ -4,6 +4,10 @@ import { Game } from './game/game.js';
 const I = {
   hand: 'M8 13V5.5a1.5 1.5 0 013 0V11m0-6.5a1.5 1.5 0 013 0V11m0-5a1.5 1.5 0 013 0V13m0-4a1.5 1.5 0 013 0v6.5A6.5 6.5 0 0113 22h-1.6a6 6 0 01-4.7-2.3L3.5 15.5a1.5 1.5 0 012.3-1.9L8 16',
   road: 'M9 3L5 21M15 3l4 18M12 4v3m0 4v3m0 4v3',
+  pier: 'M3 19c2 0 2-1.5 4.5-1.5S10 19 12 19s2-1.5 4.5-1.5S19 19 21 19M3 12h18M6 12v5M12 12v5M18 12v5M17 12V6',
+  umbrella: 'M12 4a8 8 0 018 8H4a8 8 0 018-8zm0 8l-2 7M3 20c2 0 2-1 4.5-1s2.5 1 4.5 1 2-1 4.5-1 2.5 1 4.5 1',
+  boat: 'M12 3v11m0-10l6 9h-6M4 15h16l-2.5 4h-11L4 15z',
+  ferry: 'M3 15h18l-2.5 4h-13L3 15zM6 15v-4h12v4M9 11V8h6v3M9 13h1m3 0h1',
   home: 'M3 11l9-7 9 7M5 10v10h14V10M10 20v-6h4v6',
   shop: 'M4 8h16l-1-4H5L4 8zm1 0v12h14V8M9 20v-6h6v6',
   gear: 'M4 20V10l5 3V8l5 3V5h6v15H4zM8 17h2m3 0h2m3 0h1',
@@ -80,14 +84,18 @@ const T = {
   library: { id: 'library', label: 'Library', icon: 'book', cost: 700 },
   museum: { id: 'museum', label: 'Museum', icon: 'bank', cost: 2200 },
   stadium: { id: 'stadium', label: 'Stadium', icon: 'ball', cost: 7000 },
+  pier: { id: 'pier', label: 'Pier', icon: 'pier', cost: 400 },
+  beach: { id: 'beach', label: 'Beach', icon: 'umbrella', cost: 600 },
+  marina: { id: 'marina', label: 'Marina', icon: 'boat', cost: 3000 },
+  ferry: { id: 'ferry', label: 'Ferry pier', icon: 'ferry', cost: 1500 },
 };
 const CATS = [
   { id: 'build', label: 'Build', short: 'Build', icon: 'road', tools: ['move', 'road', 'res', 'com', 'ind', 'park', 'clear'] },
   { id: 'util', label: 'Power & water', short: 'Utilities', icon: 'bolt', tools: ['move', 'coal', 'wind', 'wire', 'cable', 'water', 'pump', 'treat', 'pipe', 'clear'] },
   { id: 'waste', label: 'Waste', short: 'Waste', icon: 'trash', tools: ['move', 'dump', 'recycle', 'wte', 'clear'] },
   { id: 'svc', label: 'Services', short: 'Services', icon: 'shield', tools: ['move', 'police', 'police2', 'fire', 'fire2', 'clinic', 'hospital', 'school', 'university', 'clear'] },
-  { id: 'transit', label: 'Transit', short: 'Transit', icon: 'bus', tools: ['move', 'busstop', 'busterm', 'clear'] },
-  { id: 'fun', label: 'Amenities', short: 'Fun', icon: 'ball', tools: ['move', 'plaza', 'library', 'museum', 'stadium', 'clear'] },
+  { id: 'transit', label: 'Transit', short: 'Transit', icon: 'bus', tools: ['move', 'busstop', 'busterm', 'ferry', 'clear'] },
+  { id: 'fun', label: 'Amenities', short: 'Fun', icon: 'ball', tools: ['move', 'pier', 'beach', 'plaza', 'library', 'marina', 'museum', 'stadium', 'clear'] },
 ];
 const VIEWS = [
   { id: 'commute', label: 'Commutes' }, { id: 'traffic', label: 'Traffic' }, { id: 'transit', label: 'Transit' }, { id: 'value', label: 'Land value' }, { id: 'crime', label: 'Crime' }, { id: 'pollution', label: 'Pollution' },
@@ -530,6 +538,13 @@ export default function App() {
                 ))}
               </div>
               <p className="hint" style={{ marginTop: 6 }}>{st.fpsSetting === 'auto' ? 'Smooth (60) while you drag and zoom, 30 when the view is still: cooler phone, longer battery.' : st.fpsSetting === 30 ? 'Always 30: coolest, uses the least battery.' : 'Always 60: smoothest, makes the phone warmer.'}</p>
+              <h3>Seasons</h3>
+              <div className="seg two">
+                {[['auto', 'Follow the calendar'], ['off', 'Always summer']].map(([v, l]) => (
+                  <button key={v} className={st.seasons === v ? 'on' : ''} onClick={() => { g.setSeasons(v); setSt(g.stats()); }}>{l}</button>
+                ))}
+              </div>
+              <p className="hint" style={{ marginTop: 6 }}>Autumn colours from September, frost and bare trees from December.</p>
               <div className="seg two" style={{ marginTop: 8 }}>
                 <button className={tilt ? 'on' : ''} disabled={st.fast} onClick={flipTilt}>Lens focus {tilt && !st.fast ? 'on' : 'off'}</button>
                 <button onClick={() => { const el = document.documentElement; if (document.fullscreenElement) document.exitFullscreen && document.exitFullscreen(); else if (el.requestFullscreen) el.requestFullscreen().catch(() => {}); }}>Fullscreen</button>

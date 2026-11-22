@@ -1,7 +1,7 @@
 import { T, N, TERRAIN, SHORE_NAME } from './world.js';
 import { WF_NAME } from './waterfront.js';
 import { clamp, mulberry32, hash } from './util.js';
-import { BT, BY_KEY, ELEC, WATER, WASTE, CUT_STAGE, cutGroup } from './buildings.js';
+import { BT, BY_KEY, ELEC, WATER, WASTE, CUT_STAGE, cutGroup, frontTiles, berthTile } from './buildings.js';
 import { ORD, GOALS, UNLOCK, UNLOCK_NAME, LOANS, OVERDRAFT_RATE, TUTORIAL } from './rules.js';
 
 export const COST = { road: 10, bridge: 60, zone: 5, park: 25, bulldoze: 2, wire: 4, cable: 12, pipe: 6 };
@@ -277,6 +277,7 @@ export class Sim {
   anCoverage() {
     const { anchors } = this._an;
     for (const k of COVS) this.cov[k].fill(0);
+    this.linkFerries(anchors);
     let upkeep = 0, stadiums = 0;
     let uni = false;
     for (const a of anchors) {
@@ -286,6 +287,7 @@ export class Sim {
       if (a.def.key === 'stadium') stadiums++;
       if (a.def.key === 'university') uni = true;
       if (!a.def.cov) continue;
+      if (a.def.ferry && !this.ferryLinks.get(a.i)) continue;      // a ferry pier only serves once a ferry runs to another pier
       const eff = a.def.use === undefined || this.pw[a.i] ? 1 : 0.3, R = a.def.radius, cx = a.x + a.def.w / 2, cy = a.y + a.def.d / 2;
       for (const [key, str] of a.def.cov) {
         const arr = this.cov[key];
@@ -426,6 +428,43 @@ export class Sim {
   // Which waterfront lots can send ships out to sea. Water reaching the map edge is open sea, and ships can't pass under bridges,
   // so the sea is flooded in from the edge over water without a bridge on it. Lots within 2 tiles of that water ship to the sea;
   // lots by water that only reaches the edge past a bridge are blocked (the Inspector and Advisors say so).
+  // Connected parts of open water (no bridge on them), for ferries.
+  labelWater() {
+    const w = this.w, n = N * N, wc = this.waterComp || (this.waterComp = new Int32Array(n)), st = []; wc.fill(-1); let id = 0;
+    const open = (q) => w.terrain[q] === TERRAIN.WATER && w.kind[q] !== T.ROAD;
+    for (let s0 = 0; s0 < n; s0++) {
+      if (wc[s0] >= 0 || !open(s0)) continue;
+      wc[s0] = id; st.push(s0);
+      while (st.length) { const c = st.pop(), x = c % N, y = (c / N) | 0; for (const [dx, dy] of D4) { const xx = x + dx, yy = y + dy; if (!w.inb(xx, yy)) continue; const q = yy * N + xx; if (wc[q] < 0 && open(q)) { wc[q] = id; st.push(q); } } }
+      id++;
+    }
+  }
+  // Ferry piers on the same open water are linked: each one's count of other piers it can reach.
+  linkFerries(anchors) {
+    if (!this.waterComp) this.labelWater();
+    const by = new Map(), at = []; this.ferryLinks = new Map();
+    for (const a of anchors) { if (!a.def.ferry || this.closed(a.def)) continue; const [bx, by2] = berthTile(a.def, a.x, a.y, this.w.variant[a.i]); const c = this.w.inb(bx, by2) ? this.waterComp[by2 * N + bx] : -1; if (c < 0) continue; at.push([a.i, c]); by.set(c, (by.get(c) || 0) + 1); }
+    for (const [i, c] of at) this.ferryLinks.set(i, by.get(c) - 1);
+  }
+  // Water tiles taken by shore buildings: 1 = under a pier, deck or pontoon, 2 = a berth kept clear for boats.
+  decks() {
+    const w = this.w, d = this._deck || (this._deck = new Uint8Array(N * N)); d.fill(0);
+    for (let i = 0; i < N * N; i++) {
+      if (w.kind[i] !== T.SVC || w.bo[i] !== 0) continue; const def = BT[w.bt[i]]; if (!def.reach) continue;
+      for (const [xx, yy, r] of frontTiles(def, i % N, (i / N) | 0, w.variant[i], true)) if (w.inb(xx, yy)) d[yy * N + xx] = r < def.reach ? 1 : 2;
+    }
+    return d;
+  }
+  // Which way a shore building at (x, y) can face: the first side with open water in front (-1 if none).
+  shoreFace(def, x, y) {
+    const w = this.w, deck = this.decks();
+    for (let face = 0; face < 4; face++) {
+      let ok = true;
+      for (const [xx, yy] of frontTiles(def, x, y, face, true)) { if (!w.inb(xx, yy)) { ok = false; break; } const q = w.idx(xx, yy); if (w.terrain[q] !== TERRAIN.WATER || w.kind[q] === T.ROAD || deck[q]) { ok = false; break; } }
+      if (ok) return face;
+    }
+    return -1;
+  }
   analyzeSea() {
     const w = this.w, n = N * N, open = new Uint8Array(n), edgeB = new Uint8Array(n), st = [];
     const water = (q) => w.terrain[q] === TERRAIN.WATER;
@@ -435,6 +474,7 @@ export class Sim {
         for (const [dx, dy] of D4) { const xx = x + dx, yy = y + dy; if (!w.inb(xx, yy)) continue; const q = yy * N + xx; if (!mark[q] && ok(q)) { mark[q] = 1; st.push(q); } } }
     };
     flood(open, (q) => water(q) && w.kind[q] !== T.ROAD);
+    this.labelWater();
     flood(edgeB, water);
     const sl = this.seaLink; sl.fill(0);
     for (let i = 0; i < n; i++) {
@@ -516,7 +556,7 @@ export class Sim {
       const d = this.zoneDemand(z), lvl = w.level[i];
       const road = w.roadNear(x, y, 2);
       if (!road) { if (lvl && rnd() < 0.03) { w.level[i] = lvl - 1; if (z === T.RES) this.events.push({ type: 'moveOut', i, n: POP_CAP[lvl] - POP_CAP[lvl - 1] }); } continue; }
-      const grow = (to) => { const pv = w.variant[i]; w.level[i] = to; w.variant[i] = Math.floor(rnd() * 4); this.needAn = true; this.markBuilt(i, { kind: z, from: lvl, to, pv }); };
+      const grow = (to) => { const pv = w.variant[i]; w.level[i] = to; w.variant[i] = Math.floor(rnd() * 8); this.needAn = true; this.markBuilt(i, { kind: z, from: lvl, to, pv }); };   // 8 looks per building (4..7 add roof and street details)
       const shrink = () => { w.level[i] = lvl - 1; this.needAn = true; if (z === T.RES) this.events.push({ type: 'moveOut', i, n: POP_CAP[lvl] - POP_CAP[lvl - 1] }); };
       if (lvl === 0) {
         if (!this.blocker(i, z, 0) && rnd() < 0.15 + 0.5 * Math.max(0, d)) grow(1);
@@ -598,6 +638,7 @@ export class Sim {
     if (this.hwRoads === 0) add('Planning', 'bad', 'Nothing can grow until your roads connect to the highway at the edge of the map.', 'commute');
     else if (n.offGrid > 3) add('Planning', 'warn', `${n.offGrid} zoned lots are on roads that don\u2019t reach the highway. Connect them to the main road network.`, 'commute');
     if (this.portsBlocked) add('Transport', 'warn', `${this.portsBlocked} harbor${this.portsBlocked > 1 ? 's' : ''} can\u2019t send ships to the sea: a bridge blocks the way. Ships can\u2019t pass under bridges, so remove it or route the road another way.`, null, 'Bridge traps cargo ships in the harbor');
+    if (this.ferryLinks) { let lone = 0; for (const v of this.ferryLinks.values()) if (!v) lone++; if (lone) add('Transport', 'tip', `${lone === 1 ? 'A ferry pier has' : lone + ' ferry piers have'} no ferry yet. Build a second ferry pier across the same water to start a route.`, 'transit'); }
     if (n.noJobN > 2) add('Planning', 'warn', `${n.noJobN} homes have no jobs within commuting distance. Zone shops or industry closer, or add bus stops to stretch commutes.`, 'commute', 'Long commutes drive residents out of the suburbs');
     if (n.noWorkN > 2) add('Planning', 'warn', `${n.noWorkN} workplaces can\u2019t find workers nearby. Zone homes closer to them.`, 'commute');
     if (n.pDem > n.pSup) add('Utilities', 'bad', `Power demand is ${n.pDem} but plants make ${n.pSup}. Build another plant.`, 'power', 'Brownouts hit the city as power runs short');
@@ -643,6 +684,7 @@ export class Sim {
       if (def.water) rows.push(row('Water output', def.water + (def.use && !this.pw[a] ? ' (30% without power)' : '')));
       if (def.waste) rows.push(row('Garbage capacity', def.waste));
       if (def.cov) rows.push(row('Serves', `${def.radius} tiles around`));
+      if (def.ferry && !building && !shut) { const nf = (this.ferryLinks && this.ferryLinks.get(a)) || 0; rows.push(row('Ferry route', nf ? `Yes, to ${nf} other pier${nf > 1 ? 's' : ''}` : 'No, needs a second ferry pier on the same water', nf > 0)); }
       if (def.pollute) rows.push(row('Pollution', 'Yes', false));
       return { x: ax, y: ay, w: def.w, d: def.d, title: def.name, sub: shut ? 'Reopens when the city is out of debt' : '', rows, why: shut ? 'Closed to save money while the city owes the bank' : null };
     }
@@ -692,6 +734,15 @@ export class Sim {
       const i = w.idx(xx, yy), k = w.kind[i];
       if (w.terrain[i] === TERRAIN.WATER) return { ok: false, why: 'Can\u2019t build on water' };
       if (!(k === T.EMPTY || (ZK[k] && w.level[i] === 0))) return { ok: false, why: 'Tiles must be clear' };
+      if (def.shore === 'sand' && w.terrain[i] !== TERRAIN.SAND) return { ok: false, why: 'Beaches go on sand, right by the water' };
+    }
+    if (def.shore) {
+      let near = 0; for (let dy = 0; dy < def.d; dy++) for (let dx = 0; dx < def.w; dx++) near = Math.max(near, w.shore[w.idx(x + dx, y + dy)]);
+      if (!near) return { ok: false, why: 'Must be built on the shore' };
+      if (def.shore === 'lake' && near < 2) return { ok: false, why: `${def.name}s need a lake or the sea, not a pond` };
+      const face = this.shoreFace(def, x, y);
+      if (face < 0) return { ok: false, why: def.dock ? `Must be on the shore, with ${def.reach + 1} rows of open water in front (no bridges)` : `Must be on the shore, with ${def.reach} row${def.reach > 1 ? 's' : ''} of open water in front (no bridges)` };
+      return { ok: true, face };
     }
     return { ok: true };
   }
@@ -703,6 +754,7 @@ export class Sim {
     for (let dy = 0; dy < def.d; dy++) for (let dx = 0; dx < def.w; dx++) {
       const i = w.idx(x + dx, y + dy);
       w.kind[i] = T.SVC; w.bt[i] = def.id; w.bo[i] = dx | (dy << 2); w.level[i] = 0; w.tree[i] = 0;
+      if (def.shore) w.variant[i] = c.face;       // which side the water is on
       if (w.wire[i] === 1) w.wire[i] = 0;      // overhead lines are cleared, buried cable stays
     }
     this.markBuilt(w.idx(x, y), { bt: def.id, from: 0, to: 1 });
@@ -718,6 +770,7 @@ export class Sim {
     if (w.kind[i] === T.ROAD) return { ok: false };
     const ax = w.isRoad(x - 1, y) || w.isRoad(x + 1, y), ay = w.isRoad(x, y - 1) || w.isRoad(x, y + 1);
     if (!ax && !ay) return { ok: false, why: 'Bridges must start from a road on the shore' };
+    if (this.decks()[i]) return { ok: false, why: 'A pier, beach or marina uses this water' };
     if (ax && ay) return { ok: false, why: 'Bridges run in a straight line, with no junctions on the water' };
     const dx = ax ? 1 : 0, dy = ax ? 0 : 1;
     for (const s of [1, -1]) {                               // the road it joins must run the same way

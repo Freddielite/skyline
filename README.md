@@ -29,6 +29,20 @@ bars, swipe from an edge to peek them, and draws behind the camera cutout). Both
 - Utilities and services: tap a tile to place (the preview shows the footprint); drag to reposition before lifting.
 - With a build tool active, one finger paints and two fingers move the map.
 
+## 0.5.16: more detail, seasons and small life
+
+- New buildings pick from 8 looks: solar panels, roof gardens, water tanks and air-conditioning units on flat roofs, balconies with washing, hedges, picket fences and cars in the drive, rooftop shop signs
+- Seasons follow the calendar: autumn colours from September, bare trees and frost from December (Menu → Seasons → Always summer turns it off)
+- Flags wave on the Police HQ, Fire HQ and University; gulls circle over harbors, piers and beaches
+
+## 0.5.15: piers, beaches, marinas and ferries
+
+- Fun → Pier: a wooden fishing pier with a bait shack, on any shore. Cheap, and raises land value a little nearby
+- Fun → Beach (300 residents): umbrellas, towels, a lifeguard chair and swimmers, placed on sand by the water. Counts as an amenity
+- Fun → Marina (1,000 residents): a clubhouse and pontoons full of moored boats on a lake or the sea; yachts sail out and back. A bigger amenity boost
+- Transit → Ferry pier (600 residents, next to a road): build two on the same water and a ferry runs between them, stretching commute reach like buses
+- Each one turns to face the water by itself, and says why when a spot doesn't work
+
 ## 0.5.14: cleaner interface, new landfill
 
 - The top bar is now two small pills: money, residents, happiness and utilities on the left; clock, speed and demand on the right
@@ -36,7 +50,6 @@ bars, swipe from an edge to peek them, and draws behind the camera cutout). Both
 - Build tools: a slim category rail on the left; tap a category to open its tools, pick one and the pop-out closes, leaving a chip like "Road $10 ✕". ✕ goes back to moving the map
 - Views, City, Menu and Hide are compact buttons on the right; panels open beside them
 - The landfill is redrawn: a fenced lot with terraced cells (grassed, capped, active with a compactor and gulls) and a gravel yard with an office
-- Next: pier, beach, marina and ferry pier (0.5.15), then Graphics step 3 (see CLAUDE.md)
 
 ## 0.5.13: harbor ships
 

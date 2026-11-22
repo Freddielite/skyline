@@ -4,6 +4,7 @@
 // harbors on that water, or out across the lake and back when there is only one. Ships never pass under bridges.
 // Routes come from distance fields over the water (one per destination), made once and cached until a bridge changes.
 import { N, T, TERRAIN } from './world.js';
+import { BT, FACE_OUT, berthTile } from './buildings.js';
 
 const SEA_SHIPS = [0, 1, 1, 2, 3];     // cargo ships per sea harbor, by harbor level
 const BARGES = [0, 1, 1, 1, 2];        // barges per inland harbor, by harbor level
@@ -17,9 +18,9 @@ export class Ships {
     this.hd = new Float32Array(N * N * 8 + 8); this.hi = new Int32Array(N * N * 8 + 8);   // one heap, reused, so routes make no garbage
   }
   // ---- water map: open water (no bridge), its connected parts, and which parts reach the map edge ----
-  rebuild() {
-    const w = this.w, n = N * N, nav = this.nav, comp = this.comp; comp.fill(-1);
-    for (let i = 0; i < n; i++) nav[i] = w.terrain[i] === TERRAIN.WATER && w.kind[i] !== T.ROAD ? 1 : 0;
+  rebuild(sim) {
+    const w = this.w, n = N * N, nav = this.nav, comp = this.comp, deck = sim ? sim.decks() : null; comp.fill(-1);
+    for (let i = 0; i < n; i++) nav[i] = w.terrain[i] === TERRAIN.WATER && w.kind[i] !== T.ROAD && !(deck && deck[i] === 1) ? 1 : 0;   // nothing sails under piers and pontoons
     this.compSize = []; this.compEdge = []; this.edgeTiles = [];
     const st = [];
     for (let s = 0; s < n; s++) {
@@ -42,9 +43,9 @@ export class Ships {
     }
     this.fields.clear(); this.gen = (this.gen || 0) + 1;
   }
-  bridgeSig() {
+  bridgeSig() {                                      // changes when a bridge, pier, beach or marina is built or removed
     const w = this.w; let h = 7;
-    for (let i = 0; i < N * N; i++) if (w.kind[i] === T.ROAD && w.terrain[i] === TERRAIN.WATER) h = (h * 31 + i + 1) >>> 0;
+    for (let i = 0; i < N * N; i++) if ((w.kind[i] === T.ROAD && w.terrain[i] === TERRAIN.WATER) || (w.kind[i] === T.SVC && w.bo[i] === 0 && BT[w.bt[i]].reach)) h = (h * 31 + i + 1 + w.variant[i] * 7919) >>> 0;
     return h;
   }
   // Distance (in travel cost) from every open-water tile to the nearest seed. No corner cutting past land.
@@ -77,22 +78,37 @@ export class Ships {
   // ---- harbors: find them, pick each one's berth, and decide how many ships it should have ----
   scan(sim) {
     const w = this.w, sig = this.bridgeSig();
-    if (sig !== this.sig) { this.sig = sig; this.rebuild(); for (const h of this.harbors.values()) h.dead = true; }
+    if (sig !== this.sig) { this.sig = sig; this.rebuild(sim); for (const h of this.harbors.values()) h.dead = true; }
     const seen = new Set();
     for (let i = 0; i < N * N; i++) {
+      if (w.kind[i] === T.SVC && w.bo[i] === 0) {           // marinas and ferry piers have their own boats
+        const def = BT[w.bt[i]]; if (def.key !== 'marina' && !def.ferry) continue;
+        if (sim.pending.has(i) || sim.closed(def)) continue;
+        let h = this.harbors.get(i);
+        if (!h || h.dead) {
+          const face = w.variant[i], [bx, by] = berthTile(def, i % N, (i / N) | 0, face); if (bx < 0 || by < 0 || bx >= N || by >= N) continue;
+          const q = by * N + bx; if (!this.nav[q]) continue;
+          h = { i, type: def.ferry ? 'ferry' : 'marina', dock: q, comp: this.comp[q], sea: false, qx: -FACE_OUT[face][0], qy: -FACE_OUT[face][1], cool: 1 + this.rnd() * 4 }; this.harbors.set(i, h);
+        }
+        h.lvl = 1; seen.add(i); continue;
+      }
       if (w.kind[i] !== T.IND || w.shore[i] < 2) continue;
       const l = sim.lvl(i); if (!l) continue;
       let h = this.harbors.get(i);
       if (!h || h.dead) {
         const b = this.berth(i, sim.seaLink[i] === 1); if (!b) continue;
-        h = { i, ...b, cool: 1 + this.rnd() * 4 }; this.harbors.set(i, h);
+        h = { i, type: 'harbor', ...b, cool: 1 + this.rnd() * 4 }; this.harbors.set(i, h);
       }
       h.lvl = l; seen.add(i);
     }
     for (const [i, h] of this.harbors) if (!seen.has(i) || h.dead) { this.harbors.delete(i); h.gone = true; }
     for (const s of this.list) if (!this.harbors.has(s.h) || this.harbors.get(s.h) !== s.hb) s.orphan = true;
+    const routes = new Map();                             // ferry piers on each stretch of water, in a fixed order
+    for (const h of this.harbors.values()) if (h.type === 'ferry') (routes.get(h.comp) || routes.set(h.comp, []).get(h.comp)).push(h);
+    for (const r of routes.values()) r.sort((a, b) => a.i - b.i);
     for (const h of this.harbors.values()) {
-      h.want = (h.sea ? SEA_SHIPS : BARGES)[h.lvl];
+      if (h.type === 'ferry') { const r = routes.get(h.comp); h.route = r; const at = r.indexOf(h); h.want = r.length >= 2 && (at === 0 || (at === 2 && r.length >= 4)) ? 1 : 0; }
+      else h.want = h.type === 'marina' ? 2 : (h.sea ? SEA_SHIPS : BARGES)[h.lvl];
       const mine = this.list.filter((s) => s.hb === h && !s.orphan); h.active = mine.length;
       if (mine.length > h.want) mine[mine.length - 1].orphan = true;      // the harbor shrank: one ship fewer
     }
@@ -113,17 +129,22 @@ export class Ships {
   }
   // Where a barge goes: another harbor on the same water (taking turns), or out to the far side of the lake.
   destination(h, s) {
-    const others = [...this.harbors.values()].filter((o) => o !== h && !o.sea && o.comp === h.comp);
-    if (others.length) { const o = others[(s.trip++) % others.length]; return o.dock; }
+    const all = [...this.harbors.values()];
+    if (h.type === 'harbor') {
+      const others = all.filter((o) => o !== h && o.type === 'harbor' && !o.sea && o.comp === h.comp);
+      if (others.length) { const o = others[(s.trip++) % others.length]; return o.dock; }
+      const m = all.find((o) => o.type === 'marina' && o.comp === h.comp); if (m) return m.dock;     // or the marina, if the lake has one
+    }
     if (h.far == null) {
       const f = this.toTile(h.dock); if (!f) return null; let best = -1, far = h.dock;
-      for (let q = 0; q < N * N; q++) if (this.comp[q] === h.comp && this.cost[q] === 1 && f[q] < Infinity && f[q] > best) { best = f[q]; far = q; }
+      const lim = h.type === 'marina' ? 14 : 40;           // yachts take a short sail; barges cross the lake
+      for (let q = 0; q < N * N; q++) if (this.comp[q] === h.comp && this.cost[q] === 1 && f[q] <= lim && f[q] > best) { best = f[q]; far = q; }
       h.far = far;
     }
     return h.far;
   }
   spawn(h) {
-    const r = this.rnd, s = { hb: h, h: h.i, kind: h.sea ? 'cargo' : 'barge', fade: 0, a: 0, sp: 0, moving: false, col: Math.floor(r() * 5), size: h.lvl, trip: Math.floor(r() * 4), load: r() < 0.8 };
+    const r = this.rnd, s = { hb: h, h: h.i, kind: h.type === 'ferry' ? 'ferry' : h.type === 'marina' ? 'yacht' : h.sea ? 'cargo' : 'barge', qx: h.qx, qy: h.qy, leg: h.route ? h.route.indexOf(h) : 0, fade: 0, a: 0, sp: 0, moving: false, col: Math.floor(r() * 5), size: h.lvl, trip: Math.floor(r() * 4), load: r() < 0.8 };
     if (h.sea) {
       const edges = this.edgeTiles[h.comp]; if (!edges.length) return false;
       const f = this.toTile(h.dock); if (!f) return false;
@@ -134,7 +155,7 @@ export class Ships {
       Object.assign(s, { x: ex + 0.5 + ox * 1.5, y: ey + 0.5 + oy * 1.5, a: Math.atan2(-oy, -ox), state: 'in', goal: h.dock, sp: 0.55 + r() * 0.15 });
     } else {
       const dx = h.dock % N, dy = (h.dock / N) | 0;
-      Object.assign(s, { x: dx + 0.5, y: dy + 0.5, a: Math.atan2(h.qx, -h.qy), state: 'dock', wait: 4 + r() * 8, sp: 0.22 + r() * 0.06 });
+      Object.assign(s, { x: dx + 0.5, y: dy + 0.5, a: Math.atan2(h.qx, -h.qy), state: 'dock', wait: 4 + r() * 8, sp: s.kind === 'ferry' ? 0.45 : s.kind === 'yacht' ? 0.3 + r() * 0.08 : 0.22 + r() * 0.06 });
     }
     h.active++; this.list.push(s); return true;
   }
@@ -158,9 +179,13 @@ export class Ships {
       }
       if (s.state === 'dock' || s.state === 'dock2') {
         s.moving = false; s.wait -= dt;
-        const pa = Math.atan2(h.qx, -h.qy), pb = pa + Math.PI, da = angDiff(pa, s.a), db = angDiff(pb, s.a);   // lie along the quay
+        const pa = Math.atan2(s.qx, -s.qy), pb = pa + Math.PI, da = angDiff(pa, s.a), db = angDiff(pb, s.a);   // lie along the quay
         if (s.state === 'dock') s.a += clampA(Math.abs(da) < Math.abs(db) ? da : db, 0.5 * dt);
         if (s.wait > 0) continue;
+        if (s.kind === 'ferry') {                          // on to the next pier on the route
+          const r = h.route || []; if (r.length < 2) { s.fadeOut = true; continue; }
+          s.leg = (s.leg + 1) % r.length; const to = r[s.leg]; s.state = 'go'; s.goal = to.dock; s.to = to; continue;
+        }
         if (h.sea) { s.state = 'out'; s.ec = h.comp; s.load = this.rnd() < 0.7; }
         else if (s.state === 'dock') { const goal = this.destination(h, s); if (goal == null) { s.wait = 0.5; continue; } s.state = 'go'; s.goal = goal; s.load = !s.load; }
         else { s.state = 'back'; s.goal = h.dock; }
@@ -175,6 +200,7 @@ export class Ships {
       if (r === 'arrived') {
         if (s.state === 'out') { s.state = 'exit'; s.fadeOut = true; const ex = Math.floor(s.x), ey = Math.floor(s.y); s.a = Math.atan2(ey <= 0 ? -1 : ey >= N - 1 ? 1 : 0, ex <= 0 ? -1 : ex >= N - 1 ? 1 : 0); }
         else if (s.state === 'in' || s.state === 'back') { s.state = 'dock'; s.wait = h.sea ? 25 + this.rnd() * 25 : 12 + this.rnd() * 14; }
+        else if (s.state === 'go' && s.kind === 'ferry') { s.state = 'dock'; s.wait = 8 + this.rnd() * 5; if (s.to) { s.qx = s.to.qx; s.qy = s.to.qy; } }
         else if (s.state === 'go') { s.state = 'dock2'; s.wait = 8 + this.rnd() * 10; }
       }
     }

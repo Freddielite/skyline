@@ -22,8 +22,26 @@ export const BT = {
   20: { id: 20, key: 'treat', name: 'Water treatment', w: 3, d: 3, cost: 7500, upkeep: 260, water: 1500, use: 14, cat: 'util' },
   21: { id: 21, key: 'busstop', name: 'Bus stop', w: 1, d: 1, cost: 150, upkeep: 4, radius: 6, cov: [['transit', 0.5]], road: true, cat: 'transit' },
   22: { id: 22, key: 'busterm', name: 'Bus terminal', w: 2, d: 2, cost: 2200, upkeep: 100, radius: 12, use: 4, cov: [['transit', 1.2]], road: true, cat: 'transit' },
+  // On the shore (shore: 'water' any pond or bigger, 'lake' a lake or the sea, 'sand' on a beach). The footprint is on land and the
+  // structure reaches out over `reach` rows of water in front; `dock` needs one more row of open water where boats tie up.
+  23: { id: 23, key: 'pier', name: 'Fishing pier', w: 1, d: 1, cost: 400, upkeep: 8, radius: 6, cov: [['fun', 0.45]], cat: 'fun', shore: 'water', reach: 2 },
+  24: { id: 24, key: 'beach', name: 'Beach', w: 2, d: 2, cost: 600, upkeep: 12, radius: 9, cov: [['fun', 0.8]], cat: 'fun', shore: 'sand', reach: 1 },
+  25: { id: 25, key: 'marina', name: 'Marina', w: 2, d: 2, cost: 3000, upkeep: 60, radius: 12, use: 3, cov: [['fun', 1.1]], cat: 'fun', shore: 'lake', reach: 2, dock: true },
+  26: { id: 26, key: 'ferry', name: 'Ferry pier', w: 1, d: 1, cost: 1500, upkeep: 40, radius: 11, use: 2, cov: [['transit', 1]], cat: 'transit', shore: 'lake', reach: 1, dock: true, road: true, ferry: true },
   18: { id: 18, key: 'wte', name: 'Waste-to-energy', w: 2, d: 2, cost: 5200, upkeep: 140, waste: 200, radius: 14, power: 40, pollute: 8, pr: 6, cat: 'waste' },
 };
+// Shore buildings face the water on one side: face 0 = +x, 1 = +y, 2 = -x, 3 = -y (stored in world.variant).
+// Local coordinates: u = distance out from the water edge of the footprint (negative = on land), v = along the shore (0..size).
+export const FACE_OUT = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+export function shoreXY(face, s, u, v) { return face === 0 ? [s + u, v] : face === 1 ? [v, s + u] : face === 2 ? [-u, v] : [v, -u]; }
+// The water tiles in front of a shore building at anchor (x, y): rows 0..reach-1 (under the structure), then the berth row if it has one.
+export function frontTiles(def, x, y, face, berth) {
+  const out = [], s = def.w, rows = def.reach + (berth && def.dock ? 1 : 0);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < s; c++) { const [X, Y] = shoreXY(face, s, r + 0.5, c + 0.5); out.push([x + Math.floor(X), y + Math.floor(Y), r]); }
+  return out;
+}
+// Where boats tie up: the middle of the berth row.
+export function berthTile(def, x, y, face) { const [X, Y] = shoreXY(face, def.w, def.reach + 0.5, Math.max(0.5, def.w / 2 - 0.5)); return [x + Math.floor(X), y + Math.floor(Y)]; }
 export const BY_KEY = Object.fromEntries(Object.values(BT).map((b) => [b.key, b]));
 // per zone level 0..4 (level 4 = skyscrapers, office megatowers and hi-tech campuses)
 export const ELEC = { r: [0, 2, 6, 16, 34], c: [0, 2, 6, 18, 40], i: [0, 4, 10, 24, 30] };
