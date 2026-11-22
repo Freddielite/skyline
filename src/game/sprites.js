@@ -846,8 +846,7 @@ function dump(k) {
   poly([P(1.54, 1.42, 4), P(1.66, 1.42, 4), P(1.66, 1.42, 9), P(1.54, 1.42, 9)], C(k.mode === 2 ? '#ffe7a0' : '#5d7f9a'));
   poly([P(1.84, 1.18, 4), P(1.84, 1.34, 4), P(1.84, 1.34, 9), P(1.84, 1.18, 9)], C(k.mode === 2 ? '#ffe7a0' : '#55768f'));
   box(1.14, 1.14, 0.2, 0.14, 6, faces('#3f8f5a')); box(1.14, 1.3, 0.2, 0.14, 6, faces('#3d6fb0'));   // skips by the office
-  // gulls over the active cell
-  for (let i = 0; i < 5; i++) { const q = P(0.25 + hash(i, 15, 6) * 0.6, 1.2 + hash(i, 16, 6) * 0.5, 26 + hash(i, 17, 6) * 14); line(q, [q[0] + 3, q[1] - 1.6], C('#f4f4f0'), 1); line(q, [q[0] - 3, q[1] - 1.6], C('#f4f4f0'), 1); }
+  // (gulls over the landfill are live, see renderer.gulls: painted into the picture they looked stuck on the building behind)
   // chain-link fence along the two front edges, with a gate to the yard
   for (let i = 0; i <= 8; i++) { const u = i / 4; if (u < 1.2 || u > 1.5) line(P(u, 1.98), P(u, 1.98, 8), C('#6b7280'), 0.7); line(P(1.98, u), P(1.98, u, 8), C('#6b7280'), 0.7); }
   line(P(0, 1.98, 8), P(1.2, 1.98, 8), C('#6b7280'), 0.8); line(P(1.5, 1.98, 8), P(2, 1.98, 8), C('#6b7280'), 0.8);

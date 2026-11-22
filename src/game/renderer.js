@@ -8,6 +8,20 @@ import { drawSmoke, SMOKE } from './smoke.js';
 import { WF_SMOKE } from './waterfront.js';
 import { isSignal, light } from './traffic.js';
 import { createContext, touched } from './gl2d.js';
+// Which vertical strips of a w x d building picture belong to which of its tiles: each half-tile column goes to the
+// frontmost footprint tile it crosses; the picture's side margins go to the outermost columns. Cached per size.
+const SLICES = new Map();
+function sliceOf(fw, fd) {
+  const key = fw * 8 + fd; if (SLICES.has(key)) return SLICES.get(key);
+  const own = [];
+  for (let k = -fd; k <= fw - 1; k++) { let best = null; for (let j = 0; j < fd; j++) for (let i = 0; i < fw; i++) if ((k === i - j - 1 || k === i - j) && (!best || i + j > best[0] + best[1])) best = [i, j]; own.push([k, best[1] * fw + best[0]]); }
+  const out = Array.from({ length: fw * fd }, () => []);
+  for (let n = 0; n < own.length; n++) {
+    const [k, t] = own[n], k0 = n === 0 ? -1e4 : k, k1 = n === own.length - 1 ? 1e4 : k + 1, r = out[t], prev = r[r.length - 1];
+    if (prev && prev[1] === k0) prev[1] = k1; else r.push([k0, k1]);
+  }
+  SLICES.set(key, out); return out;
+}
 // harbor ship colours: hulls, containers, and the loads barges carry (sand, coal, gravel, clay, rubble)
 const HULL = [[38, 52, 78], [128, 44, 36], [34, 78, 62], [42, 42, 48], [26, 92, 120]];
 const BOX = [[196, 70, 52], [52, 110, 176], [222, 168, 52], [64, 148, 96], [200, 200, 205], [150, 74, 140]];
@@ -171,13 +185,19 @@ export class Renderer {
           else if (!g.sim.wt[i]) badges.push([X, Y + 16 * z - BADGE_H[lv] * z, 'drop']);
           else if (lv >= 2 && !g.sim.ts[i]) badges.push([X, Y + 16 * z - BADGE_H[lv] * z, 'trash']);
         } else if (k === T.SVC) {
-          const bt = w.bt[i], def = BT[bt], dx = w.bo[i] & 3, dy = w.bo[i] >> 2;
-          if (dx === def.w - 1 && dy === def.d - 1) {
+          const bt = w.bt[i], def = BT[bt], dx = w.bo[i] & 3, dy = w.bo[i] >> 2, multi = def.w * def.d > 1, last = dx === def.w - 1 && dy === def.d - 1;
+          // A building bigger than one tile is drawn in slices, each with the tile in front of it, so a neighbour standing
+          // in front (a warehouse beside a landfill, say) covers it instead of the whole picture being painted over the neighbour.
+          if (multi && !g.sites.has((y - dy) * N + (x - dx))) {
+            const ax = x - dx, ay = y - dy, sp = mip(serviceSprite(bt, mode, def.power ? true : g.sim.pw[ay * N + ax] === 1, def.reach ? w.variant[ay * N + ax] : 0), lvl);
+            if (sp) this.slices(ctx, sp, sx(ax, ay), sy(ax, ay), z, sliceOf(def.w, def.d)[dy * def.w + dx]);
+          }
+          if (last) {
             const ax = x - dx, ay = y - dy, AX = sx(ax, ay), AY = sy(ax, ay), sp = mip(serviceSprite(bt, mode, def.power ? true : g.sim.pw[ay * N + ax] === 1, def.reach ? w.variant[ay * N + ax] : 0), lvl);
             const site = g.sites.get(ay * N + ax);
             if (!sp) { /* next frame */ }
             else if (site) drawConstruction(ctx, site, AX, AY, z, mode, t, sp, null);
-            else ctx.drawImage(sp.c, AX - sp.ox * z, AY - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
+            else if (!multi) ctx.drawImage(sp.c, AX - sp.ox * z, AY - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
             if (!site) { const sm = SMOKE['s' + bt]; if (sm && (def.power || bt === 16 || g.sim.pw[ay * N + ax] === 1)) smokeList.push([sm, AX, AY, hash(ax, ay, 4)]); }
             if (!site && SVC_FLAGS[bt] && z >= 0.4) for (const f of SVC_FLAGS[bt]) this.flag(ctx, sx(ax + f[0], ay + f[1]), sy(ax + f[0], ay + f[1], f[2]), z, t, mode, f[3], g.fast, hash(ax, ay, f[0] * 7));
             if (bt === 2 && (!site || site.t / site.dur > 0.93)) this.blades(ctx, sx(ax + 0.5, ay + 0.5), sy(ax + 0.5, ay + 0.5, 74), z, t, mode);
@@ -434,6 +454,14 @@ export class Renderer {
     }
   }
 
+  // Draw the vertical strips [k0, k1) of a picture (in half-tile columns from the anchor's corner, 32 units each).
+  slices(ctx, sp, AX, AY, z, ranges) {
+    const Wu = sp.c.width / sp.S, Hu = sp.c.height / sp.S;
+    for (const [k0, k1] of ranges) {
+      const u0 = Math.max(0, sp.ox + k0 * 32), u1 = Math.min(Wu, sp.ox + k1 * 32); if (u1 <= u0) continue;
+      ctx.drawImage(sp.c, u0 * sp.S, 0, (u1 - u0) * sp.S, sp.c.height, AX + (u0 - sp.ox) * z, AY - sp.oy * z, (u1 - u0) * z, Hu * z);
+    }
+  }
   // A flag waving in the wind: three bands that ripple along the cloth. Smooth graphics draws it still.
   flag(ctx, X, Y, z, t, mode, col, still, ph) {
     const L = 11 * z, H = 7 * z, n = 6;
@@ -448,7 +476,7 @@ export class Renderer {
     if (!this.gullT || t - this.gullT > 5) {                  // where they gather is looked up every few seconds, not every frame
       this.gullT = t; const spots = [];
       for (const h of g.ships.harbors.values()) spots.push(h.dock);
-      const w = g.world; for (let i = 0; i < N * N && spots.length < 24; i++) if (w.kind[i] === T.SVC && w.bo[i] === 0 && (w.bt[i] === 23 || w.bt[i] === 24)) spots.push(i);
+      const w = g.world; for (let i = 0; i < N * N && spots.length < 24; i++) if (w.kind[i] === T.SVC && w.bo[i] === 0 && (w.bt[i] === 23 || w.bt[i] === 24 || w.bt[i] === 16)) spots.push(w.bt[i] === 16 ? i + N + 1 : i);
       this.gullSpots = spots;
     }
     const col = mode === 2 ? 'rgba(220,225,235,.8)' : '#f7f7f2';

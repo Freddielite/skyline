@@ -29,6 +29,11 @@ bars, swipe from an edge to peek them, and draws behind the camera cutout). Both
 - Utilities and services: tap a tile to place (the preview shows the footprint); drag to reposition before lifting.
 - With a build tool active, one finger paints and two fingers move the map.
 
+## 0.5.17: drawing order fix
+
+- Big buildings (landfill, hospital, stadium and other 2×2 and 3×3 buildings) no longer paint over a building standing in front of them
+- Gulls now circle over landfills instead of being painted onto them
+
 ## 0.5.16: more detail, seasons and small life
 
 - New buildings pick from 8 looks: solar panels, roof gardens, water tanks and air-conditioning units on flat roofs, balconies with washing, hedges, picket fences and cars in the drive, rooftop shop signs

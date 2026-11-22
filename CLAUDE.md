@@ -2,7 +2,7 @@
 
 Isometric city builder for Android. React + Vite + canvas, packaged with Capacitor.
 Project folder on Freddie's machine: `/home/freddielite/Downloads/skyline`
-App ID: `com.wyntek.skyline` · Current version: **0.5.16**
+App ID: `com.wyntek.skyline` · Current version: **0.5.17**
 
 This file is the handover: what has been built, how to push it to the phone, and the rules for future changes.
 Anyone (person or AI assistant) working on this project should read it first.
@@ -12,7 +12,7 @@ Anyone (person or AI assistant) working on this project should read it first.
 ## Rules for every change
 
 1. **Always end with the push command.** Every fix or feature, however small, ends with the full push command below, written out exactly, so it can be copied and run without looking anything up.
-2. **Always bump the version** in `package.json` (0.5.16 → 0.5.17 and so on). The game shows "Updated to version X" on first launch and the version in Menu, which is how we confirm the phone really got the new build.
+2. **Always bump the version** in `package.json` (0.5.17 → 0.5.18 and so on). The game shows "Updated to version X" on first launch and the version in Menu, which is how we confirm the phone really got the new build.
 3. **Deliver the whole project as `skyline.zip`**, with the files at the top level of the zip (no `skyline/` folder inside), and without `node_modules/`, `dist/` or `android/`.
 4. **Add a short entry to the change history** at the bottom of this file and to `README.md`.
 5. **Check performance on a slow phone.** The test phone is an Infinix HOT. Do heavy work once and cache it in sprites. The main view is drawn on the GPU (see "Drawing engine" below): `ctx.filter` (blur) does nothing there, and additive glow (`'lighter'`) is free.
@@ -45,7 +45,7 @@ The `&&` means each step only runs if the one before succeeded. If one fails, th
 
 ## Troubleshooting
 
-**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.5.16 · built (date) UTC`.
+**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.5.17 · built (date) UTC`.
 
 **Check the project folder has the new code:**
 ```bash
@@ -245,6 +245,11 @@ Freddie found the interface covered too much of the map (about 40% in landscape)
 - **Flags** wave live: `SVC_FLAGS` in `sprites.js` lists flag positions per service building (Police HQ, Fire HQ, University); the pictures have only the poles and `renderer.flag()` draws the cloth (still on Smooth).
 - **Gulls** (`renderer.gulls()`): three per harbor berth, pier and beach, circling and mostly gliding, with shadows. Positions looked up every 5 s. Skipped on Smooth.
 
+## Drawing order for big buildings (fixed in 0.5.17)
+
+Freddie saw the landfill painted over the warehouse standing in front of it. A building bigger than one tile used to be drawn whole when the loop reached its front tile, so anything on a neighbouring tile that is further forward but earlier in the drawing order (same or lower x + y) got painted over. Now `renderer.slices()` draws each multi-tile service building in vertical half-tile strips, each strip with the frontmost footprint tile it crosses (`sliceOf(w, d)`, cached per size; the picture's side margins go with the outermost columns). Construction sites are still drawn whole at the front tile. The landfill's painted gulls are gone (they looked stuck on the building behind); live gulls circle over landfills instead.
+- **How to test:** put industry or homes on the tiles left-front and right-front of a landfill, hospital or other 2×2/3×3 building: they cover it where they stand in front, and it covers what is behind it.
+
 ## What's next
 
 Nothing agreed yet. Ideas to discuss with Freddie: snow on roofs in winter (would mean a winter copy of every building picture, so check memory on the Infinix first), more variety for level 3 towers and level 4 buildings, people walking on piers and beaches.
@@ -302,6 +307,7 @@ src/App.jsx              all interface panels: top pills, category rail and tool
 
 ## Change history
 
+- **0.5.17:** big buildings (2×2 and 3×3) no longer paint over neighbours standing in front of them; they are drawn in slices with the tiles in front. Gulls over landfills are live instead of painted on.
 - **0.5.16:** graphics step 3. Buildings pick from 8 looks, with solar panels, roof gardens, water tanks, balconies with washing, garden fences, cars in drives and shop signs. Seasons: autumn colours and winter frost with bare trees (Menu → Seasons). Waving flags and gulls over the water.
 - **0.5.15:** shore buildings. Fishing pier, beach, marina (with yachts) and ferry pier, each facing the water and reaching out over it. Two ferry piers on the same water run a ferry and extend commute reach like buses. Bridges and ships keep clear of them.
 - **0.5.14:** cleaner interface and a new landfill. Two small pills on top instead of a full-width bar, power/water/garbage folded into one chip that only shows numbers when short, a slim category rail with tools in a pop-out, an active-tool chip with ✕, and a compact right column. The map shows about twice as much at once. The landfill is redrawn as a fenced, terraced lot that fits its footprint.
