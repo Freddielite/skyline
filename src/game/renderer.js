@@ -161,12 +161,19 @@ export class Renderer {
     // life on the water, then the objects pass in painter order
     this.boats(ctx, g, z, cx, cy, t, mode);
     const badges = [], smokeList = [], neon = [], wind = 0.7 + 0.5 * Math.sin(t * 0.07);
-    const cars = g.cars.concat(g.people, g.trucks), buckets = new Map();
+    // vehicles and people sorted into their tiles with two reusable arrays (no new lists or maps every frame)
+    const cars = this.carsL || (this.carsL = []); cars.length = 0;
+    for (const Lst of [g.traffic.cars, g.agents.drivers, g.transit.buses, g.movers.vans, g.people, g.garbage.trucks, g.disasters.responders]) for (let jx = 0; jx < Lst.length; jx++) cars.push(Lst[jx]);
+    const bh = this.bHead || (this.bHead = new Int32Array(N * N).fill(-1)); if (!this.bNext || this.bNext.length < cars.length) this.bNext = new Int32Array(cars.length * 2 + 64); const bn = this.bNext, bt = this.bTouched || (this.bTouched = []);
+    for (const q of bt) bh[q] = -1; bt.length = 0;
+    for (let jx = cars.length - 1; jx >= 0; jx--) { const c = cars[jx], key = Math.max(0, Math.min(N - 1, Math.floor(c.py))) * N + Math.max(0, Math.min(N - 1, Math.floor(c.px))); if (bh[key] < 0) bt.push(key); bn[jx] = bh[key]; bh[key] = jx; }
     const shipB = new Map();                         // harbor ships are big, so they go in painter order with the buildings
     if (g.ships) for (const sh of g.ships.list) { const key = Math.max(0, Math.min(N - 1, Math.floor(sh.y))) * N + Math.max(0, Math.min(N - 1, Math.floor(sh.x))); (shipB.get(key) || shipB.set(key, []).get(key)).push(sh); }
-    for (const c of cars) { const kx = Math.max(0, Math.min(N - 1, Math.floor(c.px))), ky = Math.max(0, Math.min(N - 1, Math.floor(c.py))), key = ky * N + kx; (buckets.get(key) || buckets.set(key, []).get(key)).push(c); }
+
     for (let s = 0; s < 2 * N - 1; s++) {
-      for (let x = Math.max(0, s - N + 1); x <= Math.min(s, N - 1); x++) {
+      const Yd = s * 16 * z + cy; if (Yd < top || Yd > H + 60 * z) continue;            // the whole diagonal is off screen
+      const xa = Math.max(Math.max(0, s - N + 1), Math.floor((s + (-mX * 3 - cx) / (32 * z)) / 2)), xb = Math.min(Math.min(s, N - 1), Math.ceil((s + (W + mX * 3 - cx) / (32 * z)) / 2));
+      for (let x = xa; x <= xb; x++) {
         const y = s - x, X = sx(x, y), Y = sy(x, y);
         if (X < -mX * 3 || X > W + mX * 3 || Y < top || Y > H + 60 * z) continue;
         const i = y * N + x, k = w.kind[i];
@@ -235,8 +242,7 @@ export class Renderer {
         if (z >= 0.45 && w.wire[i] === 1) this.pole(ctx, w, x, y, X, Y, z, mode);
         const sb = shipB.size ? shipB.get(i) : null;
         if (sb) for (const sh of sb) this.ship(ctx, sh, w, z, cx, cy, t, mode);
-        const cb = buckets.get(y * N + x);
-        if (cb) for (const c of cb) { if (c.ped) { if (z >= 0.5) this.person(ctx, c, z, cx, cy, mode, t); } else if (c.truck) this.truck(ctx, c, z, cx, cy, mode, t); else if (c.bus) this.bus(ctx, c, z, cx, cy, mode); else this.car(ctx, c, z, cx, cy, mode); }
+        for (let jj = bh[y * N + x]; jj >= 0; jj = bn[jj]) { const c = cars[jj]; if (c.ped) { if (z >= 0.5) this.person(ctx, c, z, cx, cy, mode, t); } else if (c.truck) this.truck(ctx, c, z, cx, cy, mode, t); else if (c.bus) this.bus(ctx, c, z, cx, cy, mode); else this.car(ctx, c, z, cx, cy, mode); }
       }
     }
     if (z >= 0.35) for (const [list, X, Y, seed] of smokeList) drawSmoke(ctx, list, X, Y, z, t, mode, seed, wind);
@@ -276,7 +282,7 @@ export class Renderer {
     const key = `${x0},${y0},${x1},${y1},${mode},${lvl}`;
     if (key !== this.warmKey) { this.warmKey = key; this.warmI = 0; }
     const send = (sp) => { if (sp && ctx.entry && ctx.canWarm()) ctx.entry(sp.c); };
-    while (this.warmI < span && performance.now() - t0 < 3 && spriteBudget.left > 0) {
+    while (this.warmI < span && performance.now() - t0 < 1.5 && spriteBudget.left > 0) {
       const x = x0 + (this.warmI % (x1 - x0 + 1)), y = y0 + Math.floor(this.warmI / (x1 - x0 + 1)); this.warmI++;
       const i = y * N + x, k = w.kind[i];
       if (k === T.EMPTY && w.tree[i]) send(mip(treeSprite(w.tree[i], mode), lvl));
@@ -299,16 +305,30 @@ export class Renderer {
     }
   }
   signal(ctx, x, y, X, Y, z, sigT, mode) {
+    const stV = light(sigT, x, y, true), stH = light(sigT, x, y, false), key = stV + stH + mode;
+    this.sigC = this.sigC || {}; let c = this.sigC[key];
+    if (!c) { c = this.sigC[key] = document.createElement('canvas'); c.width = 128; c.height = 76; const x2 = c.getContext('2d'); x2.scale(2, 2); this.signalPaint(x2, 32, 20, 1, stV, stH, mode); }
+    ctx.drawImage(c, X - 32 * z, Y - 20 * z, 64 * z, 38 * z);
+    if (mode > 0 || stV === 'r' || stH === 'r') {                       // the lit lamps glow
+      ctx.globalCompositeOperation = 'lighter'; const gs = this.glowSprite();
+      for (const [lx, ly, st] of [[0.94, 0.07, stV], [0.07, 0.94, stH]]) {
+        if (mode === 0 && st !== 'r') continue;
+        const dy = st === 'r' ? 2.4 : st === 'y' ? 6.6 : 10.8, gx = X + (lx - ly) * 32 * z, gy = Y + (lx + ly) * 16 * z - 26 * z - 3 * z + dy * z * 0.95;
+        ctx.globalAlpha = mode === 2 ? 0.9 : 0.55; ctx.drawImage(gs, gx - 8 * z, gy - 4 * z, 16 * z, 8 * z);
+      }
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+  signalPaint(ctx, X, Y, z, stV, stH, mode) {
     const P = (lx, ly, h = 0) => [X + (lx - ly) * 32 * z, Y + (lx + ly) * 16 * z - h * z];
     const heads = [[0.94, 0.07, true], [0.07, 0.94, false]], d = mode === 2 ? 0.6 : 1;
     for (const [lx, ly, vertical] of heads) {
-      const b = P(lx, ly), t = P(lx, ly, 26), st = light(sigT, x, y, vertical);
+      const b = P(lx, ly), t = P(lx, ly, 26), st = vertical ? stV : stH;
       ctx.strokeStyle = `rgb(${70 * d | 0},${74 * d | 0},${82 * d | 0})`; ctx.lineWidth = 1.5 * z; ctx.beginPath(); ctx.moveTo(b[0], b[1]); ctx.lineTo(t[0], t[1]); ctx.stroke();
       ctx.fillStyle = `rgb(${34 * d | 0},${37 * d | 0},${44 * d | 0})`; ctx.fillRect(t[0] - 2.6 * z, t[1] - 3 * z, 5.2 * z, 12 * z);
       const cols = [['r', '#ff4b3e', 2.4], ['y', '#ffc93a', 6.6], ['g', '#3ddc6a', 10.8]];
       for (const [k, c, dy] of cols) {
         const on = st === k; ctx.fillStyle = on ? c : `rgba(70,74,84,${0.9})`; ctx.beginPath(); ctx.arc(t[0], t[1] - 3 * z + dy * z * 0.95, 1.5 * z, 0, 6.3); ctx.fill();
-        if (on && (mode > 0 || k === 'r')) { ctx.save(); ctx.globalCompositeOperation = 'lighter'; const gl = ctx.createRadialGradient(t[0], t[1] - 3 * z + dy * z * 0.95, 0, t[0], t[1] - 3 * z + dy * z * 0.95, 9 * z); gl.addColorStop(0, c + 'aa'); gl.addColorStop(1, c + '00'); ctx.fillStyle = gl; ctx.fillRect(t[0] - 9 * z, t[1] - 12 * z, 18 * z, 22 * z); ctx.restore(); }
       }
     }
   }
@@ -496,6 +516,9 @@ export class Renderer {
     const q = 0.25, cw = Math.max(8, Math.ceil(W * q)), ch = Math.max(8, Math.ceil(H * q));
     let c = this.shc; if (!c) { c = this.shc = document.createElement('canvas'); c._solo = true; this.shx = c.getContext('2d'); }
     if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+    const sk = `${cx | 0},${cy | 0},${z},${cw},${sun.dx.toFixed(2)},${g.sim.day},${g.sites.size}`;
+    if (sk === this.shKey) { if (this.shAny) { ctx.globalAlpha = sun.a; ctx.drawImage(c, 0, 0, cw / q, ch / q); ctx.globalAlpha = 1; } return; }   // nothing moved: reuse last frame's shadows
+    this.shKey = sk;
     const x2 = this.shx; x2.setTransform(1, 0, 0, 1, 0, 0); x2.clearRect(0, 0, cw, ch); x2.fillStyle = '#0a1426'; x2.beginPath();
     let any = false;
     const pt = (u, v, first) => { const X = ((u - v) * 32 * z + cx) * q, Y = ((u + v) * 16 * z + cy) * q; if (first) x2.moveTo(X, Y); else x2.lineTo(X, Y); };
@@ -510,7 +533,7 @@ export class Renderer {
       if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i] && !g.sites.has(i)) add(x + 0.12, y + 0.12, 0.76, 0.76, REAL_H[k][w.level[i] - 1] * 0.8);
       else if (k === T.SVC && w.bo[i] === 0 && !g.sites.has(i)) { const def = BT[w.bt[i]]; if (!def.reach) add(x + 0.1, y + 0.1, def.w - 0.2, def.d - 0.2, (SVC_H[def.key] || 40) * 0.7); }
     }
-    if (!any) return;
+    this.shAny = any; if (!any) return;
     x2.fill(); touched(c);
     ctx.globalAlpha = sun.a; ctx.drawImage(c, 0, 0, cw / q, ch / q); ctx.globalAlpha = 1;
   }
@@ -774,7 +797,9 @@ export class Renderer {
   }
   badge(ctx, X, Y, z, type) {
     if (z < 0.6) return;
-    this.badgeShape(ctx, X, Y, z, type);
+    this.badgeC = this.badgeC || {}; let c = this.badgeC[type];
+    if (!c) { c = this.badgeC[type] = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'); x.scale(2, 2); this.badgeShape(x, 16, 16, 1, type); }   // drawn once, then copied
+    ctx.drawImage(c, X - 16 * z, Y - 16 * z, 32 * z, 32 * z);
   }
   badgeShape(ctx, X, Y, z, type) {
     const r = 8 * z;
@@ -829,7 +854,7 @@ export class Renderer {
         case 'police': if (sim.cov.police[i] > 0.02) col = `rgba(80,140,255,${0.2 + sim.cov.police[i] * 0.5})`; break;
         case 'fire': if (sim.cov.fire[i] > 0.02) col = `rgba(255,110,70,${0.2 + sim.cov.fire[i] * 0.5})`; break;
         case 'health': if (sim.cov.health[i] > 0.02) col = `rgba(255,120,170,${0.2 + sim.cov.health[i] * 0.5})`; break;
-        case 'traffic': if (w.kind[i] === T.ROAD) col = ramp(1 - Math.min(1, g.density[i] / 2.2), 0.75); break;
+        case 'traffic': if (w.kind[i] === T.ROAD) col = ramp(1 - Math.min(1, sim.flowM.load[i] / 1.4), 0.75); break;
         case 'transit': if (sim.cov.transit[i] > 0.02) col = `rgba(70,200,190,${0.2 + sim.cov.transit[i] * 0.5})`; break;
         case 'metro': if (sim.cov.metro[i] > 0.02) col = `rgba(220,70,60,${0.2 + sim.cov.metro[i] * 0.5})`; break;
         case 'fun': if (sim.cov.fun[i] > 0.02) col = `rgba(190,120,255,${0.2 + sim.cov.fun[i] * 0.5})`; break;

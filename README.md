@@ -29,6 +29,13 @@ bars, swipe from an edge to peek them, and draws behind the camera cutout). Both
 - Utilities and services: tap a tile to place (the preview shows the footprint); drag to reposition before lifting.
 - With a build tool active, one finger paints and two fingers move the map.
 
+## 0.6.1: real traffic, faster
+
+- Traffic now comes from real trips: people to work and shops, lorries to the highway. Jams appear where your roads are too weak, and an avenue, a second route, buses or the metro actually relieve them
+- Drivers take the quickest route and avoid jams; the cars you see gather on the busy roads
+- Tap a road to see its trips against what it can carry
+- Smoother on slow phones: about 40% less drawing work per frame in a big city
+
 ## 0.6.0: gameplay update
 
 - Seasons matter: winter heating raises power demand and slows growth, spring speeds it up, summer brings tourists, autumn is harvest time for farms

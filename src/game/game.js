@@ -51,7 +51,8 @@ export class Game {
     this.fleet = new Fleet(this.world, mulberry32(seed + 10));
     this.ships = new Ships(this.world, mulberry32(seed + 11));
     this.density = new Float32Array(N * N);
-    this.sim.traffic = this.density;                 // congestion now feeds land value, commutes and happiness
+    this.sim.traffic = this.density;
+    this.traffic.flow = this.sim.flowM; this.agents.flow = this.sim.flowM;   // cars and drivers follow the real trips (flow.js)
   }
   get cars() { return this.traffic.cars.concat(this.agents.drivers, this.transit.buses, this.movers.vans); }
   get people() { return this.agents.walkers; }
@@ -214,7 +215,7 @@ export class Game {
     const s = this.sim;
     return { seasonName: SEASON_NAME[s.SEASON_NOW], tourists: s.tourists, tourIncome: s.tourIncome, beds: s.beds, attraction: s.attraction, request: s.requestView(), seasons: this.seasons, season: getSeason(), fpsSetting: this.fpsSetting, fpsNow: this.fpsNow, engine: this.renderer.engine, hitches: this.hitchInfo(), pages: this.renderer.ctx.pages ? this.renderer.ctx.pages.length : 0, money: Math.floor(s.money), pop: s.pop, date: s.dateLabel(), rd: s.rd, cd: s.cd, id: s.id, happy: s.happiness, tax: { ...s.tax }, income: s.lastIncome, expense: s.lastExpense, bld: s.bld, roads: s.roads, parks: s.parks, jobs: s.cJobs + s.iJobs, speed: this.speed, mode: this.mode, time: `${String(Math.floor(this.hour)).padStart(2, '0')}:${String(Math.floor((this.hour % 1) * 60)).padStart(2, '0')}`, citizens: this.agents.stats.total, employed: this.agents.stats.employed, tSup: s.net.tSup, tDem: s.net.tDem, wasteUn: s.net.wasteUn, pSup: s.net.pSup, pDem: s.net.pDem, wSup: s.net.wSup, wDem: s.net.wDem, upkeep: Math.round(s.net.upkeep), crime: Math.round(s.net.crimeAvg), poll: Math.round(s.net.pollAvg), cov: { police: s.net.police, fire: s.net.fire, health: s.net.health, edu: s.net.edu, fun: s.net.fun }, overlay: this.overlay,
       canUndo: this.history.length, undoLabel: this.history.length ? this.history[this.history.length - 1].label : '', undoLeft: this.history.length ? Math.max(1, Math.ceil((UNDO_MS - (performance.now() - this.history[this.history.length - 1].t)) / 1000)) : 0,
-      weather: this.ambient.setting, rain: this.ambient.weather.k, buses: this.transit.buses.length, riders: this.agents.stats.riding, heavyRoads: (() => { let n = 0; for (let i = 0; i < this.density.length; i++) if (this.density[i] > 1.3) n++; return n; })(),
+      weather: this.ambient.setting, rain: this.ambient.weather.k, buses: this.transit.buses.length, riders: this.agents.stats.riding, heavyRoads: (() => { let n = 0; const l = this.sim.flowM.load; for (let i = 0; i < l.length; i++) if (l[i] > 1.1) n++; return n; })(),
       grant: s.grant || Math.round(Math.max(0, 300 * (1 - s.pop / 1200))), streak: s.streak, ordCost: s.ordCost(), disastersLevel: s.disasters,
       ords: Object.entries(ORD).map(([key, o]) => ({ key, ...o, on: !!s.ord[key] })), goals: s.goalStatus(),
       alerts: [this.disasters.fires.size ? `Fire x${this.disasters.fires.size}` : '', this.disasters.tornado ? 'Tornado' : '', this.disasters.ufo ? 'UFO' : '', s.cut ? 'In debt: services cut' : ''].filter(Boolean),
@@ -496,8 +497,7 @@ export class Game {
     this.fleet.update(live > 0 ? dt : 0, s.pop);
     this.ships.update(live > 0 ? dt : 0, s);
     // congestion map: smoothed vehicle count per road tile
-    { const dn = this.density, a = 1 - Math.exp(-dt * 0.6); for (let i = 0; i < dn.length; i++) if (dn[i] > 0.001) dn[i] -= dn[i] * a;
-      for (const v of veh) { const i = Math.max(0, Math.min(N - 1, Math.floor(v.py))) * N + Math.max(0, Math.min(N - 1, Math.floor(v.px))); dn[i] += a; } }
+    this.sim.flowM.step(this.sim, this.fast ? 1.5 : 2.5);            // trips to roads, a little at a time (flow.js)
     this.disasters.update(dt * sp);
     this.tutT += dt;
     if (this.tutT > 0.5) { this.tutT = 0; s.checkTutorial(); }

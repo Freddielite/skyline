@@ -52,16 +52,23 @@ export class Agents {
     }
     return best;
   }
-  bfs(s, e) {
+  bfs(s, e) {                                        // quickest route by travel time (avenues are quicker, jams slower)
+    if (this.flow && this.flowV !== this.flow.version) { this.flowV = this.flow.version; this.cache.clear(); }   // traffic changed: routes may too
     const key = s * N * N + e, hit = this.cache.get(key); if (hit !== undefined) return hit;
-    const w = this.w, prev = new Int16Array(N * N).fill(-1), q = [s]; prev[s] = s;
-    for (let h = 0; h < q.length; h++) {
-      const c = q[h]; if (c === e) break;
+    const w = this.w, n = N * N, cost = this.flow ? this.flow.cost : null;
+    const dist = this._dist || (this._dist = new Float32Array(n)), prev = this._prev || (this._prev = new Int32Array(n)), mark = this._mark || (this._mark = new Int32Array(n));
+    const hd = this._hd || (this._hd = new Float32Array(n * 4 + 8)), hi = this._hi || (this._hi = new Int32Array(n * 4 + 8)), gen = (this._gen = (this._gen | 0) + 1);
+    let len = 0; const push = (d, i) => { let k = len++; while (k > 0) { const p = (k - 1) >> 1; if (hd[p] <= d) break; hd[k] = hd[p]; hi[k] = hi[p]; k = p; } hd[k] = d; hi[k] = i; };
+    mark[s] = gen; dist[s] = 0; prev[s] = -1; push(0, s);
+    while (len) {
+      const d = hd[0], c = hi[0]; len--;
+      if (len) { const ld = hd[len], li = hi[len]; let k = 0; for (;;) { const l = 2 * k + 1, r = l + 1; if (l >= len) break; const m = r < len && hd[r] < hd[l] ? r : l; if (hd[m] >= ld) break; hd[k] = hd[m]; hi[k] = hi[m]; k = m; } hd[k] = ld; hi[k] = li; }
+      if (d > dist[c]) continue; if (c === e) break;
       const x = c % N, y = (c / N) | 0;
-      for (const [dx, dy] of D4) { const xx = x + dx, yy = y + dy; if (!w.isRoad(xx, yy)) continue; const n = yy * N + xx; if (prev[n] < 0) { prev[n] = c; q.push(n); } }
+      for (const [dx, dy] of D4) { const xx = x + dx, yy = y + dy; if (!w.isRoad(xx, yy)) continue; const q = yy * N + xx, nd = d + (cost ? cost[q] : 1); if (mark[q] !== gen || nd < dist[q]) { mark[q] = gen; dist[q] = nd; prev[q] = c; push(nd, q); } }
     }
     let out = null;
-    if (prev[e] >= 0) { out = []; for (let c = e; c !== s; c = prev[c]) out.push(c); out.push(s); out.reverse(); }
+    if (mark[e] === gen) { out = []; for (let c = e; c !== s && c >= 0; c = prev[c]) out.push(c); out.push(s); out.reverse(); }
     if (this.cache.size > 800) this.cache.clear();
     this.cache.set(key, out); return out;
   }

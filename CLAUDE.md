@@ -2,7 +2,7 @@
 
 Isometric city builder for Android. React + Vite + canvas, packaged with Capacitor.
 Project folder on Freddie's machine: `/home/freddielite/Downloads/skyline`
-App ID: `com.wyntek.skyline` · Current version: **0.6.0**
+App ID: `com.wyntek.skyline` · Current version: **0.6.1**
 
 This file is the handover: what has been built, how to push it to the phone, and the rules for future changes.
 Anyone (person or AI assistant) working on this project should read it first.
@@ -12,7 +12,7 @@ Anyone (person or AI assistant) working on this project should read it first.
 ## Rules for every change
 
 1. **Always end with the push command.** Every fix or feature, however small, ends with the full push command below, written out exactly, so it can be copied and run without looking anything up.
-2. **Always bump the version** in `package.json` (0.6.0 → 0.6.1 and so on). The game shows "Updated to version X" on first launch and the version in Menu, which is how we confirm the phone really got the new build.
+2. **Always bump the version** in `package.json` (0.6.1 → 0.6.2 and so on). The game shows "Updated to version X" on first launch and the version in Menu, which is how we confirm the phone really got the new build.
 3. **Deliver the whole project as `skyline.zip`**, with the files at the top level of the zip (no `skyline/` folder inside), and without `node_modules/`, `dist/` or `android/`.
 4. **Add a short entry to the change history** at the bottom of this file and to `README.md`.
 5. **Check performance on a slow phone.** The test phone is an Infinix HOT. Do heavy work once and cache it in sprites. The main view is drawn on the GPU (see "Drawing engine" below): `ctx.filter` (blur) does nothing there, and additive glow (`'lighter'`) is free.
@@ -45,7 +45,7 @@ The `&&` means each step only runs if the one before succeeded. If one fails, th
 
 ## Troubleshooting
 
-**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.6.0 · built (date) UTC`.
+**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.6.1 · built (date) UTC`.
 
 **Check the project folder has the new code:**
 ```bash
@@ -119,6 +119,7 @@ adb install android/app/build/outputs/apk/debug/app-debug.apk
 | Avenues | Build → Avenue: drag over an existing road to widen it ($15 a tile) or build new ($25). A planted median and two lanes each way; it carries twice the traffic before jamming. Upkeep $1/month. Not on bridges. |
 | Metro | Transit → Metro (2,000 residents, next to a road, needs power). One station does nothing; with two or more, every station covers 14 tiles: commutes reach 22 tiles further, fewer cars on the road, happier residents. Views → Metro. |
 | Industry types | Zone industry out in the countryside, away from homes and shops: farms. Next to woods: sawmills. In a town with a university and good schools nearby: tech parks. The Inspector shows the type. Farms: 60% of the jobs, a quarter of the pollution. Forestry: 80% jobs, 60% pollution. Tech: 125% jobs, 20% pollution, 1.4× tax, but needs an educated city. |
+| Traffic from real trips | Build a town on one long street with homes at one end and jobs at the other: Views → Traffic goes red on the street, Advisors warn, and Move → tap the road says e.g. "Jammed: 249 of 55 trips". Widen it to an avenue or add a parallel road: within a few seconds the load drops and cars move over. Cars on screen gather on the busy roads. |
 | Moving vans | Set taxes to 20% so people leave: cars with boxes on the roof drive from the homes to the highway and fade out at the map edge. When homes grow, vans drive in from the highway. Homes not linked to the highway send no vans. |
 
 ---
@@ -278,7 +279,16 @@ All in `sim.js` unless noted.
 - **Metro:** building 27 (`metro: true`), coverage key `metro` (in `COVS`), only when two or more stations are open (`metroLinked`). Commute reach `18 + 12 × buses + 22 × metro`. Cars on the road drop with metro coverage like with buses (`game.js`).
 - **Industry types:** `pickSpec()` when an industry lot first grows; stored in bits 4–5 of `world.variant` (`specOf()`), kept as it grows. Jobs, pollution and tax multipliers `SPEC_JOBS`, `SPEC_POLL`, `SPEC_TAX`; tech lots need city education 40%. Pictures `farm`, `sawmill`, `techPark` in `sprites.js` (`industryArt`; level 4 keeps the hi-tech campus). The renderer passes `variant & 55` so the type reaches the picture.
 
+## Traffic and speed (built in 0.6.1)
+
+- **Trips, not wandering cars** (`flow.js`, `sim.flowM`): districts of 6×6 tiles send workers to jobs (attraction × e^(−time/28)), residents to shops (35%, e^(−time/14)) and industry's lorries to the highway, minus the share that takes buses or the metro. One quickest-route search per district, trips pushed back along the route tree in one sweep. `PEAK` = 0.08 turns daily trips into the busiest hour. Capacity per tile: street 55, avenue 120, highway 170. Travel time `base × (1 + 0.5 × load⁴)` (base: avenue 0.7, highway 0.6), capped at 5×, so later passes route around jams. Passes run 2.5 ms per frame (1.5 on Smooth), every 6 game days or when roads change, blended 50/50 with the last result; the first three passes run back to back.
+- **Uses:** `sim.analyzeRoads` takes jams (load above 0.85) and commute times from it and reruns when a new pass finishes; Views → Traffic shows load; the road Inspector shows trips against capacity. The old per-frame car-count map is gone.
+- **Cars follow it:** `Traffic` spawns cars on road tiles in proportion to trips (`flow.pick`), turns them toward busier roads, and replaces each after 10–24 tiles. Citizen drivers take the quickest route by travel time (`agents.bfs`, now a Dijkstra over `flow.cost`; route cache cleared when the traffic picture changes).
+- **Speed:** vehicles queue by checking only their own and the next tile (`followPass`, no longer every vehicle against every other); the renderer sorts vehicles into tiles with reusable arrays instead of a new map every frame; off-screen rows of the map are skipped before any tile work; status badges and traffic lights are cached pictures (lamp glow added live); building shadows are only redrawn when the view, the sun or the city changed; the sprite warm-up gets 1.5 ms instead of 3. In a test city of 47,000 residents the drawing work per frame went from 46 ms to 27 ms on a PC.
+
 ## What's next
+
+1. **Traffic, part 2 (agreed):** smarter junctions (lights only where busy roads meet, priority roads elsewhere, longer green for the busier direction, maybe roundabouts) and diagnosis tools (where a road's trips come from and go to; Advisors naming the worst bottlenecks with Show on map).
 
 Nothing agreed yet. Ideas to discuss with Freddie: snow on roofs in winter (would mean a winter copy of every building picture, so check memory on the Infinix first), more variety for level 3 towers and level 4 buildings, people walking on piers and beaches.
 
@@ -335,6 +345,7 @@ src/App.jsx              all interface panels: top pills, category rail and tool
 
 ## Change history
 
+- **0.6.1:** traffic from real trips: jams appear where homes, jobs, shops and industry actually send people, drivers take the quickest route and avoid jams, avenues and new roads draw traffic away, and the cars on screen follow the busy roads. Faster drawing: about 40% less work per frame in a big city.
 - **0.6.0:** gameplay update. Seasons change power demand, growth, happiness and tourism; tourists bring income and need hotel beds; residents and businesses make requests with deadlines and choices; avenues carry twice the traffic; a metro links distant stations; industry grows as farms, sawmills or tech parks depending on where it is.
 - **0.5.18:** graphics polish. Sharp pictures when zoomed in, brick, siding and panel walls with framed windows and sills, shadows that follow the sun across the streets, street trees, parked cars and benches, wet roads after rain, windows lighting up one by one, walking people and soft grass and sand edges.
 - **0.5.17:** big buildings (2×2 and 3×3) no longer paint over neighbours standing in front of them; they are drawn in slices with the tiles in front. Gulls over landfills are live instead of painted on.

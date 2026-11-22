@@ -55,8 +55,15 @@ class Mover {
         let od = this.openDirs(c.tx, c.ty, back);
         if (!od.length) od = [back];
         else if (turnBack && this.rnd() < turnBack) od.push(back);
-        const straight = od.includes(c.d) && this.rnd() < 0.65;
-        c.d = straight ? c.d : od[Math.floor(this.rnd() * od.length)];
+        const fw = this.flowW;
+        if (fw && od.length > 1) {                       // follow the traffic: busier roads are likelier, going straight a bit more so
+          let sum = 0; for (const d of od) sum += (fw[(c.ty + DIRS[d][1]) * N + c.tx + DIRS[d][0]] + 2) * (d === c.d ? 1.6 : 1);
+          let r = this.rnd() * sum; for (const d of od) { r -= (fw[(c.ty + DIRS[d][1]) * N + c.tx + DIRS[d][0]] + 2) * (d === c.d ? 1.6 : 1); if (r <= 0) { c.d = d; break; } }
+        } else {
+          const straight = od.includes(c.d) && this.rnd() < 0.65;
+          c.d = straight ? c.d : od[Math.floor(this.rnd() * od.length)];
+        }
+        if (c.life !== undefined && --c.life <= 0) c.dead = true;      // after a while a car leaves, and a new one appears where trips are
       }
       if (c.dead) { this.list.splice(i, 1); continue; }
       c.dx = DIRS[c.d][0]; c.dy = DIRS[c.d][1];
@@ -68,10 +75,19 @@ class Mover {
 }
 
 export class Traffic extends Mover {
-  constructor(world, rnd) { super(world, rnd); this.needBuilt = false; }
+  constructor(world, rnd) { super(world, rnd); this.needBuilt = false; this.flow = null; }
+  spawn(needBuilt) {
+    const f = this.flow;
+    if (f && f.total > 0) for (let t = 0; t < 8; t++) {
+      const q = f.pick(this.rnd()); if (q < 0) break; const x = q % N, y = (q / N) | 0;
+      const od = this.openDirs(x, y, -1); if (!od.length) continue;
+      const c = this.make(x, y, od[Math.floor(this.rnd() * od.length)]); c.life = 10 + Math.floor(this.rnd() * 14); return c;
+    }
+    return super.spawn(needBuilt);
+  }
   get cars() { return this.list; }
   make(x, y, d) { return { tx: x, ty: y, d, t: this.rnd() * 0.8, speed: 0.9 + this.rnd() * 0.7, col: Math.floor(this.rnd() * 8), px: 0, py: 0, dx: DIRS[d][0], dy: DIRS[d][1], off: 0.13 }; }
-  update(dt, target, sigT) { this.sigT = sigT; this.balance(dt, target, 0.35); this.step(dt, 0); }
+  update(dt, target, sigT) { this.sigT = sigT; this.flowW = this.flow && this.flow.total > 0 ? this.flow.flow : null; this.balance(dt, target, 0.35); this.step(dt, 0); }
 }
 
 export class Walkers extends Mover {

@@ -1,6 +1,7 @@
 import { T, N, TERRAIN, SHORE_NAME } from './world.js';
 import { WF_NAME } from './waterfront.js';
 import { clamp, mulberry32, hash } from './util.js';
+import { Flow } from './flow.js';
 import { BT, BY_KEY, ELEC, WATER, WASTE, CUT_STAGE, cutGroup, frontTiles, berthTile } from './buildings.js';
 import { ORD, GOALS, UNLOCK, UNLOCK_NAME, LOANS, OVERDRAFT_RATE, TUTORIAL } from './rules.js';
 
@@ -82,7 +83,8 @@ export class Sim {
     this.tut = s.tut ?? (s.day ? TUTORIAL.length : 0);   // older cities skip the guide
     this.inspected = !!s.inspected;
     this.cut = 0; this.happiness = 60; this.hapParts = []; this.advice = [];
-    this.traffic = null;                           // live congestion map, set by the game
+    this.traffic = null;                           // (old) live car count per tile; congestion now comes from trips (flow.js)
+    this.flowM = new Flow(world);
     this.unlocked = new Set();
     this.events = [];
     this.grace = this.day + 90;         // older saves get time to wire up before buildings decay
@@ -338,7 +340,7 @@ export class Sim {
   // stage 3: road networks, highway link and commutes (only when roads changed or every 6 days)
   anRoads() {
     const { zones, empties } = this._an;
-    if (this.roadsDirty !== false || this.day - (this.roadsDay ?? -99) >= 6) { this.analyzeRoads(zones, empties); this.roadsDirty = false; this.roadsDay = this.day; }
+    if (this.roadsDirty !== false || this.day - (this.roadsDay ?? -99) >= 6 || this.flowM.version !== this.roadsFlowV) { this.analyzeRoads(zones, empties); this.roadsDirty = false; this.roadsDay = this.day; this.roadsFlowV = this.flowM.version; }   // also when the traffic picture is new
 
   }
   // stage 4: pollution, density, crime, land value, then the city-wide totals
@@ -461,16 +463,16 @@ export class Sim {
     this.hwRoads = hwRoads; this.hwRoadComp = hwComp;
 
     // congestion near each tile (0 free flowing .. 1 gridlock), from the live traffic map
-    const jam = this.jam, tr = this.traffic; jam.fill(0);
-    if (tr) for (let i = 0; i < n; i++) {
+    const jam = this.jam, ld = this.flowM.load; jam.fill(0);
+    if (this.roadsDirty !== false) this.flowM.dirty = true;                  // roads changed: work the trips out again soon
+    for (let i = 0; i < n; i++) {
       if (w.kind[i] !== T.ROAD) continue;
-      const cap = w.level[i] === 1 && w.terrain[i] !== TERRAIN.WATER ? 2 : 1;              // an avenue carries twice the traffic
-      const v = clamp((tr[i] - 0.7 * cap) / (1.3 * cap), 0, 1); if (v <= 0) continue;
+      const v = clamp((ld[i] - 0.85) / 0.65, 0, 1); if (v <= 0) continue;     // past capacity (from real trips; avenues and the highway carry more)
       const x = i % N, y = (i / N) | 0;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const xx = x + dx, yy = y + dy; if (w.inb(xx, yy)) { const q = yy * N + xx; if (v > jam[q]) jam[q] = v; } }
     }
     // travel cost along roads: jammed roads count as longer trips
-    const cost = (i) => 1 + (tr ? clamp((tr[i] - 0.6 * (w.level[i] === 1 ? 2 : 1)) * (w.level[i] === 1 ? 0.6 : 1.2), 0, 2.5) : 0);
+    const fc = this.flowM.cost, cost = (i) => Math.min(3.5, fc[i]);           // travel time through a tile: quicker on avenues, slower when jammed
     const roadsNear = (x, y) => { const out = []; for (const [dx, dy] of D24) { const xx = x + dx, yy = y + dy; if (w.inb(xx, yy)) { const q = yy * N + xx; if (w.kind[q] === T.ROAD) out.push(q); } } return out; };
     const dijkstra = (srcs) => {             // binary heap on typed arrays: no per-step allocations for the garbage collector
       const dist = new Float32Array(n).fill(1e9), cap = srcs.length + 4 * n + 4, hd = new Float64Array(cap), hi = new Int32Array(cap);
@@ -772,11 +774,11 @@ export class Sim {
     const yes = (b) => (b ? 'Yes' : 'No');
     if (w.terrain[i] === TERRAIN.WATER && k !== T.ROAD) return { x, y, w: 1, d: 1, title: 'Water', sub: 'Drag a road from the shore to build a bridge', rows: [] };
     if (k === T.ROAD) {
-      const tr = this.traffic ? this.traffic[i] : 0, hw = this.roadLinked(i);
+      const fm = this.flowM, ld = fm.load[i], hw = this.roadLinked(i);
       const br = w.terrain[i] === TERRAIN.WATER;
       const av = !br && w.level[i] === 1;
       return { x, y, w: 1, d: 1, title: w.hw[i] ? 'Highway' : br ? 'Bridge' : av ? 'Avenue' : 'Road', sub: w.hw[i] ? 'Links the city to the region' : br ? 'Upkeep $2/month' : av ? 'Carries twice the traffic of a street. Upkeep $1/month' : 'Upkeep $0.40/month. Pick Avenue and drag over it to widen it',
-        rows: [row('Traffic', tr > 1.3 ? 'Jammed' : tr > 0.7 ? 'Busy' : 'Light', tr <= 1.3), row('Reaches the highway', yes(hw), hw)] };
+        rows: [row('Traffic', `${ld > 1.1 ? 'Jammed' : ld > 0.7 ? 'Busy' : 'Light'}: ${Math.round(fm.flow[i])} of ${fm.capOf(i)} trips`, ld <= 1.1), row('Reaches the highway', yes(hw), hw)] };
     }
     if (k === T.SVC) {
       const ax = x - (w.bo[i] & 3), ay = y - (w.bo[i] >> 2), a = w.idx(ax, ay), def = BT[w.bt[i]], shut = this.closed(def), building = this.pending.has(a);
