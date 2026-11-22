@@ -29,6 +29,15 @@ bars, swipe from an edge to peek them, and draws behind the camera cutout). Both
 - Utilities and services: tap a tile to place (the preview shows the footprint); drag to reposition before lifting.
 - With a build tool active, one finger paints and two fingers move the map.
 
+## 0.5.14: cleaner interface, new landfill
+
+- The top bar is now two small pills: money, residents, happiness and utilities on the left; clock, speed and demand on the right
+- Power, water and garbage share one chip that only shows numbers when something runs short. Tap it (or the money) for the budget
+- Build tools: a slim category rail on the left; tap a category to open its tools, pick one and the pop-out closes, leaving a chip like "Road $10 ✕". ✕ goes back to moving the map
+- Views, City, Menu and Hide are compact buttons on the right; panels open beside them
+- The landfill is redrawn: a fenced lot with terraced cells (grassed, capped, active with a compactor and gulls) and a gravel yard with an office
+- Next: pier, beach, marina and ferry pier (0.5.15), then Graphics step 3 (see CLAUDE.md)
+
 ## 0.5.13: harbor ships
 
 - Every harbor on a lake or the sea has ships coming and going, more as it grows (1 ship at levels 1–2, 2 at level 3, 3 at level 4)
@@ -134,7 +143,7 @@ Debt instead of game over
 - Bank tab: loans of $10k, $25k and $60k repaid monthly, early repayment saves 10%
 
 Understanding the city
-- Tap any tile with Move: the card shows what the building needs and what is holding it back
+- With no tool picked, tap any tile: the card shows what the building needs and what is holding it back
 - Advisors tab with "Show on map", a news ticker, monthly charts, and an 8-step guide for new cities
 - Buildings unlock as the city grows. Level 4 buildings: skyscrapers, office megatowers and hi-tech campuses. New goals up to 25,000 residents
 

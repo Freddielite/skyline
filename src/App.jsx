@@ -82,12 +82,12 @@ const T = {
   stadium: { id: 'stadium', label: 'Stadium', icon: 'ball', cost: 7000 },
 };
 const CATS = [
-  { id: 'build', label: 'Build', icon: 'road', tools: ['move', 'road', 'res', 'com', 'ind', 'park', 'clear'] },
-  { id: 'util', label: 'Power & water', icon: 'bolt', tools: ['move', 'coal', 'wind', 'wire', 'cable', 'water', 'pump', 'treat', 'pipe', 'clear'] },
-  { id: 'waste', label: 'Waste', icon: 'trash', tools: ['move', 'dump', 'recycle', 'wte', 'clear'] },
-  { id: 'svc', label: 'Services', icon: 'shield', tools: ['move', 'police', 'police2', 'fire', 'fire2', 'clinic', 'hospital', 'school', 'university', 'clear'] },
-  { id: 'transit', label: 'Transit', icon: 'bus', tools: ['move', 'busstop', 'busterm', 'clear'] },
-  { id: 'fun', label: 'Amenities', icon: 'ball', tools: ['move', 'plaza', 'library', 'museum', 'stadium', 'clear'] },
+  { id: 'build', label: 'Build', short: 'Build', icon: 'road', tools: ['move', 'road', 'res', 'com', 'ind', 'park', 'clear'] },
+  { id: 'util', label: 'Power & water', short: 'Utilities', icon: 'bolt', tools: ['move', 'coal', 'wind', 'wire', 'cable', 'water', 'pump', 'treat', 'pipe', 'clear'] },
+  { id: 'waste', label: 'Waste', short: 'Waste', icon: 'trash', tools: ['move', 'dump', 'recycle', 'wte', 'clear'] },
+  { id: 'svc', label: 'Services', short: 'Services', icon: 'shield', tools: ['move', 'police', 'police2', 'fire', 'fire2', 'clinic', 'hospital', 'school', 'university', 'clear'] },
+  { id: 'transit', label: 'Transit', short: 'Transit', icon: 'bus', tools: ['move', 'busstop', 'busterm', 'clear'] },
+  { id: 'fun', label: 'Amenities', short: 'Fun', icon: 'ball', tools: ['move', 'plaza', 'library', 'museum', 'stadium', 'clear'] },
 ];
 const VIEWS = [
   { id: 'commute', label: 'Commutes' }, { id: 'traffic', label: 'Traffic' }, { id: 'transit', label: 'Transit' }, { id: 'value', label: 'Land value' }, { id: 'crime', label: 'Crime' }, { id: 'pollution', label: 'Pollution' },
@@ -236,6 +236,7 @@ export default function App() {
   const [st, setSt] = useState(null);
   const [tool, setTool] = useState(null);
   const [cat, setCat] = useState('build');
+  const [fly, setFly] = useState(false);          // the tool pop-out next to the category rail
   const [toast, setToast] = useState('');
   const [cost, setCost] = useState(null);
   const [panel, setPanel] = useState(null);
@@ -281,7 +282,7 @@ export default function App() {
     const onKey = (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && gameRef.current) { e.preventDefault(); gameRef.current.undo(); } };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, []);
-  const pick = (id) => { setTool(id); g && g.setTool(id); if (id) { setPanel(null); g.setOverlay(id === 'wire' || id === 'cable' ? 'power' : id === 'pipe' ? 'water' : null); } };
+  const pick = (id) => { setTool(id); setFly(false); g && g.setTool(id); if (id) { setPanel(null); g.setOverlay(id === 'wire' || id === 'cable' ? 'power' : id === 'pipe' ? 'water' : null); } };
   const speed = (s) => { g.setSpeed(s); setSt(g.stats()); };
   const setTax = (k, v) => { g.setTax(k, v); setSt(g.stats()); };
   const pickTime = (v) => { setTimeSet(v); g.setTime(v); };
@@ -289,42 +290,70 @@ export default function App() {
   const play = () => { g.leaveMenu(); setScreen('game'); setSt(g.stats()); };
   const startNew = () => { g.startNewCity(); setScreen('game'); setStartView('home'); setSt(g.stats()); };
   const setView = (v) => { g.setOverlay(v); if (v) { setTool(null); g.setTool(null); } setPanel(null); setSt(g.stats()); };
-  const toggle = (p) => { setPanel(panel === p ? null : p); if (g && panel !== p) g.clearSel(); };
+  const toggle = (p) => { setFly(false); setPanel(panel === p ? null : p); if (g && panel !== p) g.clearSel(); };
+  const openCity = (t) => { setTab(t); setFly(false); setPanel('budget'); g.clearSel(); };
+  const openCat = (id) => { if (fly && cat === id) { setFly(false); return; } setCat(id); setFly(true); setPanel(null); g && g.clearSel(); };
   const showMe = (t) => { setCat(t.cat); if (t.tool) pick(t.tool); else { pick(null); } if (t.id === 'road') g.focusHighway(); };
-  const flipUi = () => { const next = !ui; setUi(next); try { localStorage.setItem('skyline.hideui', next ? '0' : '1'); } catch (e) { /* ignore */ } if (!next) { setPanel(null); setTool(null); g && g.setTool(null); } };
-  const catTools = CATS.find((c) => c.id === cat).tools;
+  const flipUi = () => { const next = !ui; setUi(next); try { localStorage.setItem('skyline.hideui', next ? '0' : '1'); } catch (e) { /* ignore */ } if (!next) { setPanel(null); setFly(false); setTool(null); g && g.setTool(null); } };
+  const catTools = CATS.find((c) => c.id === cat).tools.filter((k) => k !== 'move');   // Move is simply no tool: the chip's close button
+  const curTool = tool ? Object.values(T).find((t) => t.id === tool) : null;
+  const utils = st ? [['bolt', st.pSup, st.pDem, 'Power'], ['drop', st.wSup, st.wDem, 'Water'], ['trash', st.tSup, st.tDem, 'Garbage']] : [];
   const view = st && VIEWS.find((v) => v.id === st.overlay);
 
   return (
     <div className="app">
-      <canvas ref={cvRef} className="map" />
+      <canvas ref={cvRef} className="map" onPointerDown={() => fly && setFly(false)} />
       {tilt && screen === 'game' && !(st && st.fast) && <><div className="tilt top" aria-hidden="true" /><div className="tilt bot" aria-hidden="true" /></>}
       {toast && <div className="toast" role="status">{toast}</div>}
       {screen === 'start' && g && <StartScreen refresh={() => setSt(g.stats())} g={g} st={st} saved={saved} view={startView} setView={setStartView} onPlay={play} onNew={startNew} />}
       {st && screen === 'game' && (
         <>
           {!ui && <button className="showui" onClick={flipUi} aria-label="Show interface"><Icon n="eye" size={22} /></button>}
-          {ui && <header className="top">
-            <button className={'cash' + (st.money < 0 ? ' debt' : '')} onClick={() => { setTab(st.money < 0 || st.loans.length ? 'bank' : 'budget'); setPanel('budget'); g.clearSel(); }} title={st.money < 0 ? 'Owed to the bank' : 'Treasury'}><Icon n="coin" size={18} /><b>{money(st.money)}</b>{st.money < 0 && <small>owed</small>}</button>
-            <div className="util pop" title="Residents"><Icon n="people" size={15} /><b>{st.pop.toLocaleString('en-US')}</b></div>
-            <div className={'util ' + supplyClass(st.pSup, st.pDem)} title="Power supply / demand"><Icon n="bolt" size={15} fill /><b>{st.pSup}/{st.pDem}</b></div>
-            <div className={'util ' + supplyClass(st.wSup, st.wDem)} title="Water supply / demand"><Icon n="drop" size={15} fill /><b>{st.wSup}/{st.wDem}</b></div>
-            <div className={'util ' + supplyClass(st.tSup, st.tDem)} title="Waste capacity / output"><Icon n="trash" size={15} /><b>{st.tSup}/{st.tDem}</b></div>
-            <div className={'util ' + (st.happy >= 60 ? 'ok' : st.happy >= 40 ? 'mid' : 'bad')} title="Happiness"><Icon n="smile" size={15} /><b>{st.happy}%</b></div>
-            <div className="util time" title="Time of day"><Icon n="clock" size={15} /><b>{st.time}</b></div>
-            <div className="date">{st.date}</div>
+          {ui && <header className="hud hud-l">
+            <button className={'cash' + (st.money < 0 ? ' debt' : '')} onClick={() => openCity(st.money < 0 || st.loans.length ? 'bank' : 'budget')} title={st.money < 0 ? 'Owed to the bank' : 'Treasury'}><Icon n="coin" size={17} /><b>{money(st.money)}</b>{st.money < 0 && <small>owed</small>}</button>
+            <div className="util pop" title="Residents"><Icon n="people" size={14} /><b>{st.pop.toLocaleString('en-US')}</b></div>
+            <div className={'util ' + (st.happy >= 60 ? 'ok' : st.happy >= 40 ? 'mid' : 'bad')} title="Happiness"><Icon n="smile" size={14} /><b>{st.happy}%</b></div>
+            <button className="utils" onClick={() => openCity('budget')} title={utils.map((u) => `${u[3]} ${u[1]}/${u[2]}`).join(' · ')} aria-label="Power, water and garbage">
+              {utils.map(([ic, sup, dem, label]) => { const c = supplyClass(sup, dem); return c === 'ok'
+                ? <i key={ic} className="uok" aria-label={label + ' OK'}><Icon n={ic} size={13} fill={ic !== 'trash'} /></i>
+                : <span key={ic} className={'ushort ' + c}><Icon n={ic} size={13} fill={ic !== 'trash'} /><b>{sup}/{dem}</b></span>; })}
+            </button>
+          </header>}
+          {ui && <div className="hud hud-r">
+            <div className="clock" title={st.date}><Icon n="clock" size={14} /><b>{st.time}</b><span>{st.date.replace(/\s\d{4}$/, '')}</span></div>
             <div className="speed" role="group" aria-label="Game speed">
               {[[0, 'pause'], [1, 'play'], [2, 'ff'], [4, 'fff']].map(([v, ic]) => (
-                <button key={v} className={st.speed === v ? 'on' : ''} onClick={() => speed(v)} aria-label={v ? `Speed ${v}` : 'Pause'}><Icon n={ic} size={16} fill={ic !== 'pause'} /></button>
+                <button key={v} className={st.speed === v ? 'on' : ''} onClick={() => speed(v)} aria-label={v ? `Speed ${v}` : 'Pause'}><Icon n={ic} size={15} fill={ic !== 'pause'} /></button>
               ))}
             </div>
             <Demand s={st} />
-          </header>}
+          </div>}
 
           {ui && cost && tool && <div className="costtag">{cost.name ? cost.name + ' · ' : cost.n + ' tiles · '}{money(cost.c)}</div>}
-          {ui && (view || st.tut) && <div className="leftcol">
+
+          {ui && <nav className="rail" aria-label="Build categories">
+            {CATS.map((c) => <button key={c.id} aria-label={c.label} aria-expanded={fly && cat === c.id} className={(fly && cat === c.id ? 'on' : '') + (tool && cat === c.id ? ' has' : '')} onClick={() => openCat(c.id)}><Icon n={c.icon} size={19} /><span>{c.short}</span></button>)}
+          </nav>}
+          {ui && fly && <section className="fly" aria-label={CATS.find((c) => c.id === cat).label}>
+            <div className="fly-h"><b>{CATS.find((c) => c.id === cat).label}</b><button className="x" onClick={() => setFly(false)} aria-label="Close"><Icon n="close" size={15} /></button></div>
+            <div className={'fly-grid' + (catTools.length > 6 ? ' three' : '')}>
+              {catTools.map((k) => { const t = T[k], need = t.id && st.locked[t.id]; return need ? (
+                <button key={k} className="tool locked" onClick={() => say(`${t.label} unlocks at ${need.toLocaleString('en-US')} residents`)} aria-disabled="true">
+                  <Icon n="lock" /><span>{t.label}</span><em>{need.toLocaleString('en-US')} pop</em>
+                </button>) : (
+                <button key={k} className={'tool' + (tool === t.id ? ' on' : '') + (t.zone ? ' z-' + t.zone : '')} onClick={() => pick(t.id)}>
+                  <Icon n={t.icon} /><span>{t.label}</span><em>{money(t.cost)}</em>
+                </button>); })}
+            </div>
+          </section>}
+          {ui && (view || st.tut || tool || st.canUndo > 0) && <div className="leftcol">
+            {tool && curTool && <div className="chip">
+              <button className="chip-main" onClick={() => openCat(cat)} title="Pick another tool"><Icon n={curTool.icon} size={16} /><b>{curTool.label}</b><em>{money(curTool.cost)}</em></button>
+              <button className="chip-x" onClick={() => pick(null)} aria-label="Stop building and move the map"><Icon n="close" size={14} /></button>
+            </div>}
+            {st.canUndo > 0 && <button className="chip undo" onClick={() => { g.undo(); setSt(g.stats()); }} title={'Undo ' + st.undoLabel}><Icon n="undo" size={15} /><b>Undo</b><em>{st.undoLeft}s</em></button>}
             {view && <button className="viewtag" onClick={() => setView(null)}>{view.label} view <Icon n="close" size={14} /></button>}
-            {st.tut && !panel && <section className="guide" aria-label="Getting started">
+            {st.tut && !panel && !fly && <section className="guide" aria-label="Getting started">
               <div className="gstep">Step {st.tut.i + 1} of {st.tut.n}</div>
               <h2>{st.tut.title}</h2>
               <p>{st.tut.text}</p>
@@ -335,29 +364,11 @@ export default function App() {
           {ui && news && !(cost && tool) && <div className="ticker" role="status"><Icon n="news" size={15} /><span>{news}</span></div>}
           {ui && st.alerts.length > 0 && <div className="alerts" role="alert">{st.alerts.map((a) => <span key={a}>{a}</span>)}</div>}
 
-          {ui && <nav className="dock" aria-label="Build tools">
-            <div className="stack">
-              <div className="tabs" role="tablist">
-                {CATS.map((c) => <button key={c.id} role="tab" aria-label={c.label} aria-selected={cat === c.id} className={cat === c.id ? 'on' : ''} onClick={() => setCat(c.id)}><Icon n={c.icon} size={18} /><span>{c.label}</span></button>)}
-              </div>
-              <div className="tabcap">{CATS.find((c) => c.id === cat).label}</div>
-              <div className="tools">
-                {catTools.map((k) => { const t = T[k], need = t.id && st.locked[t.id]; return need ? (
-                  <button key={k} className="tool locked" onClick={() => say(`${t.label} unlocks at ${need.toLocaleString('en-US')} residents`)} aria-disabled="true">
-                    <Icon n="lock" /><span>{t.label}</span><em>{need.toLocaleString('en-US')} pop</em>
-                  </button>) : (
-                  <button key={k} className={'tool' + (tool === t.id ? ' on' : '') + (t.zone ? ' z-' + t.zone : '')} onClick={() => pick(t.id)}>
-                    <Icon n={t.icon} /><span>{t.label}</span>{t.cost ? <em>{money(t.cost)}</em> : <em>&nbsp;</em>}
-                  </button>); })}
-              </div>
-            </div>
-            <div className="sys">
-              {st.canUndo > 0 && <button className="tool undo" onClick={() => { g.undo(); setSt(g.stats()); }} aria-label="Undo last build" title={'Undo ' + st.undoLabel}><Icon n="undo" /><span>Undo</span><em>{st.undoLeft}s</em></button>}
-              <button className={'tool' + (st.overlay ? ' on' : '')} onClick={() => toggle('views')}><Icon n="eye" /><span>Views</span><em>&nbsp;</em></button>
-              <button className="tool" onClick={() => toggle('budget')}><Icon n="coin" /><span>City</span><em>&nbsp;</em>{st.advice.some((a) => a.sev === 'bad') && <i className="dot" aria-label="Advisors have urgent news" />}</button>
-              <button className="tool" onClick={() => toggle('menu')}><Icon n="menu" /><span>Menu</span><em>&nbsp;</em></button>
-              <button className="tool" onClick={flipUi} aria-label="Hide interface"><Icon n="eyeoff" /><span>Hide</span><em>&nbsp;</em></button>
-            </div>
+          {ui && <nav className="side" aria-label="City and settings">
+            <button className={'sbtn' + (panel === 'views' || st.overlay ? ' on' : '')} onClick={() => toggle('views')}><Icon n="eye" size={18} /><span>Views</span></button>
+            <button className={'sbtn' + (panel === 'budget' ? ' on' : '')} onClick={() => toggle('budget')}><Icon n="coin" size={18} /><span>City</span>{st.advice.some((a) => a.sev === 'bad') && <i className="dot" aria-label="Advisors have urgent news" />}</button>
+            <button className={'sbtn' + (panel === 'menu' ? ' on' : '')} onClick={() => toggle('menu')}><Icon n="menu" size={18} /><span>Menu</span></button>
+            <button className="sbtn" onClick={flipUi} aria-label="Hide interface"><Icon n="eyeoff" size={18} /><span>Hide</span></button>
           </nav>}
 
           {ui && panel === 'views' && (

@@ -296,3 +296,69 @@ button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .start-ver { position: absolute; right: calc(var(--sar) + 12px); bottom: calc(var(--sab) + 10px); font-size: 11px; color: rgba(255, 255, 255, .6); text-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
 @media (max-height: 420px) { .start-col { gap: 10px; } .logo span { margin-top: 4px; } .big { min-height: 46px; padding: 6px 14px; } .mapcard small { display: none; } }
 @media (max-width: 560px) { .start-scrim { background: linear-gradient(180deg, rgba(9, 18, 31, .55), rgba(9, 18, 31, .9)); } }
+
+/* ---------- HUD (0.5.14): two small pills on top, a slim category rail on the left, a compact column on the right ----------
+   Everything sits along the edges so the middle of the screen stays map. Tools open in a pop-out only when needed. */
+:root { --hud-top: calc(var(--sat) + 6px); --below: calc(var(--sat) + 50px); --rail-w: 56px; --side-w: 52px; }
+.hud { position: absolute; top: var(--hud-top); display: flex; align-items: center; gap: 6px; height: 38px; padding: 0 6px; background: var(--glass); border: 1px solid var(--line); border-radius: 13px; backdrop-filter: blur(8px); font-variant-numeric: tabular-nums; z-index: 3; }
+.hud-l { left: calc(var(--sal) + 8px); }
+.hud-r { right: calc(var(--sar) + 8px); }
+.hud .cash { background: none; border: 0; padding: 0 4px; font-size: 16px; gap: 5px; }
+.hud .util { padding: 3px 7px; font-size: 12.5px; }
+.utils { display: flex; align-items: center; gap: 2px; height: 28px; padding: 0 5px; background: rgba(255,255,255,.06); border: 0; border-radius: 9px; }
+.utils .uok { display: grid; place-items: center; width: 18px; color: var(--mint); }
+.utils .ushort { display: flex; align-items: center; gap: 3px; padding: 0 4px; font-size: 12px; }
+.utils .ushort.mid { color: var(--amber); } .utils .ushort.bad { color: var(--coral); }
+.clock { display: flex; align-items: center; gap: 5px; padding: 0 4px; font-size: 13px; white-space: nowrap; }
+.clock span { color: var(--dim); font-size: 12px; }
+.hud .speed button { width: 30px; height: 28px; }
+.hud .demand { gap: 3px; padding-right: 2px; }
+.hud .dm { font-size: 9px; gap: 1px; } .hud .dm-track { width: 9px; height: 20px; }
+
+.rail { position: absolute; top: var(--below); left: calc(var(--sal) + 8px); width: var(--rail-w); display: flex; flex-direction: column; gap: 3px; padding: 4px; background: var(--glass); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(8px); z-index: 3; }
+.rail button { position: relative; height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; background: none; border: 0; border-radius: 10px; color: var(--dim); }
+.rail button span { font-size: 9px; line-height: 1; }
+.rail button.on { background: var(--amber); color: #1b1405; }
+.rail button.has:not(.on) { color: var(--amber); }
+.rail button.has:not(.on)::after { content: ''; position: absolute; left: -1px; top: 12px; bottom: 12px; width: 3px; border-radius: 2px; background: var(--amber); }
+
+.fly { position: absolute; top: var(--below); left: calc(var(--sal) + 8px + var(--rail-w) + 8px); max-height: calc(100dvh - var(--below) - var(--sab) - 8px); overflow-y: auto; padding: 6px 8px 8px; background: var(--glass); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(10px); z-index: 4; scrollbar-width: none; }
+.fly-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.fly-h b { font-size: 13px; font-weight: 600; padding-left: 2px; }
+.fly-h .x { width: 30px; height: 30px; border-radius: 9px; }
+.fly-grid { display: grid; grid-template-columns: repeat(2, 76px); gap: 5px; }
+.fly-grid.three { grid-template-columns: repeat(3, 76px); }
+.fly .tool { min-width: 0; min-height: 50px; padding: 4px; }
+
+.leftcol { top: var(--below); left: calc(var(--sal) + 8px + var(--rail-w) + 8px); z-index: 2; }
+.chip { display: flex; align-items: center; background: var(--glass); border: 1px solid var(--amber); border-radius: 999px; backdrop-filter: blur(8px); overflow: hidden; }
+.chip button { background: none; border: 0; color: var(--text); }
+.chip-main { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 6px 0 12px; color: var(--amber) !important; }
+.chip b { font-size: 13px; font-weight: 600; } .chip em { font-style: normal; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.chip-x { width: 38px; height: 36px; display: grid; place-items: center; border-left: 1px solid var(--line) !important; }
+.chip.undo { gap: 6px; height: 34px; padding: 0 12px; border-color: var(--line); color: var(--amber); }
+
+.side { position: absolute; top: var(--below); right: calc(var(--sar) + 8px); width: var(--side-w); display: flex; flex-direction: column; gap: 3px; padding: 4px; background: var(--glass); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(8px); z-index: 3; }
+.sbtn { position: relative; height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; background: none; border: 0; border-radius: 10px; color: var(--text); }
+.sbtn span { font-size: 9.5px; color: var(--dim); line-height: 1; }
+.sbtn.on { background: rgba(242, 184, 75, .16); color: var(--amber); } .sbtn.on span { color: var(--amber); }
+.sbtn .dot { position: absolute; top: 5px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--coral); box-shadow: 0 0 0 2px var(--ink); }
+
+/* panels and cards line up with the new columns */
+.sheet { top: var(--below); bottom: auto; right: calc(var(--sar) + 8px + var(--side-w) + 8px); max-height: calc(100dvh - var(--below) - var(--sab) - 8px); }
+.inspect { top: var(--below); right: calc(var(--sar) + 8px + var(--side-w) + 8px); max-height: calc(100dvh - var(--below) - var(--sab) - 60px); }
+.inspect.low { top: calc(var(--below) + 36px); }
+.alerts { top: var(--below); right: calc(var(--sar) + 8px + var(--side-w) + 8px); }
+.toast { top: auto; bottom: calc(var(--sab) + 56px); }
+.costtag, .ticker { bottom: calc(var(--sab) + 12px); }
+.showui { top: var(--hud-top); bottom: auto; width: 42px; height: 42px; }
+
+/* narrow screens (portrait phones): the right pill drops below the left one */
+@media (max-width: 620px) {
+  :root { --below: calc(var(--sat) + 94px); }
+  .hud-r { top: calc(var(--sat) + 50px); }
+  .clock span { display: none; }
+}
+@media (max-height: 400px) {
+  .rail button, .sbtn { height: 41px; }
+}

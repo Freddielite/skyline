@@ -722,20 +722,53 @@ function stadium(k) {
   poly([P(1.1, 2.62, 0), P(1.9, 2.62, 0), P(1.9, 2.62, 10), P(1.1, 2.62, 10)], C('#4a5568'));
   for (let i = 0; i < 6; i++) circ(P(0.4 + i * 0.4, 2.9, 2), 2, C(['#e0483f', '#f4c542', '#3a7bd5'][i % 3]));
 }
+// Landfill: a fenced lot in four terraced cells, like a real one is filled. Back left is finished and grassed over,
+// back right is capped with soil, front left is the active cell with fresh waste and a compactor, front right is the
+// gravel yard with the site office and a weighbridge. Everything stays inside the 2x2 diamond, like other buildings.
 function dump(k) {
-  const { P, ell, ctx, line, box, faces, sh, C, circ, poly } = k;
-  padRect(k, 2, 2, '#8a7f66', ['#6b5a45', '#a39878']);
-  const c = P(1, 1);
-  ell([c[0] + 2, c[1] + 6], 62, 31, 'rgba(0,0,0,.15)');
-  const cols = ['#6b5a45', '#7a6a52', '#867660'];
-  for (let i = 0; i < 3; i++) ell([c[0] - 2, c[1] - i * 7], 58 - i * 14, 29 - i * 7, C(cols[i]));
-  const tc = ['#d9534a', '#4a7fc7', '#f4c542', '#e8e8e8', '#3a9d6e', '#8b5a2b'];
-  for (let i = 0; i < 70; i++) { const a = hash(i, 1, 1) * 6.283, r = Math.sqrt(hash(i, 2, 2)) * 44, px = c[0] + Math.cos(a) * r - 2, py = c[1] - 10 + Math.sin(a) * r * 0.5 - (1 - r / 44) * 6; ctx.fillStyle = C(tc[i % 6]); ctx.fillRect(px, py, 2.4, 1.8); }
-  for (let i = 0; i < 6; i++) { const p = [c[0] - 30 + i * 12 + hash(i, 5, 5) * 8, c[1] - 26 - hash(i, 6, 6) * 12]; line(p, [p[0] + 3, p[1] - 1.5], '#fff', 1); line(p, [p[0] - 3, p[1] - 1.5], '#fff', 1); }
-  box(1.35, 1.35, 0.35, 0.22, 7, faces('#f4c542')); box(1.6, 1.35, 0.05, 0.22, 5, faces('#555b66'));
-  box(0.15, 1.5, 0.35, 0.3, 14, faces('#c9ccd2')); poly([P(0.2, 1.8, 0), P(0.32, 1.8, 0), P(0.32, 1.8, 9), P(0.2, 1.8, 9)], C('#4a5568'));
-  for (let i = 0; i <= 8; i++) { const u = i / 4; line(P(u, 1.97), P(u, 1.97, 7), C('#6b7280'), 0.7); line(P(1.97, u), P(1.97, u, 7), C('#6b7280'), 0.7); }
-  line(P(0, 1.97, 7), P(2, 1.97, 7), C('#6b7280'), 0.8); line(P(1.97, 0, 7), P(1.97, 2, 7), C('#6b7280'), 0.8);
+  const { P, poly, box, faces, sh, C, line, circ, ell } = k;
+  padRect(k, 2, 2, '#9c8b69', ['#86765a', '#ad9d7c']);
+  const cell = (x0, y0, x1, y1, h, top, side) => {           // a raised cell with its two visible side faces
+    poly([P(x0, y1, 0), P(x1, y1, 0), P(x1, y1, h), P(x0, y1, h)], C(side));
+    poly([P(x1, y0, 0), P(x1, y1, 0), P(x1, y1, h), P(x1, y0, h)], C(shade(side, 0.8)));
+    poly([P(x0, y0, h), P(x1, y0, h), P(x1, y1, h), P(x0, y1, h)], C(top));
+  };
+  // back left: finished, grassed, with a gas vent
+  cell(0.08, 0.08, 0.96, 0.96, 9, '#7fa65c', '#8b7656');
+  for (let i = 0; i < 18; i++) { const p = P(0.14 + hash(i, 3, 1) * 0.76, 0.14 + hash(i, 4, 1) * 0.76, 9); line(p, [p[0] + 1.6, p[1] - 1.2], C(i % 2 ? '#6d9450' : '#93b96c'), 0.9); }
+  box(0.5, 0.48, 0.05, 0.05, 15, faces('#7b828c'), 9);
+  // back right: capped with soil, a few seeded strips
+  cell(1.04, 0.08, 1.92, 0.96, 7, '#8f7a57', '#7c6849');
+  for (let j = 0; j < 4; j++) line(P(1.12, 0.22 + j * 0.2, 7), P(1.84, 0.22 + j * 0.2, 7), C(j % 2 ? '#a08b66' : '#7e6a4b'), 1.2);
+  // front left: the active cell, a little lower, with fresh waste in muted colours and bin bags
+  cell(0.08, 1.04, 0.96, 1.92, 3, '#6f6452', '#6a5b46');
+  const tc = ['#b9b2a4', '#8a8f96', '#a8826a', '#d8d4c8', '#6f7d6a', '#7f8fa6', '#b07a68', '#c8bc8a'];
+  for (let i = 0; i < 90; i++) { const u = 0.13 + hash(i, 7, 3) * 0.78, v = 1.09 + hash(i, 8, 3) * 0.78, q = P(u, v, 3 + hash(i, 9, 3) * 3); k.ctx.fillStyle = C(tc[i % tc.length]); k.ctx.fillRect(q[0] - 1.2, q[1] - 0.9, 2.4, 1.8); }
+  for (let i = 0; i < 9; i++) { const q = P(0.2 + hash(i, 11, 2) * 0.66, 1.18 + hash(i, 12, 2) * 0.6, 6); ell(q, 2.4, 1.7, C(i % 3 ? '#2e3238' : '#3b4a5c')); }
+  // the compactor working the cell, and its tracks
+  line(P(0.3, 1.86, 3.2), P(0.62, 1.4, 3.2), C('#5c5040'), 2.2);
+  sh(0.56, 1.36, 0.26, 0.18, 9);
+  box(0.56, 1.36, 0.26, 0.18, 6, faces('#e3b33c'), 3);
+  box(0.62, 1.39, 0.12, 0.12, 6, faces('#2f3540'), 9);
+  box(0.5, 1.35, 0.05, 0.2, 4, faces('#8a8f96'), 3);
+  // front right: gravel yard, site office, weighbridge
+  poly([P(1.04, 1.04), P(1.92, 1.04), P(1.92, 1.92), P(1.04, 1.92)], C('#b8b2a2'));
+  for (let i = 0; i < 26; i++) { const q = P(1.08 + hash(i, 13, 4) * 0.8, 1.08 + hash(i, 14, 4) * 0.8); circ(q, 0.7, C(i % 2 ? '#a39d8e' : '#cbc5b6')); }
+  poly([P(1.1, 1.62, 0.5), P(1.7, 1.62, 0.5), P(1.7, 1.86, 0.5), P(1.1, 1.86, 0.5)], C('#7d838c'));
+  line(P(1.1, 1.62, 0.5), P(1.7, 1.62, 0.5), C('#5d636c'), 0.8);
+  sh(1.48, 1.12, 0.36, 0.3, 13);
+  box(1.48, 1.12, 0.36, 0.3, 12, faces('#e8e6df'));
+  poly([P(1.48, 1.12, 12), P(1.84, 1.12, 12), P(1.84, 1.42, 12), P(1.48, 1.42, 12)], C('#4f6f5a'));
+  poly([P(1.54, 1.42, 4), P(1.66, 1.42, 4), P(1.66, 1.42, 9), P(1.54, 1.42, 9)], C(k.mode === 2 ? '#ffe7a0' : '#5d7f9a'));
+  poly([P(1.84, 1.18, 4), P(1.84, 1.34, 4), P(1.84, 1.34, 9), P(1.84, 1.18, 9)], C(k.mode === 2 ? '#ffe7a0' : '#55768f'));
+  box(1.14, 1.14, 0.2, 0.14, 6, faces('#3f8f5a')); box(1.14, 1.3, 0.2, 0.14, 6, faces('#3d6fb0'));   // skips by the office
+  // gulls over the active cell
+  for (let i = 0; i < 5; i++) { const q = P(0.25 + hash(i, 15, 6) * 0.6, 1.2 + hash(i, 16, 6) * 0.5, 26 + hash(i, 17, 6) * 14); line(q, [q[0] + 3, q[1] - 1.6], C('#f4f4f0'), 1); line(q, [q[0] - 3, q[1] - 1.6], C('#f4f4f0'), 1); }
+  // chain-link fence along the two front edges, with a gate to the yard
+  for (let i = 0; i <= 8; i++) { const u = i / 4; if (u < 1.2 || u > 1.5) line(P(u, 1.98), P(u, 1.98, 8), C('#6b7280'), 0.7); line(P(1.98, u), P(1.98, u, 8), C('#6b7280'), 0.7); }
+  line(P(0, 1.98, 8), P(1.2, 1.98, 8), C('#6b7280'), 0.8); line(P(1.5, 1.98, 8), P(2, 1.98, 8), C('#6b7280'), 0.8);
+  line(P(0, 1.98, 4), P(1.2, 1.98, 4), 'rgba(107,114,128,.45)', 0.5); line(P(1.5, 1.98, 4), P(2, 1.98, 4), 'rgba(107,114,128,.45)', 0.5);
+  line(P(1.98, 0, 8), P(1.98, 2, 8), C('#6b7280'), 0.8); line(P(1.98, 0, 4), P(1.98, 2, 4), 'rgba(107,114,128,.45)', 0.5);
 }
 function recycle(k) {
   const { P, poly, box, faces, sh, C, line, circ } = k;

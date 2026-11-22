@@ -2,7 +2,7 @@
 
 Isometric city builder for Android. React + Vite + canvas, packaged with Capacitor.
 Project folder on Freddie's machine: `/home/freddielite/Downloads/skyline`
-App ID: `com.wyntek.skyline` · Current version: **0.5.13**
+App ID: `com.wyntek.skyline` · Current version: **0.5.14**
 
 This file is the handover: what has been built, how to push it to the phone, and the rules for future changes.
 Anyone (person or AI assistant) working on this project should read it first.
@@ -12,7 +12,7 @@ Anyone (person or AI assistant) working on this project should read it first.
 ## Rules for every change
 
 1. **Always end with the push command.** Every fix or feature, however small, ends with the full push command below, written out exactly, so it can be copied and run without looking anything up.
-2. **Always bump the version** in `package.json` (0.5.13 → 0.5.14 and so on). The game shows "Updated to version X" on first launch and the version in Menu, which is how we confirm the phone really got the new build.
+2. **Always bump the version** in `package.json` (0.5.14 → 0.5.15 and so on). The game shows "Updated to version X" on first launch and the version in Menu, which is how we confirm the phone really got the new build.
 3. **Deliver the whole project as `skyline.zip`**, with the files at the top level of the zip (no `skyline/` folder inside), and without `node_modules/`, `dist/` or `android/`.
 4. **Add a short entry to the change history** at the bottom of this file and to `README.md`.
 5. **Check performance on a slow phone.** The test phone is an Infinix HOT. Do heavy work once and cache it in sprites. The main view is drawn on the GPU (see "Drawing engine" below): `ctx.filter` (blur) does nothing there, and additive glow (`'lighter'`) is free.
@@ -45,7 +45,7 @@ The `&&` means each step only runs if the one before succeeded. If one fails, th
 
 ## Troubleshooting
 
-**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.5.13 · built (date) UTC`.
+**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.5.14 · built (date) UTC`.
 
 **Check the project folder has the new code:**
 ```bash
@@ -86,7 +86,7 @@ adb install android/app/build/outputs/apk/debug/app-debug.apk
 | Start screen | Open the game: the start screen shows with your city drifting behind it. Continue shows population, date and money. New city → pick Coastline, Lakeland or Countryside: the map behind changes to show it; Another map rolls a new one. With a saved city, Start building asks once more (Replace city). Back returns to your saved city unchanged. In the game, Menu → Main menu goes back to the start screen. |
 | Guide | Start screen (or Menu) → New city → Start building. An 8-step card appears and the camera starts at the highway. |
 | Highway | Zone homes on a road that doesn't reach the highway, then tap a lot: "Its roads don't reach the highway". Connect it and building starts. |
-| Inspector | Pick Move, tap any building. Tap again to close. |
+| Inspector | With no tool picked (tap ✕ on the tool chip), tap any building. Tap again to close. |
 | Debt | Test tools → Go into debt. The money turns red with "owed", lock badges appear on closed buildings, City → Bank explains it. Clear debt reopens everything. |
 | Loans | City → Bank → borrow. End month, then check payments in Budget. |
 | Unlocks, level 4 | Locked tools show a padlock. Test tools → Unlock all. Level 4 needs a university, schools, health care and land value 78+. |
@@ -98,14 +98,16 @@ adb install android/app/build/outputs/apk/debug/app-debug.apk
 | Sound | Tap the map once (phones need a tap before audio plays). Menu → Sound. |
 | Graphics | Menu → Graphics: Auto / Pretty / Smooth, Lens focus. Menu → Time of day to see dusk and night. |
 | Map edges | Drag to every edge and corner; each can be brought to the middle of the screen. |
-| Bridges | Pick Road and drag from a road on the shore across water. The preview counts $60 per water tile. Try a junction on the water, a side road onto the bridge, or more than 12 tiles: each is refused with a message. Move → tap a bridge: "Bridge, upkeep $2/month". Bulldoze removes it, with any lines or pipes on it. |
+| Bridges | Pick Road and drag from a road on the shore across water. The preview counts $60 per water tile. Try a junction on the water, a side road onto the bridge, or more than 12 tiles: each is refused with a message. With no tool picked, tap a bridge: "Bridge, upkeep $2/month". Bulldoze removes it, with any lines or pipes on it. |
 | Boats | Every lake and pond has something on it: ducks and rowboats on ponds, pedal boats on small lakes, sailboats and fishing boats on lakes, motorboats on big water. More appear as the population grows (checked every 3 seconds). Boats pass under bridges. Running lights at night. |
 | Light and water | Graphics → Pretty. Find buildings by a lake or the sea: by day they reflect in the water, which waves and glints. Menu → Time of day → Dusk: orange glints, warm sky on far water, warm light from the upper right. Night: lamps light pools on the roads, lit buildings spill light, cars have headlight beams and red tail lights. Smooth: no reflections or beams, water still moves. |
 | Frame rate | Menu → Graphics → Frame rate. With Auto, test tools say "Aiming for 30 fps" while you look, 60 while you drag, 20 when paused. The phone should stay cooler than before. 30 is coolest, 60 smoothest. |
 | Stutters | Test tools: drag the map around for 30 seconds, then read the Stutters line and its "Last one" details. Send these to whoever works on performance. |
 | GPU drawing | Menu → tap the version line 5 times: it says "Drawing with: GPU (WebGL2)". Look at the Frames line, then tap "Switch to old 2D canvas" and compare in the same place. Switch back afterwards. |
 | Leaving the app | Tap the map so sound plays, then press Home or switch apps. The sound stops at once. Come back: the clock and the city carried on from where they were, nothing happened while you were away. |
-| Harbor ships | Test tools → +$50,000 and Unlock all. Zone industry along the sea (Coastline map) and along an inland lake (Lakeland), connect them to the highway and let them grow. Sea harbors: container ships sail in from the map edge, tie up at the quay, then sail out (each round trip takes a few minutes). Lake harbors: a tug pushes a barge between harbors, or across the lake and back. Move → tap a harbor: "Ships to the sea" says Yes, or "inland water". Build a bridge that cuts a harbor off from the sea: the row says a bridge blocks the way, City → Advisors warns, and its ships switch to barges. Night: running lights. |
+| Harbor ships | Test tools → +$50,000 and Unlock all. Zone industry along the sea (Coastline map) and along an inland lake (Lakeland), connect them to the highway and let them grow. Sea harbors: container ships sail in from the map edge, tie up at the quay, then sail out (each round trip takes a few minutes). Lake harbors: a tug pushes a barge between harbors, or across the lake and back. With no tool picked, tap a harbor: "Ships to the sea" says Yes, or "inland water". Build a bridge that cuts a harbor off from the sea: the row says a bridge blocks the way, City → Advisors warns, and its ships switch to barges. Night: running lights. |
+| Interface | Top left: money, residents, happiness and a utilities chip (mint icons when power, water and garbage are fine; a shortage shows its numbers in amber or red). Tap money or the chip for City → Budget. Top right: clock and date, speed, R/C/I demand. Left rail: tap a category to open its tools, tap it again or ✕ or the map to close. Picking a tool closes the pop-out and shows a chip ("Road $10 ✕"); tap the chip to change tool, ✕ to stop building. Undo appears under the chip. Right column: Views, City, Menu, Hide. Panels and the Inspector open next to the right column. |
+| Landfill | Waste → Landfill. It fills its 2×2 lot: grassed cell, soil-capped cell, active cell with a compactor and gulls, gravel yard with office and skips, fence along the front. |
 | Moving vans | Set taxes to 20% so people leave: cars with boxes on the roof drive from the homes to the highway and fade out at the map edge. When homes grow, vans drive in from the highway. Homes not linked to the highway send no vans. |
 
 ---
@@ -127,7 +129,7 @@ adb install android/app/build/outputs/apk/debug/app-debug.apk
 - Bank tab: loans of $10k (12 months), $25k (24 months) and $60k (36 months), up to 3 at a time. Paying early saves 10%.
 
 ### Understanding the city
-- **Inspector:** tap any tile with Move to see what the building needs and the exact reason it isn't growing.
+- **Inspector:** with no tool picked, tap any tile to see what the building needs and the exact reason it isn't growing.
 - **Advisors** tab with plain-language problems and a "Show on map" button. A **news ticker** shows monthly headlines.
 - **Charts:** population, treasury, income vs costs, happiness, plus a happiness breakdown.
 - **8-step guide** for new cities.
@@ -215,9 +217,17 @@ Agreed with Freddie on 22 Nov 2026: buildings near water should look different d
 - **Drawing:** `renderer.ship()`, drawn live (few ships, simple shapes) in painter order with the buildings, so harbor buildings correctly hide ships tied up behind them. Hull colours etc. are `HULL`, `BOX`, `CARGO` at the top of `renderer.js`.
 - **Rules (sim.js):** `analyzeSea()` (run with the road analysis) sets `seaLink` per land tile: 1 = within 2 tiles of open sea, 2 = only reaches the sea past a bridge. `linkedOut(i)` replaces the plain highway check for growth and decay: industry with `seaLink 1` ships its goods by sea. `ports` / `portsBlocked` counted in `recount()`. With a port, industry never pays half tax and gets +0.08 demand (Freddie: this demand bonus was not in the plan; drop it if unwanted). Inspector row "Ships to the sea"; Advisors warn about blocked harbors.
 
+## Interface and landfill (built in 0.5.14)
+
+Freddie found the interface covered too much of the map (about 40% in landscape) and the landfill looked out of place (a round brown mound with confetti specks, spilling over its lot).
+- **HUD** (`App.jsx`, styles at the end of `styles.css` under "HUD (0.5.14)"): two pills on top instead of one full-width bar (`.hud-l`: money, residents, happiness, utilities chip `.utils`; `.hud-r`: clock with short date, speed, demand). The date's year is in the tooltip and in City.
+- **Build tools:** a slim category rail (`.rail`, 56 px) with short labels; tools open in a pop-out (`.fly`, state `fly`) only when a category is tapped. Move is no longer a tool: no tool picked means move/inspect, and the active tool shows as a chip (`.chip`) in `.leftcol` with ✕ to stop. Tapping the map closes the pop-out. Undo moved to a chip under it.
+- **Right column** (`.side`): Views, City, Menu, Hide as compact buttons under the top-right pill; sheets, the Inspector and alerts open beside it (`--below`, `--side-w`). On narrow portrait screens the right pill drops below the left one.
+- **Landfill** (`dump()` in `sprites.js`): four terraced cells inside the 2×2 diamond (grassed with a gas vent, soil-capped, active cell with muted waste, bin bags, a compactor and gulls, gravel yard with office, skips and weighbridge) and a chain-link fence with a gate.
+
 ## What's next (agreed order)
 
-1. **Water, part 2, second half** (below): pier, beach, marina, ferry pier. Barges on a lake with one harbor should go to the marina once it exists (`Ships.destination`).
+1. **Water, part 2, second half** (below, planned as 0.5.15): pier, beach, marina, ferry pier. Barges on a lake with one harbor should go to the marina once it exists (`Ships.destination`).
 2. **Graphics step 3** (below): richer building art and small signs of life.
 
 ## Water, part 2 (planned, not built yet)
@@ -266,13 +276,14 @@ src/game/audio.js        synthesized sound and music
 src/game/boats.js        boats on every body of water, sized to it
 src/game/ships.js        harbor ships: container ships from the sea, barges on lakes, routes over open water
 src/game/movers.js       moving vans: residents leaving and arriving by the highway
-src/App.jsx              all interface panels, including the start screen (StartScreen)
+src/App.jsx              all interface panels: top pills, category rail and tool pop-out, right column, sheets, start screen (StartScreen)
 ```
 
 ---
 
 ## Change history
 
+- **0.5.14:** cleaner interface and a new landfill. Two small pills on top instead of a full-width bar, power/water/garbage folded into one chip that only shows numbers when short, a slim category rail with tools in a pop-out, an active-tool chip with ✕, and a compact right column. The map shows about twice as much at once. The landfill is redrawn as a fenced, terraced lot that fits its footprint.
 - **0.5.13:** harbor ships. Container ships sail in from the sea to sea harbors and back out; barges shuttle on inland lakes. Ships can't pass bridges; the Inspector and Advisors say when a bridge cuts a harbor off. A harbor that reaches the sea ships goods out like the highway, and a sea port raises industry demand a little.
 - **0.5.12:** cooler phone, longer battery. Auto frame rate (60 while touching, 30 when still, 20 when paused, never above 60 on fast screens), a Frame rate setting (Auto / 30 / 60), and Pretty at 1.25x resolution on phones. Plan for Water part 2 and Graphics step 3 written down above.
 - **0.5.11:** graphics step 2, light and water: animated water with twinkling glints and sky reflection, buildings and trees reflected in the water, street-lamp light pools, light spilling from lit buildings, headlight beams, and warm sunset light.
