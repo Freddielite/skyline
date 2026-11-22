@@ -1,0 +1,33 @@
+{
+  "_readme": "Content pack: see \"Adding content\" in README.md. ids 100-250 are free for packs.",
+  "buildings": [
+    {
+      "id": 100,
+      "key": "cafe",
+      "name": "Corner cafe",
+      "label": "Cafe",
+      "icon": "book",
+      "cat": "fun",
+      "w": 1,
+      "d": 1,
+      "cost": 650,
+      "upkeep": 14,
+      "radius": 7,
+      "use": 1,
+      "cov": [
+        [
+          "fun",
+          0.55
+        ]
+      ],
+      "height": 36,
+      "unlock": 300,
+      "sprite": {
+        "file": "cafe.png",
+        "scale": 2
+      }
+    }
+  ],
+  "looks": {},
+  "replace": {}
+}

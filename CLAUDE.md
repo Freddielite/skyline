@@ -2,7 +2,7 @@
 
 Isometric city builder for Android. React + Vite + canvas, packaged with Capacitor.
 Project folder on Freddie's machine: `/home/freddielite/Downloads/skyline`
-App ID: `com.wyntek.skyline` · Current version: **0.6.1**
+App ID: `com.wyntek.skyline` · Current version: **0.7.0**
 
 This file is the handover: what has been built, how to push it to the phone, and the rules for future changes.
 Anyone (person or AI assistant) working on this project should read it first.
@@ -45,7 +45,7 @@ The `&&` means each step only runs if the one before succeeded. If one fails, th
 
 ## Troubleshooting
 
-**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.6.1 · built (date) UTC`.
+**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.7.0 · built (date) UTC`.
 
 **Check the project folder has the new code:**
 ```bash
@@ -345,6 +345,7 @@ src/App.jsx              all interface panels: top pills, category rail and tool
 
 ## Change history
 
+- **0.7.0:** content and soundtrack foundation. (1) Every house, shop and factory now has 16 looks instead of 8: bit 3 of the variant turns walls and roofs to a second colour family. (2) A recorded soundtrack: five 2-minute tracks (morning, daytime, golden hour, dusk, night) chosen by the time of day and crossfaded; the generated score stays as the fallback if a file is missing. Tracks are rendered by `tools/make-music.py` (`npm run music`). (3) Content packs: `public/content/pack.json` adds new buildings (with PNG pictures), extra looks for zoned buildings, or replaces a drawn picture, with no code change. Example: Corner cafe (unlocks at 300 residents). `npm run bake` exports every drawn picture as a PNG template into `bake/`. See "Adding content" in README.md.
 - **0.6.1:** traffic from real trips: jams appear where homes, jobs, shops and industry actually send people, drivers take the quickest route and avoid jams, avenues and new roads draw traffic away, and the cars on screen follow the busy roads. Faster drawing: about 40% less work per frame in a big city.
 - **0.6.0:** gameplay update. Seasons change power demand, growth, happiness and tourism; tourists bring income and need hotel beds; residents and businesses make requests with deadlines and choices; avenues carry twice the traffic; a metro links distant stations; industry grows as farms, sawmills or tech parks depending on where it is.
 - **0.5.18:** graphics polish. Sharp pictures when zoomed in, brick, siding and panel walls with framed windows and sills, shadows that follow the sun across the streets, street trees, parked cars and benches, wet roads after rain, windows lighting up one by one, walking people and soft grass and sand edges.

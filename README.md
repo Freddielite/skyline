@@ -216,6 +216,35 @@ Graphics and sound
 - Manhole covers hint at buried pipes in the normal view; the water view shows live pipes in blue and dead ones in gray
 - Older saves have no pipes: connect your towers to the buildings with pipes (you get 90 days before buildings without water start losing upgrades)
 
+## Adding content (0.7.0)
+
+0.7.0 in short: 16 looks per zoned building, a five-track recorded soundtrack chosen by time of day, and content packs (below).
+
+New buildings and pictures are files, not code. Everything lives in `public/content/` and is listed in `pack.json`.
+
+**A new building** (ids 100 to 250 are free):
+
+```json
+{ "id": 101, "key": "bakery", "name": "Bakery", "label": "Bakery", "icon": "book", "cat": "fun",
+  "w": 1, "d": 1, "cost": 500, "upkeep": 10, "radius": 6, "use": 1, "cov": [["fun", 0.5]],
+  "height": 36, "unlock": 300, "sprite": { "file": "bakery.png", "scale": 2 } }
+```
+
+- `cat`: where it shows in the build menu: `util`, `svc`, `waste`, `transit` or `fun`.
+- Effects are the same fields the built-in buildings use: `cov` (`police`, `fire`, `health`, `edu`, `fun`, `transit`, `metro`), `power`, `water`, `waste`, `radius`, `use`, `pollute`.
+- `unlock`: residents needed. `height`: used for the construction animation and shadow.
+- One day-lit PNG is enough: dusk and night are painted over it by the game.
+
+**Picture anchor.** `scale` is picture pixels per game pixel (2 is normal). `ox`, `oy` (picture pixels) mark the back corner of the building's footprint diamond. Leave them out and the footprint is centred on the bottom edge. A 1x1 building fits a 320x220 picture at scale 2 (see `cafe.png`).
+
+**More looks for houses, shops and factories**: `"looks": { "res.2": [ { "file": "house_a.png" }, ... ] }` (`res`, `com` or `ind`, then level 1 to 4). They appear as the second half of the 16 looks.
+
+**Replace a drawn building**: `"replace": { "4": { "file": "police.png" } }` (the number is the building id in `buildings.js`).
+
+**Templates.** `npm run bake` writes every drawn picture to `bake/` (PNG plus `index.json` with size and anchor). Draw over one, keep its size, and point the pack at it. A broken entry is skipped and logged; the game still starts.
+
+**Music.** `npm run music` re-renders `public/audio/*.mp3` from `tools/make-music.py` (edit keys, tempos and chords there). Needs Python with numpy and scipy, and ffmpeg. You can also drop in your own tracks with the same five names.
+
 ## Stage 3
 
 - Economy rebalanced: small towns now turn a profit, a regional grant tapers off as the city grows

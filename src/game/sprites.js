@@ -1,10 +1,12 @@
-import { tint, shade, mix, hash, lerp } from './util.js';
+import { tint, shade, mix, hash, lerp, hueShift } from './util.js';
 import { T, TERRAIN } from './world.js';
 import { waterfrontArt, WF_HEIGHTS } from './waterfront.js';
 
 const S = 2;               // supersampling for crisp zoom
 const CAST = false;        // baked cast shadows off: buildings' shadows are drawn by the renderer, across roads and neighbours
 const cache = new Map();
+// Bit 3 of a building's variant picks the second colour family (walls and roofs turned around the colour wheel), so each of the 8 shapes has 2 palettes = 16 looks.
+let ALT = 0, ALT_HUE = 0;
 const mk = (w, h, sc = S) => { const c = document.createElement('canvas'); c.width = Math.ceil(w * sc); c.height = Math.ceil(h * sc); return c; };
 const HI = 3.2;             // sharper copies for close zoom (see hiRes): drawn on demand, only for what's on screen
 
@@ -34,7 +36,7 @@ function kit(ctx, mode, ox, oy, lit = true, season = 0) {
   const line = (a, b, col, w = 1, dash) => { ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.setLineDash(dash || []); ctx.stroke(); ctx.setLineDash([]); };
   const circ = (p, r, f) => { ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, 6.2832); ctx.fillStyle = f; ctx.fill(); };
   const ell = (p, rx, ry, f) => { ctx.beginPath(); ctx.ellipse(p[0], p[1], rx, ry, 0, 0, 6.2832); ctx.fillStyle = f; ctx.fill(); };
-  const faces = (b) => ({ l: b, r: shade(b, 0.76), t: shade(b, 1.1) });
+  const faces = (b) => { if (ALT) b = hueShift(b, ALT_HUE); return { l: b, r: shade(b, 0.76), t: shade(b, 1.1) }; };
   const box = (x, y, w, d, h, col, z0 = 0) => {
     const t = z0 + h;
     poly([P(x, y + d, z0), P(x + w, y + d, z0), P(x + w, y + d, t), P(x, y + d, t)], C(col.l), true);
@@ -240,7 +242,7 @@ function yard(k, v) {
 function house(k, v) {
   const { P, poly, box, win, faces, sh, C, circ, line, ctx } = k;
   const x = 0.16, y = 0.1, w = 0.62 + (v % 2) * 0.04, d = 0.54, h = 22, rh = 14, ym = y + d / 2;
-  const wall = WALL[v % 5], roof = ROOF[(v * 2 + 1) % 5], f = faces(wall);
+  const wall = WALL[v % 5], roof = ALT ? hueShift(ROOF[(v * 2 + 1) % 5], ALT_HUE) : ROOF[(v * 2 + 1) % 5], f = faces(wall);
   const pos = (u, t) => P(x + w * u, lerp(y + d, ym, t), h + rh * t);
   k.pad('#a9dc8e', ['#4d8f3c', '#8fd070', '#3f7f34']);
   poly([P(0.48, 0.64), P(0.7, 0.64), P(0.7, 1), P(0.48, 1)], C('#b4b7bd'), null, true);
@@ -553,11 +555,14 @@ function memoLater(key, fn) { const v = cache.get(key); if (v) return v; if (spr
 // shore: 0 inland, or the waterfront style (SHORE.POND / LAKE / SEA) from world.shore
 export function buildingSprite(kind, level, variant, mode, lit = true, shore = 0, hi = false) {
   lit = mode === 2 ? !!lit : true;
+  const pool = !shore && (variant & 8) && POOL.get(kind + '.' + level);       // content packs add pictures as extra looks (the second-palette half of the 16)
+  if (pool) return extSprite(pool[(variant & 7) % pool.length], mode, lit);
   const key = `b${kind}${level}${variant}${mode}${lit ? 1 : 0}w${shore}`;
   const fnMake = (sc) => () => {
     const H = shore ? WF_HEIGHTS[kind][level - 1] : HEIGHTS[kind][level - 1];
     const fn = shore ? waterfrontArt(shore, kind, level) : kind === T.IND && (variant >> 4) ? industryArt(level, variant) : BUILD[kind][level - 1];
-    return make(160, H, 80, H - 64, (k) => fn(k, variant & 7), mode, lit, 0, sc);
+    ALT = (variant >> 3) & 1; ALT_HUE = [0, 150, 205, 95][(variant >> 1) & 3] + 40;   // a different turn of the wheel for each shape
+    try { return make(160, H, 80, H - 64, (k) => fn(k, variant & 7), mode, lit, 0, sc); } finally { ALT = 0; }
   };
   return hi ? hiRes(key, fnMake(HI)) || memoLater(key, fnMake(S)) : memoLater(key, fnMake(S));
 }
@@ -1210,6 +1215,7 @@ const SVC_SPR_SHORE = { 23: [pier, 1, 1, 70, 2], 24: [beach, 2, 2, 60, 1], 25: [
 const SVC_SPR = { ...SVC_SPR_SHORE, 1: [coalPlant, 2, 2, 190], 2: [wind, 1, 1, 130], 3: [waterTower, 1, 1, 130], 4: [police, 1, 1, 100], 5: [fireStation, 1, 1, 130], 6: [clinic, 1, 1, 110], 7: [school, 1, 1, 130], ...SVC_SPR_X };
 export function serviceSprite(id, mode, lit = true, face = 0, hi = false) {
   lit = mode === 2 ? !!lit : true;
+  const ex = EXT.get('s' + id); if (ex) return extSprite(ex, mode, lit);     // a picture from a content pack replaces (or supplies) the drawn one
   const e = SVC_SPR[id], pad = e[4] || 0, key = `s${id}${mode}${lit ? 1 : 0}${pad ? 'f' + face : ''}`;
   const fnMake = (sc) => () => {
     const [fn, fw0, fd0, hh] = e, fw = fw0 + 2 * pad, fd = fd0 + 2 * pad;     // shore buildings get a bigger canvas for the part over the water
@@ -1278,4 +1284,18 @@ export function bridgeTop(axis, endN, endF, mode) {
     wall(near(0), near(1));
     for (const t of [0.25, 0.75]) line(near(t)(0), near(t)(H + 0.6), C('#a8a296'), 0.9);
   }, mode));
+}
+
+// ---- content packs: pictures loaded from files (see src/game/content.js) ----
+// A sprite is { img, ox, oy, S, id }: ox/oy are the footprint's back corner in picture pixels / S, like the drawn ones.
+const EXT = new Map(), POOL = new Map();
+export function registerSprite(key, spr) { EXT.set(key, spr); }
+export function registerPool(kind, level, list) { POOL.set(kind + '.' + level, list); }
+// One day picture serves all three lightings: dusk and night are painted over it the way tint() does for drawn sprites.
+function extSprite(e, mode, lit) {
+  const key = `x${e.id}_${mode}${lit ? 1 : 0}`; let v = cache.get(key); if (v) return v;
+  const c = document.createElement('canvas'); c.width = e.img.width; c.height = e.img.height;
+  const g = c.getContext('2d'); g.drawImage(e.img, 0, 0);
+  if (mode) { g.globalCompositeOperation = 'source-atop'; g.fillStyle = mode === 2 ? (lit ? 'rgba(14,26,68,.46)' : 'rgba(14,26,68,.6)') : 'rgba(255,138,61,.2)'; g.fillRect(0, 0, c.width, c.height); if (mode === 1) { g.fillStyle = 'rgba(0,0,0,.07)'; g.fillRect(0, 0, c.width, c.height); } }
+  v = { c, ox: e.ox, oy: e.oy, S: e.S }; cache.set(key, v); return v;
 }

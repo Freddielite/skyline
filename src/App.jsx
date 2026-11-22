@@ -101,6 +101,14 @@ const CATS = [
   { id: 'transit', label: 'Transit', short: 'Transit', icon: 'bus', tools: ['move', 'busstop', 'busterm', 'ferry', 'metro', 'clear'] },
   { id: 'fun', label: 'Amenities', short: 'Fun', icon: 'ball', tools: ['move', 'pier', 'beach', 'plaza', 'library', 'marina', 'museum', 'stadium', 'clear'] },
 ];
+// Buildings from content packs (src/game/content.js) join the build menu under their category.
+export function registerTools(list) {
+  for (const t of list) {
+    T[t.id] = { id: t.id, label: t.label, icon: I[t.icon] ? t.icon : 'ball', cost: t.cost };
+    const cat = CATS.find((c) => c.id === t.cat) || CATS[CATS.length - 1], at = cat.tools.lastIndexOf('clear');
+    cat.tools.splice(at < 0 ? cat.tools.length : at, 0, t.id);
+  }
+}
 const VIEWS = [
   { id: 'commute', label: 'Commutes' }, { id: 'traffic', label: 'Traffic' }, { id: 'transit', label: 'Transit' }, { id: 'metro', label: 'Metro' }, { id: 'value', label: 'Land value' }, { id: 'crime', label: 'Crime' }, { id: 'pollution', label: 'Pollution' },
   { id: 'power', label: 'Power' }, { id: 'water', label: 'Water' },

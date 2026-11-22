@@ -13,6 +13,7 @@ export class SoundEngine {
     this.sound = saved.sound ?? true; this.music = saved.music ?? true; this.volume = saved.volume ?? 0.7;
     this.ctx = null; this.scene = { pop: 0, zoom: 1, rain: 0, night: false, paused: false };
     this.bar = 0; this.nextBar = 0; this.lastChirp = 0;
+    this.cur = null; this.fileFail = false;      // recorded soundtrack (public/audio/*.mp3); the generated score below is the fallback
   }
   save() { try { localStorage.setItem(KEY, JSON.stringify({ sound: this.sound, music: this.music, volume: this.volume })); } catch (e) { /* ignore */ } }
   settings() { return { sound: this.sound, music: this.music, volume: this.volume }; }
@@ -41,10 +42,10 @@ export class SoundEngine {
   }
   // The app went to the background (home button, another app, screen off): silence everything.
   // Nothing is torn down, so coming back is instant.
-  sleep() { this.asleep = true; if (this.ctx && this.ctx.state === 'running') this.ctx.suspend(); }
+  sleep() { this.asleep = true; if (this.cur) this.cur.el.pause(); if (this.ctx && this.ctx.state === 'running') this.ctx.suspend(); }
   wake() {
     this.asleep = false; if (!this.ctx) return;
-    this.ctx.resume().then(() => { this.nextBar = this.ctx.currentTime + 0.4; }).catch(() => {});   // restart the music on a fresh bar, not a burst of missed ones
+    this.ctx.resume().then(() => { this.nextBar = this.ctx.currentTime + 0.4; if (this.cur && this.music) this.cur.el.play().catch(() => {}); }).catch(() => {});   // restart the music on a fresh bar, not a burst of missed ones
   }
   noise(sec, brown) {
     const c = this.ctx, b = c.createBuffer(1, c.sampleRate * sec, c.sampleRate), d = b.getChannelData(0); let last = 0;
@@ -88,9 +89,37 @@ export class SoundEngine {
       if (!s.night && s.rain < 0.3 && Math.random() < 0.18 * Math.min(1, s.zoom)) this.chirp(now + Math.random() * 0.4);
       if (s.night && Math.random() < 0.35) this.cricket(now + Math.random() * 0.4);
     }
-    const beat = s.night ? 0.75 : 0.6, barLen = beat * 4;
+    this.tickTrack();
+    const beat = s.night ? 0.75 : 0.6, barLen = beat * 4, live = this.fileLive();
     while (this.nextBar < now + 1.2) {             // schedule well ahead, so a busy moment never leaves a gap
-      this.playBar(this.nextBar, beat); this.nextBar += barLen; this.bar++; }
+      if (!live) this.playBar(this.nextBar, beat); this.nextBar += barLen; this.bar++; }
+  }
+  // ---- recorded soundtrack: five tracks (morning, daytime, golden, dusk, night) chosen by the time of day, crossfaded ----
+  fileLive() { return this.music && !this.fileFail && !!this.cur && this.cur.ok; }
+  startTrack(name) {
+    const c = this.ctx, el = new Audio(); el.preload = 'auto'; el.src = './audio/' + name + '.mp3';
+    const node = c.createMediaElementSource(el), g = c.createGain(); g.gain.value = 0; node.connect(g); g.connect(this.musicBus);
+    const tr = { name, el, node, g, ok: false };
+    el.addEventListener('playing', () => { tr.ok = true; });
+    el.addEventListener('error', () => { if (this.cur === tr) { this.fileFail = true; this.cur = null; } this.dropTrack(tr); });
+    el.play().catch(() => { /* blocked until the next tap: tickTrack tries again */ });
+    g.gain.setTargetAtTime(1, c.currentTime, 1.4);
+    return tr;
+  }
+  dropTrack(tr) { try { tr.el.pause(); tr.el.removeAttribute('src'); tr.el.load(); tr.node.disconnect(); tr.g.disconnect(); } catch (e) { /* ignore */ } }
+  tickTrack() {
+    const c = this.ctx, want = this.scene.track || 'daytime';
+    if (this.fileFail || !c) return;
+    if (!this.music) { if (this.cur && !this.cur.el.paused) this.cur.el.pause(); return; }
+    const cur = this.cur;
+    if (!cur) { this.cur = this.startTrack(want); return; }
+    if (cur.el.paused && !cur.el.ended) { cur.el.play().catch(() => {}); return; }
+    const done = cur.el.ended || (cur.el.duration > 0 && cur.el.currentTime > cur.el.duration - 4);
+    if ((cur.name !== want && (done || cur.el.currentTime > 30)) || (cur.name === want && cur.el.ended)) {
+      cur.g.gain.setTargetAtTime(0, c.currentTime, 1.3);       // old track fades out while the new one fades in
+      setTimeout(() => this.dropTrack(cur), 6000);
+      this.cur = this.startTrack(want);
+    }
   }
   playBar(t, beat) {
     if (!this.music) return;

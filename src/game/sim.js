@@ -657,7 +657,7 @@ export class Sim {
       const d = this.zoneDemand(z), lvl = w.level[i];
       const road = w.roadNear(x, y, 2);
       if (!road) { if (lvl && rnd() < 0.03) { w.level[i] = lvl - 1; if (z === T.RES) this.events.push({ type: 'moveOut', i, n: POP_CAP[lvl] - POP_CAP[lvl - 1] }); } continue; }
-      const grow = (to) => { const pv = w.variant[i], sp = z === T.IND ? (lvl === 0 ? this.pickSpec(i) : (pv >> 4) & 3) : 0; w.level[i] = to; w.variant[i] = Math.floor(rnd() * 8) | (sp << 4); this.needAn = true; this.markBuilt(i, { kind: z, from: lvl, to, pv }); };   // 8 looks per building (4..7 add roof and street details)
+      const grow = (to) => { const pv = w.variant[i], sp = z === T.IND ? (lvl === 0 ? this.pickSpec(i) : (pv >> 4) & 3) : 0; w.level[i] = to; w.variant[i] = Math.floor(rnd() * 16) | (sp << 4); this.needAn = true; this.markBuilt(i, { kind: z, from: lvl, to, pv }); };   // 8 looks per building (4..7 add roof and street details; +8 = second colour family)
       const shrink = () => { w.level[i] = lvl - 1; this.needAn = true; if (z === T.RES) this.events.push({ type: 'moveOut', i, n: POP_CAP[lvl] - POP_CAP[lvl - 1] }); };
       if (lvl === 0) {
         if (!this.blocker(i, z, 0) && rnd() < 0.15 + 0.5 * Math.max(0, d)) grow(1);

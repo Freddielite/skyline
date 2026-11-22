@@ -20,7 +20,7 @@ const SEASON_OF = [2, 2, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2];   // by month: winter De
 
 const SAVE_KEY = 'skyline.save.v1';
 const UNDO_MS = 20000;                 // a build can only be undone shortly after you make it
-const TOOL_COST = { avenue: COST.avenue, pipe: COST.pipe, wire: COST.wire, cable: COST.cable, road: COST.road, res: COST.zone, com: COST.zone, ind: COST.zone, park: COST.park, bulldoze: COST.bulldoze };
+export const TOOL_COST = { avenue: COST.avenue, pipe: COST.pipe, wire: COST.wire, cable: COST.cable, road: COST.road, res: COST.zone, com: COST.zone, ind: COST.zone, park: COST.park, bulldoze: COST.bulldoze };
 for (const b of Object.values(BT)) TOOL_COST[b.key] = b.cost;
 
 export class Game {
@@ -450,6 +450,12 @@ export class Game {
     }
   }
   stop() { this.running = false; cancelAnimationFrame(this._raf); window.removeEventListener('resize', this._resize); window.removeEventListener('pagehide', this._hide); window.removeEventListener('pageshow', this._show); window.removeEventListener('blur', this._hide); window.removeEventListener('focus', this._show); document.removeEventListener('pause', this._hide); document.removeEventListener('resume', this._show); }
+  // which recorded track suits the hour: morning, daytime, golden, dusk, night
+  musicTrack() {
+    if (this.timeSetting !== 'auto') return ['daytime', 'dusk', 'night'][this.mode] || 'daytime';
+    const ph = (this.clock / 180) % 1;
+    return ph >= 0.9 || ph < 0.2 ? 'morning' : ph < 0.42 ? 'daytime' : ph < 0.55 ? 'golden' : ph < 0.65 ? 'dusk' : 'night';
+  }
   get abs() { return (this.clock / 180) * 24 + 6; }          // absolute clock hours; a day lasts 180s at 1x
   get hour() { return this.abs % 24; }
   update(dt) {
@@ -505,7 +511,7 @@ export class Game {
     if (alertN && !this.lastAlert) this.audio.play('alarm');
     this.lastAlert = alertN;
     this.sceneT += dt;
-    if (this.sceneT > 0.5) { this.sceneT = 0; this.audio.setScene({ pop: s.pop, zoom: this.cam.zoom, rain: this.ambient.weather.k, night: this.mode === 2, paused: sp === 0 }); }
+    if (this.sceneT > 0.5) { this.sceneT = 0; this.audio.setScene({ pop: s.pop, zoom: this.cam.zoom, rain: this.ambient.weather.k, night: this.mode === 2, track: this.musicTrack(), paused: sp === 0 }); }
     this.saveTimer += dt;
     if (this.saveTimer > 20) { this.saveTimer = 0; if (this.dirtySave && !this.menu) this.save(); }
   }

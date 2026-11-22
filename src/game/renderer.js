@@ -112,7 +112,7 @@ export class Renderer {
       if (X < -mX * 3 || X > W + mX * 3 || Y < top || Y > H + 200 * z) continue;
       const k = w.kind[i]; let sp = null;
       if (k === T.EMPTY && w.tree[i]) sp = treeSprite(w.tree[i], mode);
-      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i] && !g.sites.has(i)) sp = buildingSprite(k, w.level[i], (w.variant[i] & 55), mode, g.sim.pw[i] === 1, w.shore[i]);
+      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i] && !g.sites.has(i)) sp = buildingSprite(k, w.level[i], (w.variant[i] & 63), mode, g.sim.pw[i] === 1, w.shore[i]);
       else if (k === T.PARK) sp = parkSprite(w.variant[i] % 4, mode);
       sp = mip(sp, lvl); if (!sp) continue;
       const hh = (sp.c.height / sp.S) * z, ww = (sp.c.width / sp.S) * z, top0 = Y - sp.oy * z, cut = Y + 10 * z, mirror = Y + 26 * z;
@@ -185,14 +185,14 @@ export class Renderer {
         }
         else if (k === T.PARK) { const sp = mip(parkSprite(w.variant[i] % 4, mode), lvl), site = g.sites.get(i); if (!sp) { /* next frame */ } else if (site) drawConstruction(ctx, site, X, Y, z, mode, t, sp, null); else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
         else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) {
-          const shr = w.shore[i], sp = mip(buildingSprite(k, w.level[i], (w.variant[i] & 55), mode, g.sim.pw[i] === 1 && (mode !== 2 || hash(x, y, 17) < this.litFrac), shr, hi), lvl);
+          const shr = w.shore[i], sp = mip(buildingSprite(k, w.level[i], (w.variant[i] & 63), mode, g.sim.pw[i] === 1 && (mode !== 2 || hash(x, y, 17) < this.litFrac), shr, hi), lvl);
           const site = g.sites.get(i), lv = w.level[i];
           if (mode === 2 && ctx.gpu && !g.fast && g.sim.pw[i] === 1 && !site) {
             const r = (40 + lv * 10) * z; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.2 + lv * 0.03;
             ctx.drawImage(this.poolSprite(), X - r, Y + 16 * z - r * 0.5, r * 2, r); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
           }
           if (!sp) { /* picture not made yet: it appears in a frame or two */ }
-          else if (site) { const so = site.from > 0 ? mip(buildingSprite(k, site.from, (site.pv & 55), mode, g.sim.pw[i] === 1, shr), lvl) : null; drawConstruction(ctx, site, X, Y, z, mode, t, sp, so); }
+          else if (site) { const so = site.from > 0 ? mip(buildingSprite(k, site.from, (site.pv & 63), mode, g.sim.pw[i] === 1, shr), lvl) : null; drawConstruction(ctx, site, X, Y, z, mode, t, sp, so); }
           else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
           if (!site) {
             const sm = shr ? WF_SMOKE[`${shr}${k}${lv}`] : SMOKE[`${k}${lv}`];
@@ -287,7 +287,7 @@ export class Renderer {
       const i = y * N + x, k = w.kind[i];
       if (k === T.EMPTY && w.tree[i]) send(mip(treeSprite(w.tree[i], mode), lvl));
       else if (k === T.PARK) send(mip(parkSprite(w.variant[i] % 4, mode), lvl));
-      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) send(mip(buildingSprite(k, w.level[i], (w.variant[i] & 55), mode, g.sim.pw[i] === 1, w.shore[i]), lvl));
+      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) send(mip(buildingSprite(k, w.level[i], (w.variant[i] & 63), mode, g.sim.pw[i] === 1, w.shore[i]), lvl));
       else if (k === T.SVC && w.bo[i] === 0) { const def = BT[w.bt[i]]; send(mip(serviceSprite(w.bt[i], mode, def.power ? true : g.sim.pw[i] === 1, def.reach ? w.variant[i] : 0), lvl)); }
     }
   }
