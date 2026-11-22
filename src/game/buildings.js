@@ -25,6 +25,17 @@ export const BT = {
   18: { id: 18, key: 'wte', name: 'Waste-to-energy', w: 2, d: 2, cost: 5200, upkeep: 140, waste: 200, radius: 14, power: 40, pollute: 8, pr: 6, cat: 'waste' },
 };
 export const BY_KEY = Object.fromEntries(Object.values(BT).map((b) => [b.key, b]));
-export const ELEC = { r: [0, 2, 6, 16], c: [0, 2, 6, 18], i: [0, 4, 10, 24] };
-export const WATER = { r: [0, 2, 6, 16], c: [0, 1, 4, 12], i: [0, 3, 8, 20] };
-export const WASTE = { r: [0, 1, 3, 9], c: [0, 2, 5, 14], i: [0, 3, 8, 20] };
+// per zone level 0..4 (level 4 = skyscrapers, office megatowers and hi-tech campuses)
+export const ELEC = { r: [0, 2, 6, 16, 34], c: [0, 2, 6, 18, 40], i: [0, 4, 10, 24, 30] };
+export const WATER = { r: [0, 2, 6, 16, 34], c: [0, 1, 4, 12, 26], i: [0, 3, 8, 20, 22] };
+export const WASTE = { r: [0, 1, 3, 9, 18], c: [0, 2, 5, 14, 26], i: [0, 3, 8, 20, 16] };
+// which services shut down first when the city owes the bank money (stage 1, 2, 3)
+export const CUT_STAGE = { fun: 1, edu: 2, transit: 2, safety: 3 };
+export function cutGroup(def) {
+  if (!def) return null;
+  if (def.cat === 'fun') return 'fun';
+  if (def.cat === 'transit') return 'transit';
+  if (def.key === 'school' || def.key === 'university') return 'edu';
+  if (def.cat === 'svc') return 'safety';            // police, fire, clinics and hospitals
+  return null;                                       // power, water and garbage always keep running
+}

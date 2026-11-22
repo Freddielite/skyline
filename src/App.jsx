@@ -38,6 +38,10 @@ const I = {
   undo: 'M9 14L4 9l5-5M4 9h10a6 6 0 010 12h-4',
   bus: 'M5 4h14a1 1 0 011 1v11H4V5a1 1 0 011-1zM4 11h16M7 16v3m10-3v3M7.5 13.5h.01M16.5 13.5h.01',
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zm10-3a3 3 0 100 6 3 3 0 000-6z',
+  lock: 'M6 11h12v9H6v-9zm2 0V8a4 4 0 018 0v3',
+  check: 'M5 12.5l4.5 4.5L19 7.5',
+  news: 'M4 5h13v14H6a2 2 0 01-2-2V5zm13 4h3v8a2 2 0 01-2 2M7 9h7M7 12h7M7 15h4',
+  volume: 'M4 9v6h4l5 4V5L8 9H4zm12.5-.5a5 5 0 010 7M19 6a8.5 8.5 0 010 12',
 };
 const Icon = ({ n, size = 22, fill }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill={fill ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={I[n]} /></svg>
@@ -86,11 +90,13 @@ const CATS = [
   { id: 'fun', label: 'Amenities', icon: 'ball', tools: ['move', 'plaza', 'library', 'museum', 'stadium', 'clear'] },
 ];
 const VIEWS = [
-  { id: 'traffic', label: 'Traffic' }, { id: 'transit', label: 'Transit' }, { id: 'value', label: 'Land value' }, { id: 'crime', label: 'Crime' }, { id: 'pollution', label: 'Pollution' },
+  { id: 'commute', label: 'Commutes' }, { id: 'traffic', label: 'Traffic' }, { id: 'transit', label: 'Transit' }, { id: 'value', label: 'Land value' }, { id: 'crime', label: 'Crime' }, { id: 'pollution', label: 'Pollution' },
   { id: 'power', label: 'Power' }, { id: 'water', label: 'Water' },
   { id: 'waste', label: 'Waste' }, { id: 'fun', label: 'Amenities' },
   { id: 'police', label: 'Police' }, { id: 'fire', label: 'Fire' }, { id: 'health', label: 'Health' }, { id: 'edu', label: 'Education' },
 ];
+const VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
+const BUILT = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '';
 const money = (n) => (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-US');
 const supplyClass = (sup, dem) => (dem <= 0 ? 'ok' : sup >= dem ? 'ok' : sup >= dem * 0.75 ? 'mid' : 'bad');
 
@@ -104,6 +110,127 @@ function Demand({ s }) {
   return <div className="demand" aria-label="Zone demand">{bar(s.rd, '#4caf50', 'R')}{bar(s.cd, '#3d8bd9', 'C')}{bar(s.id, '#e0b526', 'I')}</div>;
 }
 
+// A small line chart for the monthly history. Each series gets its own color and the latest value is labeled.
+function Chart({ title, data, series, fmt }) {
+  const W = 300, H = 92, pad = 4;
+  if (data.length < 2) return null;
+  const vals = series.flatMap((sr) => data.map((d) => d[sr.k]));
+  let lo = Math.min(...vals), hi = Math.max(...vals); if (hi === lo) { hi += 1; lo -= 1; }
+  const X = (i) => pad + (i / (data.length - 1)) * (W - 2 * pad), Y = (v) => pad + (1 - (v - lo) / (hi - lo)) * (H - 2 * pad);
+  const zero = lo < 0 && hi > 0 ? Y(0) : null, last = data[data.length - 1];
+  return (
+    <figure className="chart">
+      <figcaption><b>{title}</b>{series.map((sr) => <span key={sr.k} style={{ color: sr.c }}>{sr.label ? sr.label + ' ' : ''}{fmt(last[sr.k])}</span>)}</figcaption>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={title}>
+        {zero !== null && <line x1="0" x2={W} y1={zero} y2={zero} className="zero" />}
+        {series.map((sr) => <polyline key={sr.k} fill="none" stroke={sr.c} strokeWidth="2" vectorEffect="non-scaling-stroke" points={data.map((d, i) => `${X(i)},${Y(d[sr.k])}`).join(' ')} />)}
+      </svg>
+      <div className="range"><span>{fmt(hi)}</span><span>{fmt(lo)}</span></div>
+    </figure>
+  );
+}
+
+function Inspector({ info, onClose, low }) {
+  return (
+    <section className={"inspect" + (low ? " low" : "")} aria-label={info.title}>
+      <div className="ih"><div><h2>{info.title}</h2>{info.sub && <p>{info.sub}</p>}</div><button className="x" onClick={onClose} aria-label="Close"><Icon n="close" size={16} /></button></div>
+      {info.why && <div className={'why ' + (info.good ? 'ok' : 'bad')}>{info.why}</div>}
+      {info.rows.length > 0 && <dl>{info.rows.map((r) => (
+        <div key={r.label} className={r.ok === false ? 'bad' : ''}><dt>{r.label}</dt><dd>{r.ok === true && <Icon n="check" size={13} />}{r.ok === false && <Icon n="close" size={12} />}{r.value}</dd></div>
+      ))}</dl>}
+    </section>
+  );
+}
+
+
+// ---------- start screen ----------
+// The city (or a fresh map) drifts behind it; see Game.enterMenu / previewMap.
+const MAPS = [
+  { id: 'coast', name: 'Coastline', desc: 'The sea along one edge. Beaches and harbors.' },
+  { id: 'lake', name: 'Lakeland', desc: 'Two or three big lakes. Cabins and boathouses.' },
+  { id: 'country', name: 'Countryside', desc: 'Green fields and ponds. Cottages and mills.' },
+];
+function MiniMap({ id }) {
+  return (
+    <svg viewBox="0 0 64 40" className="minimap" aria-hidden="true">
+      <rect width="64" height="40" rx="7" fill="#7cbf68" />
+      {id === 'coast' && <><path d="M0 0h22c-4 8 4 14-2 22s3 12 0 18H0z" fill="#3a92c7" /><path d="M22 0c-4 8 4 14-2 22s3 12 0 18h-3c3-6-6-10 0-18s-2-14 2-22z" fill="#ecd9a6" /><circle cx="48" cy="12" r="2.4" fill="#4fa6d6" /></>}
+      {id === 'lake' && <><path d="M14 9c8-3 16 1 15 8s-9 9-15 7-8-12 0-15z" fill="#3f9ccf" /><path d="M38 21c7-4 17-1 16 6s-10 8-16 6-6-9 0-12z" fill="#3f9ccf" /><circle cx="50" cy="9" r="2.2" fill="#4fa6d6" /></>}
+      {id === 'country' && <>{[[12, 10], [30, 8], [50, 14], [20, 28], [40, 30], [54, 31]].map(([x, y], i) => <circle key={i} cx={x} cy={y} r={i === 3 ? 4.6 : 2.6} fill="#4fa6d6" />)}<path d="M0 20h64" stroke="#9ed08a" strokeWidth="1.5" /><path d="M32 0v40" stroke="#9ed08a" strokeWidth="1.5" /></>}
+    </svg>
+  );
+}
+function StartScreen({ g, st, saved, view, setView, onPlay, onNew, refresh }) {
+  const [map, setMap] = useState('coast');
+  const [sure, setSure] = useState(false);
+  const preview = (id) => { setMap(id); setSure(false); g.previewMap(id); };
+  const openNew = () => { setView('new'); preview(map); };
+  const back = () => { g.cancelPreview(); setSure(false); setView('home'); };
+  const build = () => { if (saved && !sure) { setSure(true); return; } onNew(); };
+  return (
+    <div className="start" onPointerDown={() => g.audio.unlock()}>
+      <div className="start-scrim" aria-hidden="true" />
+      <main className="start-col">
+        <h1 className="logo">Skyline<span>Build a city by the water</span></h1>
+        {view === 'home' && (
+          <nav className="start-menu" aria-label="Start">
+            {saved && (
+              <button className="big primary" onClick={onPlay}>
+                <b>Continue</b>
+                <small>{saved.pop.toLocaleString('en-US')} residents &middot; {saved.date} &middot; <span className={saved.money < 0 ? 'neg' : ''}>{money(saved.money)}</span></small>
+              </button>
+            )}
+            <button className={'big' + (saved ? '' : ' primary')} onClick={openNew}><b>New city</b><small>Choose a coastline, lakes or countryside</small></button>
+            <button className="big" onClick={() => setView('settings')}><b>Settings</b><small>Sound, music and graphics</small></button>
+          </nav>
+        )}
+        {view === 'new' && (
+          <section className="start-new" aria-label="New city">
+            <h2>Choose your land</h2>
+            <div className="maps">
+              {MAPS.map((m) => (
+                <button key={m.id} className={'mapcard' + (map === m.id ? ' on' : '')} onClick={() => preview(m.id)} aria-pressed={map === m.id}>
+                  <MiniMap id={m.id} /><b>{m.name}</b><small>{m.desc}</small>
+                </button>
+              ))}
+            </div>
+            {sure && <p className="start-warn">This replaces your city of {saved.pop.toLocaleString('en-US')} residents. Tap again to replace it.</p>}
+            <div className="start-row">
+              <button className="big slim" onClick={back}>Back</button>
+              <button className="big slim" onClick={() => preview(map)}>Another map</button>
+              <button className={'big slim primary' + (sure ? ' danger' : '')} onClick={build}>{sure ? 'Replace city' : 'Start building'}</button>
+            </div>
+          </section>
+        )}
+        {view === 'settings' && st && (
+          <section className="start-new" aria-label="Settings">
+            <h2>Settings</h2>
+            <div className="seg two">
+              <button className={st.audio.sound ? 'on' : ''} onClick={() => { g.setAudio('sound', !st.audio.sound); refresh(); }}>Effects {st.audio.sound ? 'on' : 'off'}</button>
+              <button className={st.audio.music ? 'on' : ''} onClick={() => { g.setAudio('music', !st.audio.music); refresh(); }}>Music {st.audio.music ? 'on' : 'off'}</button>
+            </div>
+            <label className="tax vol"><span><Icon n="volume" size={16} />Volume</span><input type="range" min="0" max="100" value={Math.round(st.audio.volume * 100)} onChange={(e) => { g.setAudio('volume', +e.target.value / 100); refresh(); }} /><b>{Math.round(st.audio.volume * 100)}%</b></label>
+            <div className="seg three">
+              {[['auto', 'Auto'], ['high', 'Pretty'], ['fast', 'Smooth']].map(([q, l]) => (
+                <button key={q} className={st.quality === q ? 'on' : ''} onClick={() => { g.setQuality(q); refresh(); }}>{l}</button>
+              ))}
+            </div>
+            <p className="hint">Graphics: Auto starts pretty and switches to smooth if the game slows down.</p>
+            <div className="seg three">
+              {[['auto', 'Auto frame rate'], [30, '30 fps'], [60, '60 fps']].map(([v, l]) => (
+                <button key={l} className={st.fpsSetting === v ? 'on' : ''} onClick={() => { g.setFps(v); refresh(); }}>{l}</button>
+              ))}
+            </div>
+            <p className="hint">Auto frame rate keeps the phone cooler: 60 while you drag, 30 when the view is still.</p>
+            <div className="start-row"><button className="big slim" onClick={() => setView('home')}>Back</button></div>
+          </section>
+        )}
+      </main>
+      <div className="start-ver">Skyline {VERSION}</div>
+    </div>
+  );
+}
+
 export default function App() {
   const cvRef = useRef(null), gameRef = useRef(null);
   const [st, setSt] = useState(null);
@@ -114,6 +241,14 @@ export default function App() {
   const [panel, setPanel] = useState(null);
   const [tab, setTab] = useState('budget');
   const [timeSet, setTimeSet] = useState('auto');
+  const [news, setNews] = useState(null);
+  const [taps, setTaps] = useState(0);
+  const [tilt, setTilt] = useState(() => { try { return localStorage.getItem('skyline.tilt') === '1'; } catch (e) { return true; } });
+  const flipTilt = () => { const v = !tilt; setTilt(v); try { localStorage.setItem('skyline.tilt', v ? '1' : '0'); } catch (e) { /* ignore */ } };
+  const newsT = useRef(0);
+  const [screen, setScreen] = useState('start');
+  const [startView, setStartView] = useState('home');
+  const [saved, setSaved] = useState(null);
   const [ui, setUi] = useState(() => { try { return localStorage.getItem('skyline.hideui') !== '1'; } catch (e) { return true; } });
   const toastT = useRef(0);
 
@@ -125,10 +260,18 @@ export default function App() {
       cost: (c, n, name) => setCost(n ? { c, n, name } : null),
       goal: (e) => say(`Goal complete: ${e.title}  +${money(e.reward)}`),
       month: (e) => say(`Month closed: ${e.income - e.expense >= 0 ? '+' : ''}${money(e.income - e.expense)}`),
+      unlock: (e) => say(`Unlocked: ${e.name}`),
+      cut: () => say('The city is in debt. Services are closing'),
+      news: (e) => { setNews(e.text); clearTimeout(newsT.current); newsT.current = setTimeout(() => setNews(null), 7000); },
+      inspect: () => setPanel(null),
+      quality: () => { setTilt(false); say('Switched to smooth graphics to keep the game fast'); },
     });
     gameRef.current = g; window.__game = g;
+    try { const seen = localStorage.getItem('skyline.version'); if (seen !== VERSION) { localStorage.setItem('skyline.version', VERSION); setTimeout(() => say(`Updated to version ${VERSION}`), 900); } } catch (e) { /* ignore */ }
     g.start();
-    const iv = setInterval(() => setSt(g.stats()), 250);
+    if (g.hadSave) { const s0 = g.stats(); setSaved({ pop: s0.pop, date: s0.date, money: s0.money }); }
+    g.audio.unlock();                                   // works where autoplay is allowed (the Android app); otherwise the first tap starts it
+    const iv = setInterval(() => { if (!g.away) setSt(g.stats()); }, 500);   // twice a second is enough for the HUD and keeps re-renders cheap
     setSt(g.stats());
     return () => { clearInterval(iv); g.stop(); };
   }, [say]);
@@ -142,9 +285,12 @@ export default function App() {
   const speed = (s) => { g.setSpeed(s); setSt(g.stats()); };
   const setTax = (k, v) => { g.setTax(k, v); setSt(g.stats()); };
   const pickTime = (v) => { setTimeSet(v); g.setTime(v); };
-  const newCity = () => { g.newCity(Math.floor(Math.random() * 100000)); setPanel(null); setSt(g.stats()); };
+  const toStart = (v) => { setPanel(null); setTool(null); g.setTool(null); const s0 = g.stats(); setSaved({ pop: s0.pop, date: s0.date, money: s0.money }); g.enterMenu(); setStartView(v || 'home'); setScreen('start'); if (v === 'new') g.previewMap('coast'); };
+  const play = () => { g.leaveMenu(); setScreen('game'); setSt(g.stats()); };
+  const startNew = () => { g.startNewCity(); setScreen('game'); setStartView('home'); setSt(g.stats()); };
   const setView = (v) => { g.setOverlay(v); if (v) { setTool(null); g.setTool(null); } setPanel(null); setSt(g.stats()); };
-  const toggle = (p) => setPanel(panel === p ? null : p);
+  const toggle = (p) => { setPanel(panel === p ? null : p); if (g && panel !== p) g.clearSel(); };
+  const showMe = (t) => { setCat(t.cat); if (t.tool) pick(t.tool); else { pick(null); } if (t.id === 'road') g.focusHighway(); };
   const flipUi = () => { const next = !ui; setUi(next); try { localStorage.setItem('skyline.hideui', next ? '0' : '1'); } catch (e) { /* ignore */ } if (!next) { setPanel(null); setTool(null); g && g.setTool(null); } };
   const catTools = CATS.find((c) => c.id === cat).tools;
   const view = st && VIEWS.find((v) => v.id === st.overlay);
@@ -152,11 +298,14 @@ export default function App() {
   return (
     <div className="app">
       <canvas ref={cvRef} className="map" />
-      {st && (
+      {tilt && screen === 'game' && !(st && st.fast) && <><div className="tilt top" aria-hidden="true" /><div className="tilt bot" aria-hidden="true" /></>}
+      {toast && <div className="toast" role="status">{toast}</div>}
+      {screen === 'start' && g && <StartScreen refresh={() => setSt(g.stats())} g={g} st={st} saved={saved} view={startView} setView={setStartView} onPlay={play} onNew={startNew} />}
+      {st && screen === 'game' && (
         <>
           {!ui && <button className="showui" onClick={flipUi} aria-label="Show interface"><Icon n="eye" size={22} /></button>}
           {ui && <header className="top">
-            <div className="cash"><Icon n="coin" size={18} /><b>{money(st.money)}</b></div>
+            <button className={'cash' + (st.money < 0 ? ' debt' : '')} onClick={() => { setTab(st.money < 0 || st.loans.length ? 'bank' : 'budget'); setPanel('budget'); g.clearSel(); }} title={st.money < 0 ? 'Owed to the bank' : 'Treasury'}><Icon n="coin" size={18} /><b>{money(st.money)}</b>{st.money < 0 && <small>owed</small>}</button>
             <div className="util pop" title="Residents"><Icon n="people" size={15} /><b>{st.pop.toLocaleString('en-US')}</b></div>
             <div className={'util ' + supplyClass(st.pSup, st.pDem)} title="Power supply / demand"><Icon n="bolt" size={15} fill /><b>{st.pSup}/{st.pDem}</b></div>
             <div className={'util ' + supplyClass(st.wSup, st.wDem)} title="Water supply / demand"><Icon n="drop" size={15} fill /><b>{st.wSup}/{st.wDem}</b></div>
@@ -173,9 +322,18 @@ export default function App() {
           </header>}
 
           {ui && cost && tool && <div className="costtag">{cost.name ? cost.name + ' · ' : cost.n + ' tiles · '}{money(cost.c)}</div>}
-          {ui && view && <button className="viewtag" onClick={() => setView(null)}>{view.label} view <Icon n="close" size={14} /></button>}
+          {ui && (view || st.tut) && <div className="leftcol">
+            {view && <button className="viewtag" onClick={() => setView(null)}>{view.label} view <Icon n="close" size={14} /></button>}
+            {st.tut && !panel && <section className="guide" aria-label="Getting started">
+              <div className="gstep">Step {st.tut.i + 1} of {st.tut.n}</div>
+              <h2>{st.tut.title}</h2>
+              <p>{st.tut.text}</p>
+              <div className="gbtn">{st.tut.cat && <button onClick={() => showMe(st.tut)}>{st.tut.tool ? 'Pick the tool' : 'Pick Move'}</button>}<button className="ghost" onClick={() => { g.skipTutorial(); setSt(g.stats()); }}>Skip guide</button></div>
+            </section>}
+          </div>}
+          {ui && st.inspect && !panel && <Inspector low={st.alerts.length > 0} info={st.inspect} onClose={() => { g.clearSel(); setSt(g.stats()); }} />}
+          {ui && news && !(cost && tool) && <div className="ticker" role="status"><Icon n="news" size={15} /><span>{news}</span></div>}
           {ui && st.alerts.length > 0 && <div className="alerts" role="alert">{st.alerts.map((a) => <span key={a}>{a}</span>)}</div>}
-          {toast && <div className="toast" role="status">{toast}</div>}
 
           {ui && <nav className="dock" aria-label="Build tools">
             <div className="stack">
@@ -184,7 +342,10 @@ export default function App() {
               </div>
               <div className="tabcap">{CATS.find((c) => c.id === cat).label}</div>
               <div className="tools">
-                {catTools.map((k) => { const t = T[k]; return (
+                {catTools.map((k) => { const t = T[k], need = t.id && st.locked[t.id]; return need ? (
+                  <button key={k} className="tool locked" onClick={() => say(`${t.label} unlocks at ${need.toLocaleString('en-US')} residents`)} aria-disabled="true">
+                    <Icon n="lock" /><span>{t.label}</span><em>{need.toLocaleString('en-US')} pop</em>
+                  </button>) : (
                   <button key={k} className={'tool' + (tool === t.id ? ' on' : '') + (t.zone ? ' z-' + t.zone : '')} onClick={() => pick(t.id)}>
                     <Icon n={t.icon} /><span>{t.label}</span>{t.cost ? <em>{money(t.cost)}</em> : <em>&nbsp;</em>}
                   </button>); })}
@@ -193,7 +354,7 @@ export default function App() {
             <div className="sys">
               {st.canUndo > 0 && <button className="tool undo" onClick={() => { g.undo(); setSt(g.stats()); }} aria-label="Undo last build" title={'Undo ' + st.undoLabel}><Icon n="undo" /><span>Undo</span><em>{st.undoLeft}s</em></button>}
               <button className={'tool' + (st.overlay ? ' on' : '')} onClick={() => toggle('views')}><Icon n="eye" /><span>Views</span><em>&nbsp;</em></button>
-              <button className="tool" onClick={() => toggle('budget')}><Icon n="coin" /><span>City</span><em>&nbsp;</em></button>
+              <button className="tool" onClick={() => toggle('budget')}><Icon n="coin" /><span>City</span><em>&nbsp;</em>{st.advice.some((a) => a.sev === 'bad') && <i className="dot" aria-label="Advisors have urgent news" />}</button>
               <button className="tool" onClick={() => toggle('menu')}><Icon n="menu" /><span>Menu</span><em>&nbsp;</em></button>
               <button className="tool" onClick={flipUi} aria-label="Hide interface"><Icon n="eyeoff" /><span>Hide</span><em>&nbsp;</em></button>
             </div>
@@ -206,21 +367,23 @@ export default function App() {
                 {VIEWS.map((v) => <button key={v.id} className={'wide' + (st.overlay === v.id ? ' sel' : '')} onClick={() => setView(v.id)}>{v.label}</button>)}
               </div>
               <button className="wide" style={{ marginTop: 8, width: '100%' }} onClick={() => setView(null)}>Hide view</button>
-              <p className="hint">Green is good, red is trouble. Power and water views show which buildings are connected.</p>
+              <p className="hint">Green is good, red is trouble. Commutes shows which buildings can reach jobs or workers, and which roads link to the highway (blue).</p>
             </section>
           )}
           {ui && panel === 'budget' && (
             <section className="sheet" aria-label="City">
               <div className="sheet-h"><h2>City</h2><button className="x" onClick={() => setPanel(null)} aria-label="Close"><Icon n="close" size={18} /></button></div>
               <div className="seg three">
-                {[['budget', 'Budget'], ['rules', 'Rules'], ['goals', 'Goals']].map(([k, l]) => (
-                  <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}{k === 'goals' ? ` ${st.goals.filter((x) => x.done).length}/${st.goals.length}` : ''}</button>
+                {[['budget', 'Budget'], ['bank', 'Bank'], ['stats', 'Charts'], ['advice', 'Advisors'], ['rules', 'Rules'], ['goals', 'Goals']].map(([k, l]) => (
+                  <button key={k} className={(tab === k ? 'on' : '') + (k === 'bank' && st.cut ? ' alert' : '') + (k === 'advice' && st.advice.some((a) => a.sev === 'bad') ? ' alert' : '')} onClick={() => setTab(k)}>{l}{k === 'goals' ? ` ${st.goals.filter((x) => x.done).length}/${st.goals.length}` : ''}</button>
                 ))}
               </div>
               {tab === 'budget' && (<>
                 <div className="ledger">
                   <div><span>Last month income</span><b className="pos">{money(st.income)}</b></div>
-                  <div><span>Last month upkeep</span><b className="neg">{money(-st.expense)}</b></div>
+                  <div><span>Last month costs (all)</span><b className="neg">{money(-st.expense)}</b></div>
+                  {st.loanPay > 0 && <div><span>Loan payments</span><b className="neg">{money(-st.loanPay)}</b></div>}
+                  {st.interest > 0 && <div><span>Bank interest on debt</span><b className="neg">{money(-st.interest)}</b></div>}
                   <div><span>Regional grant (fades as you grow)</span><b>{money(st.grant)}</b></div>
                   <div><span>Service &amp; utility upkeep</span><b>{money(st.upkeep)}</b></div>
                   <div><span>Ordinances</span><b>{money(st.ordCost)}</b></div>
@@ -241,10 +404,69 @@ export default function App() {
                     <b>{st.tax[k]}%</b>
                   </label>
                 ))}
-                <p className="hint">Higher taxes raise income but slow growth and lower happiness. Buildings without power or water pay less, and uncollected garbage hurts happiness.</p>
+                <p className="hint">Higher taxes raise income but slow growth and lower happiness. Happy residents pay more willingly, healthy workers earn more, and industry needs the highway to sell its goods.</p>
+              </>)}
+              {tab === 'bank' && (<>
+                {st.cut > 0 ? (
+                  <div className="debtbox">
+                    <b>The city owes the bank {money(-st.money)}</b>
+                    <p>To save money, the city has closed: {st.closed.join(', ')}. Closed buildings cost only basic maintenance. Nothing new can be built until the balance is positive.</p>
+                    <ol className="stages">
+                      {[[1, 'Below $0', 'Ordinances paused, amenities closed'], [2, `Below ${money(-st.cutLimit)}`, 'Schools and buses close'], [3, `Below ${money(-st.cutLimit * 3)}`, 'Police, fire and health care close']].map(([n, when, what]) => (
+                        <li key={n} className={st.cut >= n ? 'hit' : ''}><span>{when}</span>{what}</li>
+                      ))}
+                    </ol>
+                    <p>The bank adds 2% interest on the debt every month. Raise taxes, cut costs, or bulldoze what you can&rsquo;t afford.</p>
+                  </div>
+                ) : <p className="hint" style={{ marginTop: 10 }}>If the balance drops below zero, the city owes the bank. It won&rsquo;t end the game, but services start closing, starting with amenities. Police, fire and health care close last.</p>}
+                <h3>Loans</h3>
+                {st.loans.length === 0 && <p className="hint" style={{ marginTop: 0 }}>No loans right now.</p>}
+                {st.loans.map((l, k) => (
+                  <div className="loan" key={k}>
+                    <span><b>{money(l.amount)}</b><em>{money(l.pay)}/month, {l.left} months left</em></span>
+                    <button className="wide" onClick={() => { g.repayLoan(k); setSt(g.stats()); }}>Repay {money(Math.round(l.pay * l.left * 0.9))}</button>
+                  </div>
+                ))}
+                <h3>Borrow</h3>
+                <div className="offers">
+                  {st.offers.map((o) => (
+                    <button key={o.k} className="wide offer" disabled={!o.ok} onClick={() => { g.takeLoan(o.k); setSt(g.stats()); }}>
+                      <b>{money(o.amount)}</b><em>{money(o.pay)}/month for {o.months} months</em>
+                    </button>
+                  ))}
+                </div>
+                <p className="hint">The bank lends up to {money(st.credit)} more, based on your population and income. Paying a loan off early saves 10% of what&rsquo;s left.</p>
+              </>)}
+              {tab === 'stats' && (<>
+                {st.history.length < 2 ? <p className="hint">Charts fill in as months pass. Check back after a couple of months.</p> : (<>
+                  <Chart title="Population" data={st.history} series={[{ k: 'pop', c: '#6fd072' }]} fmt={(v) => Math.round(v).toLocaleString('en-US')} />
+                  <Chart title="Treasury" data={st.history} series={[{ k: 'money', c: '#f2b84b' }]} fmt={(v) => money(Math.round(v))} />
+                  <Chart title="Income and costs" data={st.history} series={[{ k: 'inc', c: '#5fd3a6', label: 'In' }, { k: 'exp', c: '#ef6f5e', label: 'Out' }]} fmt={(v) => money(Math.round(v))} />
+                  <Chart title="Happiness" data={st.history} series={[{ k: 'happy', c: '#5aa3ea' }]} fmt={(v) => Math.round(v) + '%'} />
+                </>)}
+                <h3>What drives happiness ({st.happy}%)</h3>
+                <div className="hap">
+                  {st.hapParts.slice(0, 10).map(([l, v]) => (
+                    <div key={l}><span>{l}</span><i className={v > 0 ? 'up' : 'down'} style={{ width: Math.min(100, Math.abs(v) * 4) + '%' }} /><b className={v > 0 ? 'pos' : 'neg'}>{v > 0 ? '+' : ''}{v}</b></div>
+                  ))}
+                </div>
+                <p className="hint">Below 35%, residents start moving away. Above 60%, homes grow faster and taxes come in more reliably.</p>
+              </>)}
+              {tab === 'advice' && (<>
+                {st.advice.length === 0 && <p className="hint">Nothing urgent. The city is running smoothly.</p>}
+                <div className="advice">
+                  {st.advice.map((a, k) => (
+                    <div key={k} className={'adv ' + a.sev}>
+                      <small>{a.who}</small>
+                      <p>{a.text}</p>
+                      {a.view && <button onClick={() => setView(a.view)}>Show on map</button>}
+                    </div>
+                  ))}
+                </div>
+                {st.news.length > 0 && <><h3>City news</h3><ul className="newslist">{st.news.slice(0, 12).map((n, k) => <li key={k}><time>{n.date}</time>{n.text}</li>)}</ul></>}
               </>)}
               {tab === 'rules' && (<>
-                <p className="hint">Ordinances cost money every month. Pick the ones that fix your city&rsquo;s biggest problem.</p>
+                <p className="hint">Ordinances cost money every month. Pick the ones that fix your city&rsquo;s biggest problem.{st.cut > 0 && ' They are paused while the city is in debt.'}</p>
                 <div className="ords">
                   {st.ords.map((o) => (
                     <button key={o.key} className={'ord' + (o.on ? ' on' : '')} onClick={() => { g.setOrd(o.key, !o.on); setSt(g.stats()); }} aria-pressed={o.on}>
@@ -283,6 +505,30 @@ export default function App() {
                   <button key={v} className={st.weather === v ? 'on' : ''} onClick={() => { g.setWeather(v); setSt(g.stats()); }}>{l}</button>
                 ))}
               </div>
+              <h3>Graphics</h3>
+              <div className="seg three">
+                {[['auto', 'Auto'], ['high', 'Pretty'], ['fast', 'Smooth']].map(([q, l]) => (
+                  <button key={q} className={st.quality === q ? 'on' : ''} onClick={() => { g.setQuality(q); if (q === 'fast') setTilt(false); setSt(g.stats()); }}>{l}</button>
+                ))}
+              </div>
+              <p className="hint" style={{ marginTop: 6 }}>{st.quality === 'auto' ? (st.fast ? 'Auto switched to smooth graphics for this phone.' : 'Auto starts pretty and switches to smooth if the game slows down.') : st.quality === 'fast' ? 'Lower resolution, no glow or haze. Best on slower phones.' : 'Full detail, glow and haze.'}</p>
+              <h3>Frame rate</h3>
+              <div className="seg three">
+                {[['auto', 'Auto'], [30, '30'], [60, '60']].map(([v, l]) => (
+                  <button key={l} className={st.fpsSetting === v ? 'on' : ''} onClick={() => { g.setFps(v); setSt(g.stats()); }}>{l}</button>
+                ))}
+              </div>
+              <p className="hint" style={{ marginTop: 6 }}>{st.fpsSetting === 'auto' ? 'Smooth (60) while you drag and zoom, 30 when the view is still: cooler phone, longer battery.' : st.fpsSetting === 30 ? 'Always 30: coolest, uses the least battery.' : 'Always 60: smoothest, makes the phone warmer.'}</p>
+              <div className="seg two" style={{ marginTop: 8 }}>
+                <button className={tilt ? 'on' : ''} disabled={st.fast} onClick={flipTilt}>Lens focus {tilt && !st.fast ? 'on' : 'off'}</button>
+                <button onClick={() => { const el = document.documentElement; if (document.fullscreenElement) document.exitFullscreen && document.exitFullscreen(); else if (el.requestFullscreen) el.requestFullscreen().catch(() => {}); }}>Fullscreen</button>
+              </div>
+              <h3>Sound</h3>
+              <div className="seg two">
+                <button className={st.audio.sound ? 'on' : ''} onClick={() => { g.setAudio('sound', !st.audio.sound); setSt(g.stats()); }}>Effects {st.audio.sound ? 'on' : 'off'}</button>
+                <button className={st.audio.music ? 'on' : ''} onClick={() => { g.setAudio('music', !st.audio.music); setSt(g.stats()); }}>Music {st.audio.music ? 'on' : 'off'}</button>
+              </div>
+              <label className="tax vol"><span><Icon n="volume" size={16} />Volume</span><input type="range" min="0" max="100" value={Math.round(st.audio.volume * 100)} onChange={(e) => { g.setAudio('volume', +e.target.value / 100); setSt(g.stats()); }} /><b>{Math.round(st.audio.volume * 100)}%</b></label>
               <h3>Disasters</h3>
               <div className="seg">
                 {[[0, 'Off'], [1, 'Rare'], [2, 'Normal'], [3, 'Chaos']].map(([v, l]) => (
@@ -295,11 +541,25 @@ export default function App() {
                 ))}
               </div>
               <div className="rows">
-                <button className="wide" onClick={() => { const el = document.documentElement; if (document.fullscreenElement) document.exitFullscreen && document.exitFullscreen(); else if (el.requestFullscreen) el.requestFullscreen().catch(() => {}); }}>Toggle fullscreen</button>
                 <button className="wide" onClick={() => { g.save(); say('City saved'); setPanel(null); }}>Save city</button>
-                <button className="wide warn" onClick={() => { if (window.confirm('Start a new city? The current one will be replaced.')) newCity(); }}>New city</button>
+                <button className="wide" onClick={() => toStart('home')}>Main menu</button>
+                <button className="wide warn" onClick={() => toStart('new')}>New city</button>
               </div>
               <p className="hint">The city autosaves every 20 seconds.</p>
+              <button className="version" onClick={() => setTaps(taps + 1)}>Skyline {VERSION}{BUILT && ` \u00b7 built ${BUILT} UTC`}</button>
+              {taps >= 5 && (<>
+                <h3>Test tools</h3>
+                <div className="seg three">
+                  {[['cash', '+$50,000'], ['debt', 'Go into debt'], ['clear', 'Clear debt'], ['unlock', 'Unlock all'], ['month', 'End month']].map(([k, l]) => (
+                    <button key={k} onClick={() => { g.testTool(k); setSt(g.stats()); }}>{l}</button>
+                  ))}
+                </div>
+                {st.perf && <p className="hint">Aiming for {st.fpsNow} fps · Frames: {st.perf.fps} fps · average {st.perf.avg} ms · worst {st.perf.worst} ms (last 2 seconds)</p>}
+                <p className="hint">Drawing with: {st.engine}{st.pages ? ` · ${st.pages} texture pages` : ''}</p>
+                <p className="hint">Stutters (frames over 50 ms) in the last 30 seconds: {st.hitches.n}{st.hitches.last && <><br />Last one: {st.hitches.last}</>}</p>
+                <div className="seg two"><button onClick={() => { try { localStorage.setItem('skyline.engine', st.engine === 'Canvas 2D' ? 'gpu' : '2d'); } catch (e) { /* ignore */ } g.save(); window.location.reload(); }}>{st.engine === 'Canvas 2D' ? 'Switch to GPU' : 'Switch to old 2D canvas'}</button></div>
+                <p className="hint">For testing only. Tap the version line 5 times to show these.</p>
+              </>)}
             </section>
           )}
         </>

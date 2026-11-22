@@ -1,5 +1,6 @@
 import { tint, shade, mix, hash, lerp } from './util.js';
 import { T, TERRAIN } from './world.js';
+import { waterfrontArt, WF_HEIGHTS } from './waterfront.js';
 
 const S = 2;               // supersampling for crisp zoom
 const cache = new Map();
@@ -37,23 +38,52 @@ function kit(ctx, mode, ox, oy, lit = true) {
     poly([P(x, y + d, z0), P(x + w, y + d, z0), P(x + w, y + d, t), P(x, y + d, t)], C(col.l), true);
     poly([P(x + w, y, z0), P(x + w, y + d, z0), P(x + w, y + d, t), P(x + w, y, t)], C(col.r), true);
     poly([P(x, y, t), P(x + w, y, t), P(x + w, y + d, t), P(x, y + d, t)], C(col.t));
+    if (h > 3) {
+      line(P(x, y + d, t), P(x + w, y + d, t), 'rgba(255,255,255,.35)', 0.6);                       // sunlit parapet edge
+      line(P(x + w, y, t), P(x + w, y + d, t), 'rgba(255,255,255,.18)', 0.6);
+      if (z0 === 0) {                                                                               // ambient occlusion at the ground
+        const ao = (a2) => { const g = ctx.createLinearGradient(0, a2[0][1], 0, a2[0][1] - Math.min(10, h * 0.4)); g.addColorStop(0, 'rgba(0,0,0,.22)'); g.addColorStop(1, 'rgba(0,0,0,0)'); return g; };
+        const fl = [P(x, y + d, 0), P(x + w, y + d, 0), P(x + w, y + d, Math.min(10, h * 0.4)), P(x, y + d, Math.min(10, h * 0.4))];
+        const fr = [P(x + w, y, 0), P(x + w, y + d, 0), P(x + w, y + d, Math.min(10, h * 0.4)), P(x + w, y, Math.min(10, h * 0.4))];
+        path(fl); ctx.fillStyle = ao([P(x, y + d, 0)]); ctx.fill(); path(fr); ctx.fillStyle = ao([P(x + w, y + d, 0)]); ctx.fill();
+      }
+    }
   };
+  // Soft, blurred shadows: a dark contact shadow hugging the footprint, then a longer cast shadow away from the sun.
+  // Sprites are cached, so the blur costs nothing per frame.
   const sh = (x, y, w, d, h) => {
-    ctx.fillStyle = `rgba(0,0,0,${mode === 2 ? 0.22 : 0.16})`;
-    path([P(x - 0.05, y - 0.05), P(x + w + 0.05, y - 0.05), P(x + w + 0.05, y + d + 0.05), P(x - 0.05, y + d + 0.05)]); ctx.fill();
-    if (mode === 2) return;
-    const s = Math.min(1.5, (h / 70) * (mode === 1 ? 1.7 : 1)), o = mode === 1 ? 0.2 : 0.15;
-    ctx.fillStyle = `rgba(10,20,40,${o})`;
-    path([P(x + w, y), P(x + w + s, y + s * 0.2), P(x + w + s, y + d + s * 0.2), P(x + w, y + d)]); ctx.fill();
-    ctx.fillStyle = `rgba(10,20,40,${o * 0.8})`;
-    path([P(x + w, y), P(x + w + s * 0.5, y + s * 0.1), P(x + w + s * 0.5, y + d + s * 0.1), P(x + w, y + d)]); ctx.fill();
+    ctx.save(); ctx.filter = 'blur(2.2px)';
+    ctx.fillStyle = `rgba(0,0,0,${mode === 2 ? 0.3 : 0.24})`;
+    path([P(x - 0.06, y - 0.06), P(x + w + 0.08, y - 0.06), P(x + w + 0.08, y + d + 0.08), P(x - 0.06, y + d + 0.08)]); ctx.fill();
+    if (mode !== 2) {
+      const s = Math.min(1.9, (h / 62) * (mode === 1 ? 1.8 : 1)), o = mode === 1 ? 0.22 : 0.17;
+      ctx.filter = `blur(${1.6 + s * 1.4}px)`;
+      ctx.fillStyle = `rgba(16,28,52,${o})`;
+      path([P(x + w, y), P(x + w + s, y + s * 0.22), P(x + w + s, y + d + s * 0.22), P(x + w, y + d)]); ctx.fill();
+      ctx.fillStyle = `rgba(16,28,52,${o * 0.7})`;
+      path([P(x + w, y), P(x + w + s * 0.45, y + s * 0.1), P(x + w + s * 0.45, y + d + s * 0.1), P(x + w, y + d)]); ctx.fill();
+    }
+    ctx.restore();
   };
   const win = (a, r, side, gl) => {
-    let f;
-    if (mode === 2) f = lit && r > 0.45 ? (side ? '#f0bf6a' : '#ffd98c') : (side ? '#1b2a52' : '#223360');
-    else { f = gl ? (side ? '#9fc9e2' : '#d6eefa') : (side ? '#7ea6c6' : '#b7dbf2'); if (mode === 1) f = mix(f, '#ffc58a', 0.45); }
-    path(a); ctx.fillStyle = f; ctx.fill();
-    if (mode !== 2) { ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 0.6; ctx.stroke(); }
+    const top = Math.min(a[0][1], a[1][1], a[2][1], a[3][1]), bot = Math.max(a[0][1], a[1][1], a[2][1], a[3][1]);
+    path(a);
+    if (mode === 2) {
+      const on = lit && r > 0.45;
+      if (on) { const warm = r > 0.93 ? '#cfe3ff' : r > 0.62 ? '#ffd98c' : '#ffc36b'; ctx.fillStyle = side ? shade(warm, 0.86) : warm; }   // a few cool TV-lit rooms
+      else ctx.fillStyle = side ? '#18264a' : '#1f2f5a';
+      ctx.fill();
+      if (on && r < 0.8) { path(a); ctx.save(); ctx.clip(); ctx.fillStyle = 'rgba(120,70,30,.35)'; ctx.fillRect(0, top, 400, (bot - top) * 0.35); ctx.restore(); }  // curtain
+      return;
+    }
+    const g = ctx.createLinearGradient(0, top, 0, bot);                    // sky reflected in the glass
+    const hi = gl ? '#e4f4fd' : '#cfe8f7', lo = gl ? (side ? '#6f9fc0' : '#8db8d6') : (side ? '#5f86a6' : '#7fa7c6');
+    g.addColorStop(0, mode === 1 ? mix(hi, '#ffd2a0', 0.5) : hi); g.addColorStop(1, mode === 1 ? mix(lo, '#d98a5a', 0.4) : lo);
+    ctx.fillStyle = g; ctx.fill();
+    if (!gl && r > 0.7) { ctx.save(); path(a); ctx.clip(); ctx.fillStyle = r > 0.85 ? 'rgba(240,232,214,.85)' : 'rgba(250,250,245,.7)'; ctx.fillRect(0, top, 400, (bot - top) * (0.25 + (r - 0.7) * 2)); ctx.restore(); }   // blinds
+    else if (!gl && r < 0.12) { path(a); ctx.fillStyle = 'rgba(30,45,70,.45)'; ctx.fill(); }      // an open, dark window
+    path(a); ctx.strokeStyle = gl ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.8)'; ctx.lineWidth = gl ? 0.4 : 0.7; ctx.stroke();
+    if (!gl) { const m0 = [(a[0][0] + a[1][0]) / 2, (a[0][1] + a[1][1]) / 2], m1 = [(a[2][0] + a[3][0]) / 2, (a[2][1] + a[3][1]) / 2]; ctx.beginPath(); ctx.moveTo(m0[0], m0[1]); ctx.lineTo(m1[0], m1[1]); ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 0.4; ctx.stroke(); }   // mullion
   };
   const wins = (x, y, w, d, h, sd, o = {}) => {
     const rh = o.rh || 10, wh = o.wh || 5.5, base = o.base || 8, dn = o.dens || 3.5;
@@ -76,16 +106,24 @@ function kit(ctx, mode, ox, oy, lit = true) {
     if (k === 1) {
       for (let i = 0; i < 3; i++) {
         const by = cy - 5 - i * 7, hw = 9 - i * 2.2;
-        ctx.beginPath(); ctx.moveTo(cx - hw, by); ctx.lineTo(cx + hw, by); ctx.lineTo(cx, by - 11); ctx.closePath(); ctx.fillStyle = C('#2b7342'); ctx.fill();
-        ctx.beginPath(); ctx.moveTo(cx - hw, by); ctx.lineTo(cx, by); ctx.lineTo(cx, by - 11); ctx.closePath(); ctx.fillStyle = C('#3c9257'); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(cx - hw, by); ctx.lineTo(cx + hw, by); ctx.lineTo(cx, by - 11); ctx.closePath(); ctx.fillStyle = C('#245f38'); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(cx - hw, by); ctx.lineTo(cx, by); ctx.lineTo(cx, by - 11); ctx.closePath(); ctx.fillStyle = C('#3a8c53'); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(cx - hw, by); ctx.lineTo(cx - hw * 0.4, by + 1.2); ctx.lineTo(cx + hw * 0.4, by + 1.2); ctx.lineTo(cx + hw, by); ctx.closePath(); ctx.fillStyle = C('#1d4d2e'); ctx.fill();   // drooping skirt of needles
       }
     } else {
       const pal = k === 2 ? ['#c26a22', '#e08a2e', '#f2b04a'] : k === 3 ? ['#4d9a45', '#6cba58', '#92d878'] : ['#3b8636', '#56a845', '#79c85f'];
-      circ([cx + r * 0.2, cy - 8 - r * 0.45], r * 0.85, C(shade(pal[0], 0.8)));
-      circ([cx, cy - 8 - r * 0.7], r, C(pal[0]));
-      circ([cx - r * 0.2, cy - 8 - r * 0.9], r * 0.8, C(pal[1]));
-      circ([cx - r * 0.35, cy - 8 - r * 1.05], r * 0.45, C(pal[2]));
-      circ([cx + r * 0.45, cy - 8 - r * 0.4], r * 0.3, C(shade(pal[0], 0.7)));
+      const hue = 0.92 + hash(sd, 4, 4) * 0.16;                       // every tree a slightly different green
+      const blob = (bx, by, br, base) => {
+        const gr = ctx.createRadialGradient(bx - br * 0.35, by - br * 0.4, br * 0.1, bx, by, br * 1.05);
+        gr.addColorStop(0, C(shade(base, 1.22 * hue))); gr.addColorStop(0.55, C(shade(base, hue))); gr.addColorStop(1, C(shade(base, 0.68 * hue)));
+        ctx.beginPath(); ctx.arc(bx, by, br, 0, 6.2832); ctx.fillStyle = gr; ctx.fill();
+      };
+      ctx.strokeStyle = C('#5a3d26'); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx, cy - 7); ctx.lineTo(cx + r * 0.35, cy - 8 - r * 0.6); ctx.moveTo(cx, cy - 7); ctx.lineTo(cx - r * 0.3, cy - 8 - r * 0.7); ctx.stroke();
+      blob(cx + r * 0.3, cy - 8 - r * 0.45, r * 0.72, shade(pal[0], 0.85));
+      blob(cx - r * 0.25, cy - 8 - r * 0.55, r * 0.75, pal[0]);
+      blob(cx, cy - 8 - r * 0.85, r * 0.85, pal[1]);
+      blob(cx - r * 0.2, cy - 8 - r * 1.15, r * 0.5, pal[2]);
+      for (let i = 0; i < 7; i++) circ([cx - r * 0.6 + hash(sd, i, 5) * r * 1.2, cy - 8 - r * 0.3 - hash(sd, i, 6) * r * 1.1], 0.9, C(i % 2 ? shade(pal[2], 1.15) : shade(pal[0], 0.7)));   // leaf texture
     }
   };
   const pad = (col, speck) => {
@@ -249,12 +287,77 @@ function park(k, v) {
   for (let i = 0; i < 6; i++) circ(P(0.3 + hash(v, i, 1) * 0.4, 0.3 + hash(v, i, 2) * 0.4), 1.4, C(['#e86f9b', '#f4c542', '#e04848', '#ffffff'][i % 4]));
 }
 
+// ---- level 4: skyscrapers, office megatowers and hi-tech campuses ----
+function skyscraper(k, v) {
+  const { P, poly, box, faces, sh, C, line, circ } = k;
+  const base = ['#d8d2c4', '#c9d3dc', '#e2d3c3', '#cfd6cf'][v % 4], accent = ['#3f6f8f', '#8d4b3c', '#4c7a5a', '#6f5a8d'][v % 4];
+  const x = 0.16, y = 0.16, w = 0.68, d = 0.68, h = 150, f = faces(base);
+  k.pad('#b9d9a0', ['#4d8f3c', '#8fd070']);
+  sh(x, y, w, d, h + 30);
+  box(x - 0.04, y - 0.04, w + 0.08, d + 0.08, 14, faces('#b9b4aa'));                 // podium with lobby
+  poly([P(x + 0.06, y + d + 0.04, 1), P(x + w - 0.06, y + d + 0.04, 1), P(x + w - 0.06, y + d + 0.04, 11), P(x + 0.06, y + d + 0.04, 11)], k.store());
+  box(x, y, w, d, h, f, 14);
+  k.wins(x, y, w, d, h + 14, v + 61, { dens: 3.8, rh: 8, wh: 4.6, base: 20 });
+  for (let z = 26; z < h + 10; z += 16) {                                              // balcony bands
+    poly([P(x, y + d, z), P(x + w, y + d, z), P(x + w, y + d + 0.05, z - 1.5), P(x, y + d + 0.05, z - 1.5)], C(shade(base, 1.12)));
+    poly([P(x + w, y, z), P(x + w, y + d, z), P(x + w + 0.05, y + d, z - 1.5), P(x + w + 0.05, y, z - 1.5)], C(shade(base, 0.9)));
+  }
+  poly([P(x + w * 0.42, y + d, 14), P(x + w * 0.58, y + d, 14), P(x + w * 0.58, y + d, h + 14), P(x + w * 0.42, y + d, h + 14)], C(accent));
+  box(x + 0.06, y + 0.06, w - 0.12, d - 0.12, 4, faces('#7fb069'), h + 14);           // rooftop garden
+  for (let i = 0; i < 4; i++) circ(P(x + 0.15 + (i % 2) * 0.3, y + 0.15 + (i >> 1) * 0.3, h + 22), 3.2, C(['#3f8f3a', '#56a845'][i % 2]));
+  box(x + w * 0.62, y + 0.1, 0.14, 0.14, 12, faces('#9aa0a8'), h + 18);
+  const p = P(x + w * 0.69, y + 0.17, h + 30); line(p, [p[0], p[1] - 16], C('#c9d3de'), 1.1); circ([p[0], p[1] - 17], 1.8, '#ff3b30');
+}
+function megatower(k, v) {
+  const { P, poly, box, faces, sh, C, line, circ } = k;
+  const g = ['#5aa3d8', '#4f8fc9', '#5fb5b8', '#7a95c6'][v % 4], f = faces(g);
+  const tiers = [[0.08, 70], [0.15, 60], [0.22, 46], [0.29, 26]];
+  k.pad('#c8cace', null);
+  sh(0.08, 0.08, 0.84, 0.84, 220);
+  let z = 0;
+  for (const [o, h] of tiers) {
+    const x = o, y = o, w = 1 - 2 * o, d = 1 - 2 * o;
+    box(x, y, w, d, h, f, z);
+    poly([P(x, y + d, z), P(x + w, y + d, z), P(x + w, y + d, z + h), P(x, y + d, z + h)], 'rgba(0,0,0,0)', 'glass', true);
+    poly([P(x + w, y, z), P(x + w, y + d, z), P(x + w, y + d, z + h), P(x + w, y, z + h)], 'rgba(0,0,0,0)', 'glass', true);
+    k.wins(x, y, w, d, h, v + 71 + z, { dens: 4.8, rh: 7, wh: 3.8, base: z === 0 ? 14 : 4, glass: 1 });
+    for (let u = 1; u < 5; u++) { const q = x + (w * u) / 5; line(P(q, y + d, z), P(q, y + d, z + h), 'rgba(255,255,255,.35)', 0.6); }
+    z += h;
+    if (o < 0.29) box(x + 0.02, y + 0.02, w - 0.04, d - 0.04, 3, faces('#d7dde4'), z);
+    z += 3;
+  }
+  poly([P(0.15, 0.92, 1), P(0.85, 0.92, 1), P(0.85, 0.92, 12), P(0.15, 0.92, 12)], k.store());
+  const top = P(0.5, 0.5, z); poly([[top[0] - 6, top[1]], [top[0] + 6, top[1]], [top[0], top[1] - 30]], C('#dfe6ee'));
+  line([top[0], top[1] - 30], [top[0], top[1] - 48], C('#c9d3de'), 1.2); circ([top[0], top[1] - 49], 2.2, '#ff3b30');
+}
+function campus(k, v) {
+  const { P, poly, box, faces, sh, C, line, circ, tree } = k;
+  const wall = ['#e9edf1', '#dfe7ea', '#eef0ec', '#e4e8f0'][v % 4], gl = GLASS[v % 4];
+  k.pad('#9fd283', ['#4d8f3c', '#8fd070', '#3f7f34']);
+  poly([P(0.05, 0.62), P(0.95, 0.62), P(0.95, 0.74), P(0.05, 0.74)], C('#c9ccd2'), null, true);   // walkway
+  sh(0.08, 0.1, 0.5, 0.48, 40);
+  box(0.08, 0.1, 0.5, 0.48, 40, faces(wall));
+  poly([P(0.08, 0.58, 4), P(0.58, 0.58, 4), P(0.58, 0.58, 36), P(0.08, 0.58, 36)], C(gl), 'glass');
+  k.wins(0.08, 0.1, 0.5, 0.48, 40, v + 81, { dens: 3, rh: 9, wh: 6, base: 6, glass: 1 });
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) {                                    // solar panels
+    const x0 = 0.12 + i * 0.15, y0 = 0.14 + j * 0.2;
+    poly([P(x0, y0, 41), P(x0 + 0.12, y0, 41), P(x0 + 0.12, y0 + 0.16, 46), P(x0, y0 + 0.16, 46)], C('#2c4a7a'));
+    line(P(x0 + 0.06, y0, 41), P(x0 + 0.06, y0 + 0.16, 46), 'rgba(180,210,255,.6)', 0.5);
+  }
+  sh(0.64, 0.12, 0.3, 0.42, 26);
+  box(0.64, 0.12, 0.3, 0.42, 26, faces(shade(wall, 0.95)));
+  box(0.66, 0.14, 0.26, 0.38, 3, faces('#7fb069'), 26);                                     // green roof
+  k.wins(0.64, 0.12, 0.3, 0.42, 26, v + 91, { dens: 3, rh: 9, wh: 5, base: 6, glass: 1 });
+  const p = P(0.79, 0.3, 30); line(p, [p[0], p[1] - 14], C('#c9d3de'), 1); circ([p[0], p[1] - 15], 3, C('#e6ecf2'));
+  tree(0.14, 0.86, 3, v + 5); tree(0.86, 0.86, 0, v + 6);
+}
+
 const BUILD = {
-  [T.RES]: [house, apartment, tower],
-  [T.COM]: [shop, office, glassTower],
-  [T.IND]: [warehouse, factory, plant],
+  [T.RES]: [house, apartment, tower, skyscraper],
+  [T.COM]: [shop, office, glassTower, megatower],
+  [T.IND]: [warehouse, factory, plant, campus],
 };
-const HEIGHTS = { [T.RES]: [100, 150, 230], [T.COM]: [110, 170, 250], [T.IND]: [110, 150, 220] };
+const HEIGHTS = { [T.RES]: [100, 150, 230, 290], [T.COM]: [110, 170, 250, 330], [T.IND]: [110, 150, 220, 130] };
 const PAD = { [T.RES]: '#a9dc8e', [T.COM]: '#cfd1d4', [T.IND]: '#a9a493' };
 
 function make(w, h, ox, oy, fn, mode, lit = true) {
@@ -264,17 +367,24 @@ function make(w, h, ox, oy, fn, mode, lit = true) {
   fn(k);
   return { c, ox, oy, S };
 }
-function memo(key, fn) { let v = cache.get(key); if (!v) { v = fn(); cache.set(key, v); } return v; }
+function memo(key, fn) { let v = cache.get(key); if (!v) { const t0 = performance.now(); v = fn(); cache.set(key, v); spriteBudget.made++; spriteBudget.left -= performance.now() - t0; } return v; }
+// Drawing a building picture for the first time takes a few milliseconds on a slow phone. While the map is being
+// dragged, only a little of that is allowed per frame (renderer sets spriteBudget.left each frame); pictures that
+// don't fit wait for the next frame (memoLater returns null), so panning never stalls on a burst of new pictures.
+export const spriteBudget = { left: Infinity, made: 0 };
+function memoLater(key, fn) { const v = cache.get(key); if (v) return v; if (spriteBudget.left <= 0) return null; return memo(key, fn); }
 
-export function buildingSprite(kind, level, variant, mode, lit = true) {
+// shore: 0 inland, or the waterfront style (SHORE.POND / LAKE / SEA) from world.shore
+export function buildingSprite(kind, level, variant, mode, lit = true, shore = 0) {
   lit = mode === 2 ? !!lit : true;
-  return memo(`b${kind}${level}${variant}${mode}${lit ? 1 : 0}`, () => {
-    const H = HEIGHTS[kind][level - 1];
-    return make(160, H, 80, H - 64, (k) => BUILD[kind][level - 1](k, variant), mode, lit);
+  return memoLater(`b${kind}${level}${variant}${mode}${lit ? 1 : 0}w${shore}`, () => {
+    const H = shore ? WF_HEIGHTS[kind][level - 1] : HEIGHTS[kind][level - 1];
+    const fn = shore ? waterfrontArt(shore, kind, level) : BUILD[kind][level - 1];
+    return make(160, H, 80, H - 64, (k) => fn(k, variant), mode, lit);
   });
 }
 export function parkSprite(variant, mode) {
-  return memo(`p${variant}${mode}`, () => make(96, 90, 48, 50, (k) => park(k, variant), mode));
+  return memoLater(`p${variant}${mode}`, () => make(96, 90, 48, 50, (k) => park(k, variant), mode));
 }
 export function zoneSprite(kind, mode) {
   return memo(`z${kind}${mode}`, () => make(64, 32, 32, 0, (k) => {
@@ -284,24 +394,38 @@ export function zoneSprite(kind, mode) {
     ctx.fillStyle = col + '55'; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.stroke();
   }, mode));
 }
-export function terrainSprite(type, variant, mode) {
-  return memo(`t${type}${variant}${mode}`, () => make(64, 32, 32, 0, (k) => {
+const GRASS = [['#bcd58c', '#a7bf74', '#cbb978'], ['#afd487', '#97bd6e', '#c4c27c'], ['#a4d283', '#88bf68', '#b9d88f'], ['#99cc7c', '#7db662', '#b3d98b'], ['#8dc474', '#6faa58', '#a9d382'], ['#80ba6a', '#62a04f', '#9ccb78']];
+const DEEP = ['#62c1c3', '#47a8cc', '#3a91c4', '#2f7cb5'];
+export function terrainSprite(type, variant, mode, tone = 2) {
+  return memo(`t${type}${variant}${mode}${tone}`, () => make(64, 32, 32, 0, (k) => {
     const { P, ctx, C, line, poly } = k;
+    const tile = [P(0, 0), P(1, 0), P(1, 1), P(0, 1)];
     if (type === TERRAIN.WATER) {
-      poly([P(0, 0), P(1, 0), P(1, 1), P(0, 1)], C(variant % 2 ? '#3f9ad2' : '#3894cc'), null, true);
-      const g = ctx.createLinearGradient(0, 0, 64, 32); g.addColorStop(0, 'rgba(255,255,255,.18)'); g.addColorStop(1, 'rgba(0,26,64,.22)');
-      k.path([P(0, 0), P(1, 0), P(1, 1), P(0, 1)]); ctx.fillStyle = g; ctx.fill();
+      const d = Math.min(3, tone);
+      poly(tile, C(variant % 2 ? shade(DEEP[d], 1.02) : DEEP[d]), null, true);
+      if (d === 0) for (let i = 0; i < 6; i++) { const p = P(0.15 + hash(i, variant, 7) * 0.7, 0.15 + hash(i, variant, 8) * 0.7); k.ell(p, 5, 1.6, 'rgba(255,250,220,.13)'); }   // sandy bottom shows through
+      const g = ctx.createLinearGradient(0, 0, 64, 32); g.addColorStop(0, 'rgba(255,255,255,.16)'); g.addColorStop(1, 'rgba(0,26,64,.2)');
+      k.path(tile); ctx.fillStyle = g; ctx.fill();
     } else if (type === TERRAIN.SAND) {
-      poly([P(0, 0), P(1, 0), P(1, 1), P(0, 1)], C(variant % 2 ? '#e8d9a4' : '#e1d19b'), null, true);
-      for (let i = 0; i < 8; i++) { const p = P(hash(i, variant, 1), hash(i, variant, 2)); line(p, [p[0] + 1.5, p[1] - 1], C('#c9b87c'), 0.8); }
+      poly(tile, C('#e3d39e'), null, true);                    // one base color, so sand doesn't form a checkerboard
+      for (let i = 0; i < 14; i++) { const p = P(hash(i, variant, 1) * 0.9 + 0.05, hash(i, variant, 2) * 0.9 + 0.05); k.circ(p, 0.5 + hash(i, variant, 3) * 0.5, C(i % 3 ? '#c8b67c' : '#f3e7c0')); }
+      for (let i = 0; i < 3; i++) { const p = P(0.2 + hash(i, variant, 4) * 0.6, 0.2 + hash(i, variant, 5) * 0.6); line(p, [p[0] + 6, p[1] + 1.5], 'rgba(150,120,70,.18)', 0.7); }
     } else {
-      poly([P(0, 0), P(1, 0), P(1, 1), P(0, 1)], C(['#a9dc8e', '#a1d685', '#9fd283', '#a6da8a'][variant % 4]), null, true);
-      for (let i = 0; i < 9; i++) { const p = P(hash(i, variant, 1) * 0.9 + 0.05, hash(i, variant, 2) * 0.9 + 0.05); line(p, [p[0] + 1.8, p[1] - 1.4], C(['#4d8f3c', '#8fd070', '#3f7f34'][i % 3]), 0.9); }
+      const pal = GRASS[tone] || GRASS[2];
+      poly(tile, C(pal[0]), null, true);
+      // soft mottling so neighboring tiles never look stamped
+      for (let i = 0; i < 4; i++) { const p = P(0.3 + hash(i, variant, 11) * 0.4, 0.3 + hash(i, variant, 12) * 0.4); k.ell(p, 4 + hash(i, variant, 13) * 3, 2 + hash(i, variant, 14) * 1.2, i % 2 ? 'rgba(255,255,230,.05)' : 'rgba(20,60,10,.05)'); }
+      for (let i = 0; i < 16; i++) {
+        const p = P(hash(i, variant, 1) * 0.9 + 0.05, hash(i, variant, 2) * 0.9 + 0.05), lean = (hash(i, variant, 3) - 0.5) * 1.6;
+        line(p, [p[0] + lean, p[1] - 1.6 - hash(i, variant, 4) * 1.4], C(i % 3 === 2 ? pal[2] : pal[1]), 0.7);
+      }
+      if (tone <= 1 && variant % 2) for (let i = 0; i < 3; i++) { const p = P(0.2 + hash(i, variant, 6) * 0.6, 0.2 + hash(i, variant, 7) * 0.6); k.ell(p, 2.2, 1, C('#c4ad6a')); }
+      if (tone >= 3 && variant === 3) for (let i = 0; i < 4; i++) k.circ(P(0.2 + hash(i, tone, 8) * 0.6, 0.2 + hash(i, tone, 9) * 0.6), 0.7, C(['#ffffff', '#f4d35e', '#f2a7c3'][i % 3]));
     }
   }, mode));
 }
 export function treeSprite(variant, mode) {
-  return memo(`tr${variant}${mode}`, () => make(64, 72, 32, 32, (k) => {
+  return memoLater(`tr${variant}${mode}`, () => make(64, 72, 32, 32, (k) => {
     const v = variant;
     k.tree(0.5, 0.5, v === 2 ? 1 : v === 3 ? 2 : v === 4 ? 3 : 0, v + 7);
     if (v % 2 === 0) k.tree(0.22, 0.7, 0, v + 9);
@@ -311,7 +435,8 @@ export function roadSprite(mask, mode) {
   return memo(`r${mask}${mode}`, () => make(64, 32, 32, 0, (k) => {
     const { P, path, ctx, C, line, poly } = k;
     const hw = 0.36, a = 0.5 - hw, b = 0.5 + hw;
-    poly([P(0, 0), P(1, 0), P(1, 1), P(0, 1)], C('#c9c6bd'), null, true);
+    poly([P(0, 0), P(1, 0), P(1, 1), P(0, 1)], C('#cdcac2'), null, true);
+    for (let i = 0; i < 4; i++) { const t = (i + 0.5) / 4; line(P(t, 0), P(t, 0.06), 'rgba(0,0,0,.08)', 0.5); line(P(0, t), P(0.06, t), 'rgba(0,0,0,.08)', 0.5); }   // paving joints
     const pieces = [[a, a, b, b]];
     if (mask & 1) pieces.push([a, 0, b, a]);
     if (mask & 2) pieces.push([b, a, 1, b]);
@@ -320,8 +445,15 @@ export function roadSprite(mask, mode) {
     const q = (p) => [P(p[0], p[1]), P(p[2], p[1]), P(p[2], p[3]), P(p[0], p[3])];
     ctx.lineJoin = 'miter';
     for (const p of pieces) { path(q(p)); ctx.strokeStyle = C('#9a9ca2'); ctx.lineWidth = 2.4; ctx.stroke(); }
-    for (const p of pieces) { path(q(p)); ctx.fillStyle = C('#50565f'); ctx.fill(); }
-    for (let i = 0; i < 5; i++) { const pp = P(0.2 + hash(i, mask, 1) * 0.6, 0.2 + hash(i, mask, 2) * 0.6); k.circ(pp, 0.6, i % 2 ? 'rgba(255,255,255,.14)' : 'rgba(0,0,0,.22)'); }
+    for (const p of pieces) { path(q(p)); ctx.fillStyle = C('#4e535b'); ctx.fill(); }
+    ctx.save(); path(q(pieces[0])); for (const p of pieces.slice(1)) { const r = q(p); ctx.moveTo(r[0][0], r[0][1]); for (const v of r.slice(1)) ctx.lineTo(v[0], v[1]); ctx.closePath(); } ctx.clip();
+    for (let i = 0; i < 70; i++) { const pp = P(hash(i, mask, 1), hash(i, mask, 2)); ctx.fillStyle = i % 3 ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.16)'; ctx.fillRect(pp[0], pp[1], 0.7, 0.5); }   // aggregate in the asphalt
+    const wear = 'rgba(20,22,26,.16)';                                                                                             // darker tire tracks
+    if (mask & 5) for (const u of [0.38, 0.62]) line(P(u, mask & 1 ? 0 : a), P(u, mask & 4 ? 1 : b), wear, 2.2);
+    if (mask & 10) for (const v of [0.38, 0.62]) line(P(mask & 8 ? 0 : a, v), P(mask & 2 ? 1 : b, v), wear, 2.2);
+    if (hash(mask, 3, 3) > 0.4) { const c0 = P(0.3 + hash(mask, 1, 9) * 0.3, 0.35); ctx.beginPath(); ctx.moveTo(c0[0], c0[1]); ctx.lineTo(c0[0] + 3, c0[1] + 1.5); ctx.lineTo(c0[0] + 4, c0[1] + 3.5); ctx.strokeStyle = 'rgba(0,0,0,.28)'; ctx.lineWidth = 0.4; ctx.stroke(); }   // a crack
+    ctx.restore();
+    for (const p of pieces) { path(q(p)); ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 0.5; ctx.stroke(); }                       // curb highlight
     const dash = C('#f0e08a'), c = P(0.5, 0.5), arms = (mask & 1 ? 1 : 0) + (mask & 2 ? 1 : 0) + (mask & 4 ? 1 : 0) + (mask & 8 ? 1 : 0);
     if (arms <= 2) {
       if (mask & 1) line(c, P(0.5, 0), dash, 1.1, [4, 3]);
@@ -727,9 +859,70 @@ const SVC_SPR_X = { 21: [busStop, 1, 1, 70], 22: [busTerminal, 2, 2, 100], 19: [
 const SVC_SPR = { 1: [coalPlant, 2, 2, 190], 2: [wind, 1, 1, 130], 3: [waterTower, 1, 1, 130], 4: [police, 1, 1, 100], 5: [fireStation, 1, 1, 130], 6: [clinic, 1, 1, 110], 7: [school, 1, 1, 130], ...SVC_SPR_X };
 export function serviceSprite(id, mode, lit = true) {
   lit = mode === 2 ? !!lit : true;
-  return memo(`s${id}${mode}${lit ? 1 : 0}`, () => {
+  return memoLater(`s${id}${mode}${lit ? 1 : 0}`, () => {
     const [fn, fw, fd, hh] = SVC_SPR[id];
     const W = (fw + fd) * 32 + 96, ox = fd * 32 + 32, H = hh + (fw + fd) * 16 + 34, oy = H - (fw + fd) * 16 - 34;
     return make(W, H, ox, oy, (k) => fn(k), mode, lit);
   });
+}
+
+// Smaller copies of a sprite for zoomed-out drawing (level 1 = half size, 2 = quarter size).
+// Shrinking a big sprite to a few pixels every frame is slow on phones and makes edges shimmer;
+// a pre-shrunk copy is cheaper to draw and smoother to look at.
+export function mip(sp, level) {
+  if (!level || !sp) return sp;
+  const key = level === 1 ? 'm1' : 'm2';
+  if (sp[key]) return sp[key];
+  if (spriteBudget.left <= 0) return sp;                       // no time this frame: draw the full-size picture scaled down
+  const t0 = performance.now();
+  const r = mipMake(sp, level, key);
+  spriteBudget.left -= performance.now() - t0; spriteBudget.made++;
+  return r;
+}
+function mipMake(sp, level, key) {
+  const src = level === 1 ? sp : (sp.m1 || mipMake(sp, 1, 'm1'));
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(src.c.width / 2)); c.height = Math.max(1, Math.round(src.c.height / 2));
+  const x = c.getContext('2d'); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+  x.drawImage(src.c, 0, 0, c.width, c.height);
+  return (sp[key] = { c, ox: sp.ox, oy: sp.oy, S: src.S * (c.width / src.c.width) });
+}
+
+// ---------- bridges ----------
+// A bridge tile is three layers: the structure under the deck (drawn first, over the water), the road deck
+// (the normal road picture) and the railings on top. axis 0 runs along x, axis 1 along y.
+// endN: the bridge stops at its lower, visible end; endF: it stops at its upper end; pillar: this tile has a pier.
+const DECK = 7;
+export function bridgeUnder(axis, pillar, endN, mode) {
+  return memo(`bu${axis}${pillar}${endN}${mode}`, () => make(110, 64, 55, 0, (k) => {
+    const { P, poly, C } = k;
+    const side = axis === 0 ? (a, b, h) => P(a, 1 + b, h) : (a, b, h) => P(1 + b, a, h);   // along the near side
+    const end = axis === 0 ? (a, b, h) => P(1 + b, a, h) : (a, b, h) => P(a, 1 + b, h);    // across the near end
+    poly([side(0, 0, -DECK), side(1, 0, -DECK), side(1, 0.42, -DECK), side(0, 0.42, -DECK)], 'rgba(8,36,64,.2)', null, true);   // shadow on the water
+    if (pillar) {
+      const px = (h) => [side(0.38, 0, h), side(0.62, 0, h)];
+      const [a0, b0] = px(-DECK), [a1, b1] = px(-DECK - 11);
+      poly([a0, b0, b1, a1], C('#9d978c'), null, true);
+      poly([b0, side(0.62, -0.12, -DECK), side(0.62, -0.12, -DECK - 11), b1], C('#857f74'), null, true);
+      k.ell(side(0.5, 0.05, -DECK - 11), 5.5, 1.6, 'rgba(255,255,255,.35)');               // ripple where the pier meets the water
+    }
+    poly([side(0, 0, 0), side(1, 0, 0), side(1, 0, -DECK), side(0, 0, -DECK)], C('#b9b3a6'), null, true);
+    poly([side(0, 0, -DECK + 1.6), side(1, 0, -DECK + 1.6), side(1, 0, -DECK), side(0, 0, -DECK)], C('#958f83'), null, true);
+    if (endN) poly([end(0, 0, 0), end(1, 0, 0), end(1, 0, -DECK), end(0, 0, -DECK)], C('#a39d90'), null, true);
+  }, mode));
+}
+export function bridgeTop(axis, endN, endF, mode) {
+  return memo(`bt${axis}${endN ? 1 : 0}${endF ? 1 : 0}${mode}`, () => make(64, 40, 32, 5, (k) => {
+    const { P, poly, C, line } = k;
+    const H = 3.2, wall = (a, b) => {                       // a low concrete parapet with posts
+      poly([a(0), b(0), b(H), a(H)], C('#d7d1c4'), null, true);
+      line(a(H), b(H), C('#f1ece1'), 0.8);
+    };
+    const far = axis === 0 ? (t) => (h) => P(t, 0.04, h) : (t) => (h) => P(0.04, t, h);
+    const near = axis === 0 ? (t) => (h) => P(t, 0.96, h) : (t) => (h) => P(0.96, t, h);
+    wall(far(0), far(1));
+    if (endF) wall(axis === 0 ? (h) => P(0.04, 0, h) : (h) => P(0, 0.04, h), axis === 0 ? (h) => P(0.04, 1, h) : (h) => P(1, 0.04, h));
+    if (endN) wall(axis === 0 ? (h) => P(0.96, 0, h) : (h) => P(0, 0.96, h), axis === 0 ? (h) => P(0.96, 1, h) : (h) => P(1, 0.96, h));
+    wall(near(0), near(1));
+    for (const t of [0.25, 0.75]) line(near(t)(0), near(t)(H + 0.6), C('#a8a296'), 0.9);
+  }, mode));
 }

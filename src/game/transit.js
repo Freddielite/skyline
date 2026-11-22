@@ -29,7 +29,7 @@ export class Transit {
     const nodes = this.terms.concat(this.stops).map((s) => ({ s, acc: ag.access(s) })).filter((n) => n.acc >= 0);
     let line = 0;
     for (const term of nodes.filter((n) => n.s.bt === 22)) {
-      if (!this.sim.pw[term.s.i]) continue;                      // an unpowered terminal runs no buses
+      if (!this.sim.pw[term.s.i] || this.sim.isClosedAt(term.s.i)) continue;   // an unpowered or closed terminal runs no buses
       const rest = nodes.filter((n) => n.s.bt === 21 && ag.bfs(term.acc, n.acc)), order = [term];
       let cur = term;
       while (rest.length) {
@@ -90,7 +90,7 @@ export class Transit {
     this.scanT += realDt;
     if (this.scanT > 2) {
       this.scanT = 0; this.scan();
-      const sig = this.terms.map((t) => t.i + (this.sim.pw[t.i] ? 'p' : 'x')).join(',') + '|' + this.stops.map((s) => s.i).join(',') + '|' + this.sim.roads;
+      const sig = this.terms.map((t) => t.i + (this.sim.pw[t.i] && !this.sim.isClosedAt(t.i) ? 'p' : 'x')).join(',') + '|' + this.stops.map((s) => s.i).join(',') + '|' + this.sim.roads;
       if (sig !== this.sig) { this.sig = sig; this.rebuild(); }
     }
     if (dt <= 0) return;

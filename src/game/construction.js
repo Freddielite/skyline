@@ -15,7 +15,7 @@ export const STYLES = {
   turbine: { crane: 'mobile', blades: true, workers: 2, load: '#f4f6f8' },
   earth: { excavator: true, piles: true, wipe: true, workers: 2 },
 };
-const REAL_H = { [T.RES]: [30, 54, 94], [T.COM]: [32, 66, 140], [T.IND]: [30, 46, 104], [T.PARK]: [22, 22, 22] };
+const REAL_H = { [T.RES]: [30, 54, 94, 196], [T.COM]: [32, 66, 140, 240], [T.IND]: [30, 46, 104, 48], [T.PARK]: [22, 22, 22] };
 const SVC_H = { busstop: 30, busterm: 46, pump: 52, treat: 80, coal: 120, wind: 78, water: 66, police: 34, fire: 54, clinic: 48, school: 66, police2: 58, fire2: 92, hospital: 82, university: 104, plaza: 12, library: 40, museum: 60, stadium: 80, dump: 22, recycle: 40, wte: 112 };
 
 export function siteInfo(ev) {
@@ -27,7 +27,7 @@ export function siteInfo(ev) {
   if (ev.kind === T.PARK) return { style: 'earth', fw: 1, fd: 1, hb: 22, dur: 4.5 };
   const style = ev.kind === T.RES ? 'frame' : ev.kind === T.COM ? 'crane' : 'heavy';
   const L = ev.to - 1;
-  return { style, fw: 1, fd: 1, hb: REAL_H[ev.kind][L], dur: [5, 8.5, 13][L] * (ev.kind === T.COM ? 1.1 : 1) };
+  return { style, fw: 1, fd: 1, hb: REAL_H[ev.kind][L], dur: [5, 8.5, 13, 20][L] * (ev.kind === T.COM ? 1.1 : 1) };
 }
 
 export function drawConstruction(ctx, s, AX, AY, z, mode, now, spNew, spOld) {

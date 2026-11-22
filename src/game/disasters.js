@@ -50,7 +50,7 @@ export class Disasters {
   // ---- fire ----
   stations() {
     const w = this.w, out = [];
-    for (let i = 0; i < N * N; i++) if (w.kind[i] === T.SVC && w.bo[i] === 0 && (w.bt[i] === 5 || w.bt[i] === 9) && !this.sim.pending.has(i)) { const d = BT[w.bt[i]]; out.push({ x: i % N, y: (i / N) | 0, w: d.w, d: d.d, i }); }
+    for (let i = 0; i < N * N; i++) if (w.kind[i] === T.SVC && w.bo[i] === 0 && (w.bt[i] === 5 || w.bt[i] === 9) && !this.sim.pending.has(i) && !this.sim.isClosedAt(i)) { const d = BT[w.bt[i]]; out.push({ x: i % N, y: (i / N) | 0, w: d.w, d: d.d, i }); }
     return out;
   }
   ignite(i, spread) {
@@ -66,7 +66,7 @@ export class Disasters {
     this.responders.push({ truck: true, fire: true, target: i, pts, back: false, seg: 0, t: 0, speed: 3.2, wait: 0, px: pts[0][0], py: pts[0][1], dx: 1, dy: 0, col: 9 });
   }
   fireStep() {
-    const sim = this.sim, cov = sim.cov.fire, fp = sim.ord.fireproof ? 0.6 : 1;
+    const sim = this.sim, cov = sim.cov.fire, fp = sim.ordOn('fireproof') ? 0.6 : 1;
     for (const f of [...this.fires.values()]) {
       f.age++; f.dmg += f.dous ? 0.4 : 1;
       const x = f.i % N, y = (f.i / N) | 0, fc = cov[f.i];
@@ -163,7 +163,7 @@ export class Disasters {
       this.acc -= 1; this.fireStep();
       const L = LEVELS[this.sim.disasters] || 0;
       if (L > 0 && this.sim.pop >= 120) {
-        const fp = this.sim.ord.fireproof ? 0.6 : 1;
+        const fp = this.sim.ordOn('fireproof') ? 0.6 : 1;
         if (Math.random() < (L * fp) / 130) { const i = this.pickBuilt(); if (i >= 0) this.ignite(i); }
         if (Math.random() < L / 800) this.spawnTornado();
         if (Math.random() < L / 1200) this.spawnUfo();
