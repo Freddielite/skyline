@@ -112,7 +112,7 @@ export class Renderer {
       if (X < -mX * 3 || X > W + mX * 3 || Y < top || Y > H + 200 * z) continue;
       const k = w.kind[i]; let sp = null;
       if (k === T.EMPTY && w.tree[i]) sp = treeSprite(w.tree[i], mode);
-      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i] && !g.sites.has(i)) sp = buildingSprite(k, w.level[i], w.variant[i] % 8, mode, g.sim.pw[i] === 1, w.shore[i]);
+      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i] && !g.sites.has(i)) sp = buildingSprite(k, w.level[i], (w.variant[i] & 55), mode, g.sim.pw[i] === 1, w.shore[i]);
       else if (k === T.PARK) sp = parkSprite(w.variant[i] % 4, mode);
       sp = mip(sp, lvl); if (!sp) continue;
       const hh = (sp.c.height / sp.S) * z, ww = (sp.c.width / sp.S) * z, top0 = Y - sp.oy * z, cut = Y + 10 * z, mirror = Y + 26 * z;
@@ -178,14 +178,14 @@ export class Renderer {
         }
         else if (k === T.PARK) { const sp = mip(parkSprite(w.variant[i] % 4, mode), lvl), site = g.sites.get(i); if (!sp) { /* next frame */ } else if (site) drawConstruction(ctx, site, X, Y, z, mode, t, sp, null); else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
         else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) {
-          const shr = w.shore[i], sp = mip(buildingSprite(k, w.level[i], w.variant[i] % 8, mode, g.sim.pw[i] === 1 && (mode !== 2 || hash(x, y, 17) < this.litFrac), shr, hi), lvl);
+          const shr = w.shore[i], sp = mip(buildingSprite(k, w.level[i], (w.variant[i] & 55), mode, g.sim.pw[i] === 1 && (mode !== 2 || hash(x, y, 17) < this.litFrac), shr, hi), lvl);
           const site = g.sites.get(i), lv = w.level[i];
           if (mode === 2 && ctx.gpu && !g.fast && g.sim.pw[i] === 1 && !site) {
             const r = (40 + lv * 10) * z; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.2 + lv * 0.03;
             ctx.drawImage(this.poolSprite(), X - r, Y + 16 * z - r * 0.5, r * 2, r); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
           }
           if (!sp) { /* picture not made yet: it appears in a frame or two */ }
-          else if (site) { const so = site.from > 0 ? mip(buildingSprite(k, site.from, site.pv % 8, mode, g.sim.pw[i] === 1, shr), lvl) : null; drawConstruction(ctx, site, X, Y, z, mode, t, sp, so); }
+          else if (site) { const so = site.from > 0 ? mip(buildingSprite(k, site.from, (site.pv & 55), mode, g.sim.pw[i] === 1, shr), lvl) : null; drawConstruction(ctx, site, X, Y, z, mode, t, sp, so); }
           else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
           if (!site) {
             const sm = shr ? WF_SMOKE[`${shr}${k}${lv}`] : SMOKE[`${k}${lv}`];
@@ -281,7 +281,7 @@ export class Renderer {
       const i = y * N + x, k = w.kind[i];
       if (k === T.EMPTY && w.tree[i]) send(mip(treeSprite(w.tree[i], mode), lvl));
       else if (k === T.PARK) send(mip(parkSprite(w.variant[i] % 4, mode), lvl));
-      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) send(mip(buildingSprite(k, w.level[i], w.variant[i] % 8, mode, g.sim.pw[i] === 1, w.shore[i]), lvl));
+      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) send(mip(buildingSprite(k, w.level[i], (w.variant[i] & 55), mode, g.sim.pw[i] === 1, w.shore[i]), lvl));
       else if (k === T.SVC && w.bo[i] === 0) { const def = BT[w.bt[i]]; send(mip(serviceSprite(w.bt[i], mode, def.power ? true : g.sim.pw[i] === 1, def.reach ? w.variant[i] : 0), lvl)); }
     }
   }
@@ -831,6 +831,7 @@ export class Renderer {
         case 'health': if (sim.cov.health[i] > 0.02) col = `rgba(255,120,170,${0.2 + sim.cov.health[i] * 0.5})`; break;
         case 'traffic': if (w.kind[i] === T.ROAD) col = ramp(1 - Math.min(1, g.density[i] / 2.2), 0.75); break;
         case 'transit': if (sim.cov.transit[i] > 0.02) col = `rgba(70,200,190,${0.2 + sim.cov.transit[i] * 0.5})`; break;
+        case 'metro': if (sim.cov.metro[i] > 0.02) col = `rgba(220,70,60,${0.2 + sim.cov.metro[i] * 0.5})`; break;
         case 'fun': if (sim.cov.fun[i] > 0.02) col = `rgba(190,120,255,${0.2 + sim.cov.fun[i] * 0.5})`; break;
         case 'waste': { const m = sim.wasteMap[i]; col = m === 3 ? 'rgba(95,211,166,.7)' : m === 2 ? 'rgba(239,111,94,.8)' : m === 1 ? 'rgba(176,132,76,.38)' : null; break; }
         case 'edu': if (sim.cov.edu[i] > 0.02) col = `rgba(240,200,70,${0.2 + sim.cov.edu[i] * 0.5})`; break;
@@ -1038,7 +1039,7 @@ export class Renderer {
       if (k === T.ROAD) this.bridgeTile(ctx, w, x, y, X, Y, z, mode, lvl);
       return;
     }
-    const spr = mip(k === T.ROAD ? roadSprite(w.roadMask(x, y), mode) : terrainSprite(ter, ter === TERRAIN.GRASS ? ((x * 7 + y * 13) % 4) : ((x + y) % 2), mode, w.tone[i]), lvl);
+    const spr = mip(k === T.ROAD ? roadSprite(w.roadMask(x, y), mode, w.level[i] === 1) : terrainSprite(ter, ter === TERRAIN.GRASS ? ((x * 7 + y * 13) % 4) : ((x + y) % 2), mode, w.tone[i]), lvl);
     ctx.drawImage(spr.c, X - 32 * z - 0.3, Y - 0.3, 64 * z + 0.6, 32 * z + 0.6);
     if (k !== T.ROAD && (ter === TERRAIN.GRASS || ter === TERRAIN.SAND)) {       // soft edges where grass meets sand, instead of a hard tile line
       for (let s2 = 0; s2 < 4; s2++) {
@@ -1068,7 +1069,7 @@ export class Renderer {
     const S = N * GP, ROWS = 6;
     if (!this.gc) { this.gc = document.createElement('canvas'); this.gc.width = this.gc.height = S; this.gcx = this.gc.getContext('2d'); this.gkey = new Uint8Array(N * N); }
     const key = this.gkey, x = this.gcx;
-    const kOf = (i) => { const k = w.kind[i]; return 1 + k * 2 + ((k === T.RES || k === T.COM || k === T.IND) && !w.level[i] ? 1 : 0); };
+    const kOf = (i) => { const k = w.kind[i]; return 1 + k * 2 + ((k === T.RES || k === T.COM || k === T.IND) && !w.level[i] ? 1 : 0) + (k === T.ROAD && w.level[i] ? 40 : 0); };   // avenues redraw too
     const season = getSeason();
     if (!this.gJob && (this.gFor !== w || this.gMode !== mode || this.gSeason !== season)) this.gJob = { w, mode, season, row: 0, fresh: this.gFor !== w };
     const job = this.gJob;

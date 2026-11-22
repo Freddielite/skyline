@@ -41,7 +41,7 @@ export const UNLOCK = {
   pump: 600, police2: 600, fire2: 600, recycle: 600,
   hospital: 1000, museum: 1000,
   university: 1500, wte: 1500, treat: 1500,
-  stadium: 2500, sky: 2500,
+  stadium: 2500, sky: 2500, metro: 2000,
 };
 export const UNLOCK_NAME = { sky: 'Skyscrapers (level 4 buildings)' };
 

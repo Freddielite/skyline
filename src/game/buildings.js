@@ -28,6 +28,7 @@ export const BT = {
   24: { id: 24, key: 'beach', name: 'Beach', w: 2, d: 2, cost: 600, upkeep: 12, radius: 9, cov: [['fun', 0.8]], cat: 'fun', shore: 'sand', reach: 1 },
   25: { id: 25, key: 'marina', name: 'Marina', w: 2, d: 2, cost: 3000, upkeep: 60, radius: 12, use: 3, cov: [['fun', 1.1]], cat: 'fun', shore: 'lake', reach: 2, dock: true },
   26: { id: 26, key: 'ferry', name: 'Ferry pier', w: 1, d: 1, cost: 1500, upkeep: 40, radius: 11, use: 2, cov: [['transit', 1]], cat: 'transit', shore: 'lake', reach: 1, dock: true, road: true, ferry: true },
+  27: { id: 27, key: 'metro', name: 'Metro station', w: 1, d: 1, cost: 5000, upkeep: 120, radius: 14, use: 4, cov: [['metro', 1]], road: true, metro: true, cat: 'transit' },
   18: { id: 18, key: 'wte', name: 'Waste-to-energy', w: 2, d: 2, cost: 5200, upkeep: 140, waste: 200, radius: 14, power: 40, pollute: 8, pr: 6, cat: 'waste' },
 };
 // Shore buildings face the water on one side: face 0 = +x, 1 = +y, 2 = -x, 3 = -y (stored in world.variant).

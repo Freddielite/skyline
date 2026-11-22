@@ -4,6 +4,8 @@ import { Game } from './game/game.js';
 const I = {
   hand: 'M8 13V5.5a1.5 1.5 0 013 0V11m0-6.5a1.5 1.5 0 013 0V11m0-5a1.5 1.5 0 013 0V13m0-4a1.5 1.5 0 013 0v6.5A6.5 6.5 0 0113 22h-1.6a6 6 0 01-4.7-2.3L3.5 15.5a1.5 1.5 0 012.3-1.9L8 16',
   road: 'M9 3L5 21M15 3l4 18M12 4v3m0 4v3m0 4v3',
+  avenue: 'M7 3L3 21M17 3l4 18M12 4v4m0 4v4m0 4v4M9.5 5l-1 15M14.5 5l1 15',
+  metro: 'M12 3a9 9 0 110 18 9 9 0 010-18zM7.5 16V8l4.5 6 4.5-6v8',
   pier: 'M3 19c2 0 2-1.5 4.5-1.5S10 19 12 19s2-1.5 4.5-1.5S19 19 21 19M3 12h18M6 12v5M12 12v5M18 12v5M17 12V6',
   umbrella: 'M12 4a8 8 0 018 8H4a8 8 0 018-8zm0 8l-2 7M3 20c2 0 2-1 4.5-1s2.5 1 4.5 1 2-1 4.5-1 2.5 1 4.5 1',
   boat: 'M12 3v11m0-10l6 9h-6M4 15h16l-2.5 4h-11L4 15z',
@@ -54,6 +56,8 @@ const Icon = ({ n, size = 22, fill }) => (
 const T = {
   move: { id: null, label: 'Move', icon: 'hand' },
   road: { id: 'road', label: 'Road', icon: 'road', cost: 10 },
+  avenue: { id: 'avenue', label: 'Avenue', icon: 'avenue', cost: 25 },
+  metro: { id: 'metro', label: 'Metro', icon: 'metro', cost: 5000 },
   res: { id: 'res', label: 'Homes', icon: 'home', cost: 5, zone: 'r' },
   com: { id: 'com', label: 'Shops', icon: 'shop', cost: 5, zone: 'c' },
   ind: { id: 'ind', label: 'Industry', icon: 'gear', cost: 5, zone: 'i' },
@@ -90,15 +94,15 @@ const T = {
   ferry: { id: 'ferry', label: 'Ferry pier', icon: 'ferry', cost: 1500 },
 };
 const CATS = [
-  { id: 'build', label: 'Build', short: 'Build', icon: 'road', tools: ['move', 'road', 'res', 'com', 'ind', 'park', 'clear'] },
+  { id: 'build', label: 'Build', short: 'Build', icon: 'road', tools: ['move', 'road', 'avenue', 'res', 'com', 'ind', 'park', 'clear'] },
   { id: 'util', label: 'Power & water', short: 'Utilities', icon: 'bolt', tools: ['move', 'coal', 'wind', 'wire', 'cable', 'water', 'pump', 'treat', 'pipe', 'clear'] },
   { id: 'waste', label: 'Waste', short: 'Waste', icon: 'trash', tools: ['move', 'dump', 'recycle', 'wte', 'clear'] },
   { id: 'svc', label: 'Services', short: 'Services', icon: 'shield', tools: ['move', 'police', 'police2', 'fire', 'fire2', 'clinic', 'hospital', 'school', 'university', 'clear'] },
-  { id: 'transit', label: 'Transit', short: 'Transit', icon: 'bus', tools: ['move', 'busstop', 'busterm', 'ferry', 'clear'] },
+  { id: 'transit', label: 'Transit', short: 'Transit', icon: 'bus', tools: ['move', 'busstop', 'busterm', 'ferry', 'metro', 'clear'] },
   { id: 'fun', label: 'Amenities', short: 'Fun', icon: 'ball', tools: ['move', 'pier', 'beach', 'plaza', 'library', 'marina', 'museum', 'stadium', 'clear'] },
 ];
 const VIEWS = [
-  { id: 'commute', label: 'Commutes' }, { id: 'traffic', label: 'Traffic' }, { id: 'transit', label: 'Transit' }, { id: 'value', label: 'Land value' }, { id: 'crime', label: 'Crime' }, { id: 'pollution', label: 'Pollution' },
+  { id: 'commute', label: 'Commutes' }, { id: 'traffic', label: 'Traffic' }, { id: 'transit', label: 'Transit' }, { id: 'metro', label: 'Metro' }, { id: 'value', label: 'Land value' }, { id: 'crime', label: 'Crime' }, { id: 'pollution', label: 'Pollution' },
   { id: 'power', label: 'Power' }, { id: 'water', label: 'Water' },
   { id: 'waste', label: 'Waste' }, { id: 'fun', label: 'Amenities' },
   { id: 'police', label: 'Police' }, { id: 'fire', label: 'Fire' }, { id: 'health', label: 'Health' }, { id: 'edu', label: 'Education' },
@@ -272,6 +276,7 @@ export default function App() {
       unlock: (e) => say(`Unlocked: ${e.name}`),
       cut: () => say('The city is in debt. Services are closing'),
       news: (e) => { setNews(e.text); clearTimeout(newsT.current); newsT.current = setTimeout(() => setNews(null), 7000); },
+      request: (e) => say(e.fresh ? `New request: ${e.title}. See City → Advisors` : e.ok ? `Request done: ${e.title}` : `Request missed: ${e.title}`),
       inspect: () => setPanel(null),
       quality: () => { setTilt(false); say('Switched to smooth graphics to keep the game fast'); },
     });
@@ -354,12 +359,13 @@ export default function App() {
                 </button>); })}
             </div>
           </section>}
-          {ui && (view || st.tut || tool || st.canUndo > 0) && <div className="leftcol">
+          {ui && (view || st.tut || tool || st.canUndo > 0 || st.request) && <div className="leftcol">
             {tool && curTool && <div className="chip">
               <button className="chip-main" onClick={() => openCat(cat)} title="Pick another tool"><Icon n={curTool.icon} size={16} /><b>{curTool.label}</b><em>{money(curTool.cost)}</em></button>
               <button className="chip-x" onClick={() => pick(null)} aria-label="Stop building and move the map"><Icon n="close" size={14} /></button>
             </div>}
             {st.canUndo > 0 && <button className="chip undo" onClick={() => { g.undo(); setSt(g.stats()); }} title={'Undo ' + st.undoLabel}><Icon n="undo" size={15} /><b>Undo</b><em>{st.undoLeft}s</em></button>}
+            {st.request && !tool && <button className="chip reqchip" onClick={() => openCity('advice')}><Icon n="news" size={14} /><b>{st.request.choice ? 'Decide' : 'Request'}</b><em>{st.request.title}</em></button>}
             {view && <button className="viewtag" onClick={() => setView(null)}>{view.label} view <Icon n="close" size={14} /></button>}
             {st.tut && !panel && !fly && <section className="guide" aria-label="Getting started">
               <div className="gstep">Step {st.tut.i + 1} of {st.tut.n}</div>
@@ -374,7 +380,7 @@ export default function App() {
 
           {ui && <nav className="side" aria-label="City and settings">
             <button className={'sbtn' + (panel === 'views' || st.overlay ? ' on' : '')} onClick={() => toggle('views')}><Icon n="eye" size={18} /><span>Views</span></button>
-            <button className={'sbtn' + (panel === 'budget' ? ' on' : '')} onClick={() => toggle('budget')}><Icon n="coin" size={18} /><span>City</span>{st.advice.some((a) => a.sev === 'bad') && <i className="dot" aria-label="Advisors have urgent news" />}</button>
+            <button className={'sbtn' + (panel === 'budget' ? ' on' : '')} onClick={() => toggle('budget')}><Icon n="coin" size={18} /><span>City</span>{(st.advice.some((a) => a.sev === 'bad') || (st.request && st.request.choice)) && <i className="dot" aria-label="Advisors have urgent news" />}</button>
             <button className={'sbtn' + (panel === 'menu' ? ' on' : '')} onClick={() => toggle('menu')}><Icon n="menu" size={18} /><span>Menu</span></button>
             <button className="sbtn" onClick={flipUi} aria-label="Hide interface"><Icon n="eyeoff" size={18} /><span>Hide</span></button>
           </nav>}
@@ -403,6 +409,9 @@ export default function App() {
                   <div><span>Last month costs (all)</span><b className="neg">{money(-st.expense)}</b></div>
                   {st.loanPay > 0 && <div><span>Loan payments</span><b className="neg">{money(-st.loanPay)}</b></div>}
                   {st.interest > 0 && <div><span>Bank interest on debt</span><b className="neg">{money(-st.interest)}</b></div>}
+                  <div><span>Season</span><b>{st.seasonName}</b></div>
+                  <div><span>Tourists last month · hotel beds</span><b>{st.tourists} · {st.beds}</b></div>
+                  <div><span>Tourism income</span><b className="pos">{money(st.tourIncome || 0)}</b></div>
                   <div><span>Regional grant (fades as you grow)</span><b>{money(st.grant)}</b></div>
                   <div><span>Service &amp; utility upkeep</span><b>{money(st.upkeep)}</b></div>
                   <div><span>Ordinances</span><b>{money(st.ordCost)}</b></div>
@@ -472,6 +481,12 @@ export default function App() {
                 <p className="hint">Below 35%, residents start moving away. Above 60%, homes grow faster and taxes come in more reliably.</p>
               </>)}
               {tab === 'advice' && (<>
+                {st.request && <div className="req">
+                  <small>{st.request.choice ? 'Your decision' : `Request · ${st.request.left} month${st.request.left === 1 ? '' : 's'} left`}</small>
+                  <b>{st.request.title}</b>
+                  <p>{st.request.text}{st.request.prog ? ` Progress: ${st.request.prog}.` : ''}{st.request.win ? ` Reward: ${[st.request.win.money ? money(st.request.win.money) : '', st.request.win.happy ? `+${st.request.win.happy} happiness` : ''].filter(Boolean).join(', ')}.` : ''}</p>
+                  {st.request.choice && <div className="req-c">{st.request.choices.map((c, n) => <button key={n} onClick={() => { g.answerRequest(n); setSt(g.stats()); }}>{c}</button>)}</div>}
+                </div>}
                 {st.advice.length === 0 && <p className="hint">Nothing urgent. The city is running smoothly.</p>}
                 <div className="advice">
                   {st.advice.map((a, k) => (

@@ -362,3 +362,14 @@ button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 @media (max-height: 400px) {
   .rail button, .sbtn { height: 41px; }
 }
+
+/* ---------- requests (0.6.0) ---------- */
+.req { margin-top: 10px; padding: 10px 12px; background: rgba(242, 184, 75, .1); border: 1px solid var(--amber); border-radius: 12px; }
+.req small { display: block; font-size: 11px; color: var(--amber); font-weight: 600; }
+.req b { display: block; margin: 2px 0 3px; font-size: 14px; }
+.req p { margin: 0; font-size: 12.5px; line-height: 1.4; color: var(--dim); }
+.req-c { display: grid; gap: 6px; margin-top: 8px; }
+.req-c button { min-height: 40px; padding: 0 12px; background: rgba(255,255,255,.08); border: 1px solid var(--line); border-radius: 10px; text-align: left; }
+.req-c button:first-child { border-color: var(--amber); }
+.reqchip { gap: 6px; height: 32px; padding: 0 12px; border-color: var(--line); max-width: 260px; }
+.reqchip b { color: var(--amber); } .reqchip em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

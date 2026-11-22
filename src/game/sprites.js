@@ -372,6 +372,48 @@ function factory(k, v) {
   box(0.7, 0.5, 0.24, 0.3, 14, faces('#c9ccd2'));
   k.smoke(P(0.84, 0.24, 86), 3);
 }
+// ---- specialised industry: farms, forestry and tech (bits 4-5 of the variant) ----
+function farm(k, v, l) {
+  const { P, poly, box, faces, sh, C, line, cyl, circ } = k;
+  const crops = [['#d9c25a', '#c9ad3f'], ['#8fc85a', '#6fae44'], ['#b98a4a', '#9c7038'], ['#c9d86a', '#a9bf4a']][v % 4];
+  k.pad(crops[0], null);
+  for (let i = 0; i < 9; i++) line(P(0.05, 0.08 + i * 0.1), P(0.95, 0.08 + i * 0.1), C(crops[1]), 1.6);   // furrows
+  const bw = l >= 3 ? 0.42 : 0.34, bh = l >= 2 ? 18 : 14;
+  sh(0.08, 0.08, bw, 0.3, bh + 6); box(0.08, 0.08, bw, 0.3, bh, faces('#b5463a')); k.mat(0.08, 0.08, bw, 0.3, bh, 'siding', v);
+  poly([P(0.08, 0.08, bh), P(0.08 + bw, 0.08, bh), P(0.08 + bw, 0.23, bh + 8), P(0.08, 0.23, bh + 8)], C('#6b6f78'));
+  poly([P(0.08 + bw, 0.08, bh), P(0.08 + bw, 0.38, bh), P(0.08 + bw, 0.23, bh + 8)], C('#8e3a30'));
+  poly([P(0.08 + bw * 0.35, 0.38, 0), P(0.08 + bw * 0.65, 0.38, 0), P(0.08 + bw * 0.65, 0.38, bh * 0.7), P(0.08 + bw * 0.35, 0.38, bh * 0.7)], C('#f2efe6'));
+  for (let i = 0; i < Math.min(3, l); i++) { cyl(0.68 + i * 0.1, 0.2, 4.5, 22 + l * 4, '#c9ccd2'); circ(P(0.68 + i * 0.1, 0.2, 24 + l * 4), 4.5, C('#9aa0a8')); }
+  if (l >= 2) { box(0.62, 0.7, 0.16, 0.1, 5, faces('#3f8f5a')); box(0.6, 0.7, 0.05, 0.1, 7, faces('#3f8f5a')); circ(P(0.66, 0.82, 1.5), 2, C('#2c2c2c')); }   // a tractor
+  if (l >= 3) for (let i = 0; i < 3; i++) { const p = P(0.3 + i * 0.22, 0.88); k.ell([p[0], p[1] - 1], 4, 2, C('#e9d89a')); }   // hay bales
+}
+function sawmill(k, v, l) {
+  const { P, poly, box, faces, sh, C, line, cyl, circ } = k;
+  k.pad('#9c8f73', ['#7d7158', '#b3a684']);
+  const w = 0.5 + l * 0.06, h = 16 + l * 5;
+  sh(0.1, 0.1, w, 0.4, h); box(0.1, 0.1, w, 0.4, h, faces('#8a6a48')); k.mat(0.1, 0.1, w, 0.4, h, 'siding', v + 3);
+  poly([P(0.06, 0.06, h), P(0.14 + w, 0.06, h), P(0.14 + w, 0.54, h), P(0.06, 0.54, h)], C('#5c6670'));
+  poly([P(0.25, 0.5, 0), P(0.45, 0.5, 0), P(0.45, 0.5, h * 0.7), P(0.25, 0.5, h * 0.7)], C('#3b2f24'));
+  for (let r = 0; r < 2 + Math.min(2, l); r++) for (let i = 0; i < 4; i++) { const p = P(0.62 + i * 0.07, 0.62 + r * 0.08, 2 + (i % 2)); circ(p, 2.4, C('#c49a62')); circ(p, 1.1, C('#8a6440')); }   // log piles, ends showing
+  for (let i = 0; i < 3; i++) line(P(0.12, 0.66 + i * 0.1), P(0.5, 0.66 + i * 0.1), C('#b98a52'), 2.6);   // stacked planks
+  if (l >= 2) { cyl(0.75, 0.18, 4, 26 + l * 4, '#8d939b'); k.smoke(P(0.75, 0.18, 30 + l * 4), 2); }
+}
+function techPark(k, v, l) {
+  const { P, poly, box, faces, sh, C, line, circ } = k;
+  k.pad('#b9dca0', ['#4d8f3c', '#8fd070']);
+  poly([P(0.05, 0.85), P(0.95, 0.85), P(0.95, 0.95), P(0.05, 0.95)], C('#d9d6cc'), null, true);
+  const h = [0, 20, 30, 46][Math.min(3, l)], x = 0.12, y = 0.14, w = 0.62, d = 0.52;
+  sh(x, y, w, d, h); box(x, y, w, d, h, { l: '#e9eef2', r: '#c9d2da', t: '#9fb0be' });
+  k.wins(x, y, w, d, h, v + 61, { dens: 4.4, rh: 8, wh: 5.5, base: 5, glass: true });
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) poly([P(x + 0.06 + i * 0.18, y + 0.06 + j * 0.22, h + 1), P(x + 0.2 + i * 0.18, y + 0.06 + j * 0.22, h + 1), P(x + 0.2 + i * 0.18, y + 0.24 + j * 0.22, h + 3), P(x + 0.06 + i * 0.18, y + 0.24 + j * 0.22, h + 3)], C('#2b4a78'));
+  for (let i = 0; i < 4; i++) k.tree(0.82, 0.18 + i * 0.2, 0, v + i);
+  circ(P(0.4, 0.78, 1), 3, C('#62b6e6'));                                           // a little pond by the entrance
+}
+function industryArt(level, v) {
+  const sp = (v >> 4) & 3, vv = v & 7;
+  if (!sp || level >= 4) return (k) => BUILD[T.IND][level - 1](k, vv);
+  return (k) => [null, farm, sawmill, techPark][sp](k, vv, level);
+}
 function plant(k, v) {
   const { P, poly, box, faces, sh, C, line, cyl } = k;
   k.pad('#a9a493', ['#8a8574', '#bdb8a6']);
@@ -514,8 +556,8 @@ export function buildingSprite(kind, level, variant, mode, lit = true, shore = 0
   const key = `b${kind}${level}${variant}${mode}${lit ? 1 : 0}w${shore}`;
   const fnMake = (sc) => () => {
     const H = shore ? WF_HEIGHTS[kind][level - 1] : HEIGHTS[kind][level - 1];
-    const fn = shore ? waterfrontArt(shore, kind, level) : BUILD[kind][level - 1];
-    return make(160, H, 80, H - 64, (k) => fn(k, variant), mode, lit, 0, sc);
+    const fn = shore ? waterfrontArt(shore, kind, level) : kind === T.IND && (variant >> 4) ? industryArt(level, variant) : BUILD[kind][level - 1];
+    return make(160, H, 80, H - 64, (k) => fn(k, variant & 7), mode, lit, 0, sc);
   };
   return hi ? hiRes(key, fnMake(HI)) || memoLater(key, fnMake(S)) : memoLater(key, fnMake(S));
 }
@@ -570,8 +612,8 @@ export function treeSprite(variant, mode) {
     if (v % 2 === 0) k.tree(0.22, 0.7, 0, v + 9);
   }, mode, true, se));
 }
-export function roadSprite(mask, mode) {
-  return memo(`r${mask}${mode}`, () => make(64, 32, 32, 0, (k) => {
+export function roadSprite(mask, mode, avenue = false) {
+  return memo(`r${mask}${mode}${avenue ? 'a' : ''}`, () => make(64, 32, 32, 0, (k) => {
     const { P, path, ctx, C, line, poly } = k;
     const hw = 0.36, a = 0.5 - hw, b = 0.5 + hw;
     poly([P(0, 0), P(1, 0), P(1, 1), P(0, 1)], C('#cdcac2'), null, true);
@@ -594,7 +636,13 @@ export function roadSprite(mask, mode) {
     ctx.restore();
     for (const p of pieces) { path(q(p)); ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 0.5; ctx.stroke(); }                       // curb highlight
     const dash = C('#f0e08a'), c = P(0.5, 0.5), arms = (mask & 1 ? 1 : 0) + (mask & 2 ? 1 : 0) + (mask & 4 ? 1 : 0) + (mask & 8 ? 1 : 0);
-    if (arms <= 2) {
+    if (avenue && arms <= 2 && (mask === 5 || mask === 10 || mask === 1 || mask === 4 || mask === 2 || mask === 8)) {   // avenue: a planted median and lane lines
+      const ax = mask & 5;
+      const med = ax ? [P(0.46, 0), P(0.54, 0), P(0.54, 1), P(0.46, 1)] : [P(0, 0.46), P(1, 0.46), P(1, 0.54), P(0, 0.54)];
+      poly(med, C('#b8b4aa')); const inner = ax ? [P(0.475, 0), P(0.525, 0), P(0.525, 1), P(0.475, 1)] : [P(0, 0.475), P(1, 0.475), P(1, 0.525), P(0, 0.525)]; poly(inner, C('#6fae58'), null, true);
+      for (let i = 0; i < 3; i++) { const t = 0.17 + i * 0.33; k.circ(ax ? P(0.5, t) : P(t, 0.5), 1.6, C('#4f9a46')); }
+      for (const o of [0.32, 0.68]) line(ax ? P(o, 0) : P(0, o), ax ? P(o, 1) : P(1, o), 'rgba(255,255,255,.55)', 0.6, [3, 3]);
+    } else if (arms <= 2) {
       if (mask & 1) line(c, P(0.5, 0), dash, 1.1, [4, 3]);
       if (mask & 2) line(c, P(1, 0.5), dash, 1.1, [4, 3]);
       if (mask & 4) line(c, P(0.5, 1), dash, 1.1, [4, 3]);
@@ -1145,7 +1193,19 @@ function busTerminal(k) {
   for (const [x, c] of [[0.2, '#e8a521'], [1.05, '#3a9d6e']]) { box(x, 1.2, 0.7, 0.22, 11, faces(c)); poly([P(x + 0.05, 1.42, 4), P(x + 0.65, 1.42, 4), P(x + 0.65, 1.42, 9), P(x + 0.05, 1.42, 9)], C('#cfe6f3')); }
   box(1.75, 0.8, 0.12, 0.12, 40, faces('#2e86c1')); poly([P(1.7, 0.92, 34), P(1.92, 0.92, 34), P(1.92, 0.92, 44), P(1.7, 0.92, 44)], C('#ffffff'));
 }
-const SVC_SPR_X = { 21: [busStop, 1, 1, 70], 22: [busTerminal, 2, 2, 100], 19: [pumpStation, 2, 2, 120], 20: [treatmentPlant, 3, 3, 130], 8: [policeHQ, 2, 2, 150], 9: [fireHQ, 2, 2, 170], 10: [hospital, 2, 2, 170], 11: [university, 3, 3, 190], 12: [plaza, 2, 2, 100], 13: [library, 1, 1, 100], 14: [museum, 2, 2, 130], 15: [stadium, 3, 3, 150], 16: [dump, 2, 2, 100], 17: [recycle, 2, 2, 100], 18: [wte, 2, 2, 170] };
+const SVC_SPR_X = { 27: [metro, 1, 1, 80], 21: [busStop, 1, 1, 70], 22: [busTerminal, 2, 2, 100], 19: [pumpStation, 2, 2, 120], 20: [treatmentPlant, 3, 3, 130], 8: [policeHQ, 2, 2, 150], 9: [fireHQ, 2, 2, 170], 10: [hospital, 2, 2, 170], 11: [university, 3, 3, 190], 12: [plaza, 2, 2, 100], 13: [library, 1, 1, 100], 14: [museum, 2, 2, 130], 15: [stadium, 3, 3, 150], 16: [dump, 2, 2, 100], 17: [recycle, 2, 2, 100], 18: [wte, 2, 2, 170] };
+function metro(k) {
+  const { P, poly, box, faces, sh, C, line, circ } = k;
+  padRect(k, 1, 1, '#cfcbc2', ['#b9b5ac', '#e0ddd5']);
+  poly([P(0.2, 0.3, 0), P(0.8, 0.3, 0), P(0.8, 0.75, 0), P(0.2, 0.75, 0)], C('#3a3f48'));                    // stairs going down
+  for (let i = 0; i < 6; i++) line(P(0.22, 0.34 + i * 0.07, 0.2), P(0.78, 0.34 + i * 0.07, 0.2), 'rgba(255,255,255,.25)', 0.6);
+  for (const u of [0.2, 0.8]) for (const v of [0.3, 0.75]) line(P(u, v), P(u, v, 16), C('#5a6270'), 1.2);
+  poly([P(0.14, 0.24, 16), P(0.86, 0.24, 16), P(0.86, 0.82, 19), P(0.14, 0.82, 19)], 'rgba(150,200,230,.75)');   // glass canopy
+  line(P(0.14, 0.82, 19), P(0.86, 0.82, 19), C('#5a6270'), 1);
+  line(P(0.9, 0.85), P(0.9, 0.85, 30), C('#5a6270'), 1.4);                                                    // the sign: a red M on white
+  const t = P(0.9, 0.85, 34); circ(t, 6, C('#f4f4f0')); circ(t, 5, C('#d9312a'));
+  k.ctx.fillStyle = '#ffffff'; k.ctx.font = 'bold 7px sans-serif'; k.ctx.textAlign = 'center'; k.ctx.fillText('M', t[0], t[1] + 2.5);
+}
 const SVC_SPR_SHORE = { 23: [pier, 1, 1, 70, 2], 24: [beach, 2, 2, 60, 1], 25: [marina, 2, 2, 80, 2], 26: [ferryPier, 1, 1, 70, 1] };   // last number: tiles the picture reaches beyond its lot
 const SVC_SPR = { ...SVC_SPR_SHORE, 1: [coalPlant, 2, 2, 190], 2: [wind, 1, 1, 130], 3: [waterTower, 1, 1, 130], 4: [police, 1, 1, 100], 5: [fireStation, 1, 1, 130], 6: [clinic, 1, 1, 110], 7: [school, 1, 1, 130], ...SVC_SPR_X };
 export function serviceSprite(id, mode, lit = true, face = 0, hi = false) {

@@ -29,6 +29,15 @@ bars, swipe from an edge to peek them, and draws behind the camera cutout). Both
 - Utilities and services: tap a tile to place (the preview shows the footprint); drag to reposition before lifting.
 - With a build tool active, one finger paints and two fingers move the map.
 
+## 0.6.0: gameplay update
+
+- Seasons matter: winter heating raises power demand and slows growth, spring speeds it up, summer brings tourists, autumn is harvest time for farms
+- Tourism: beaches, marinas, piers, museums and stadiums draw visitors who need hotel beds (big shops) and bring income (City → Budget)
+- Requests: residents and businesses ask for things with a deadline and a reward, or ask you to decide (City → Advisors)
+- Avenues: widen busy roads to carry twice the traffic (Build → Avenue)
+- Metro: two or more stations link distant neighbourhoods and stretch commutes (Transit → Metro, 2,000 residents)
+- Industry types: farms in the countryside, sawmills by woods, tech parks in an educated university town
+
 ## 0.5.18: graphics polish
 
 - Buildings stay sharp when you zoom right in

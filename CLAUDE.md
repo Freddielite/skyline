@@ -2,7 +2,7 @@
 
 Isometric city builder for Android. React + Vite + canvas, packaged with Capacitor.
 Project folder on Freddie's machine: `/home/freddielite/Downloads/skyline`
-App ID: `com.wyntek.skyline` · Current version: **0.5.18**
+App ID: `com.wyntek.skyline` · Current version: **0.6.0**
 
 This file is the handover: what has been built, how to push it to the phone, and the rules for future changes.
 Anyone (person or AI assistant) working on this project should read it first.
@@ -12,7 +12,7 @@ Anyone (person or AI assistant) working on this project should read it first.
 ## Rules for every change
 
 1. **Always end with the push command.** Every fix or feature, however small, ends with the full push command below, written out exactly, so it can be copied and run without looking anything up.
-2. **Always bump the version** in `package.json` (0.5.18 → 0.5.19 and so on). The game shows "Updated to version X" on first launch and the version in Menu, which is how we confirm the phone really got the new build.
+2. **Always bump the version** in `package.json` (0.6.0 → 0.6.1 and so on). The game shows "Updated to version X" on first launch and the version in Menu, which is how we confirm the phone really got the new build.
 3. **Deliver the whole project as `skyline.zip`**, with the files at the top level of the zip (no `skyline/` folder inside), and without `node_modules/`, `dist/` or `android/`.
 4. **Add a short entry to the change history** at the bottom of this file and to `README.md`.
 5. **Check performance on a slow phone.** The test phone is an Infinix HOT. Do heavy work once and cache it in sprites. The main view is drawn on the GPU (see "Drawing engine" below): `ctx.filter` (blur) does nothing there, and additive glow (`'lighter'`) is free.
@@ -45,7 +45,7 @@ The `&&` means each step only runs if the one before succeeded. If one fails, th
 
 ## Troubleshooting
 
-**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.5.18 · built (date) UTC`.
+**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.6.0 · built (date) UTC`.
 
 **Check the project folder has the new code:**
 ```bash
@@ -113,6 +113,12 @@ adb install android/app/build/outputs/apk/debug/app-debug.apk
 | Seasons | Menu → Seasons → Follow the calendar. Test tools → End month until September: trees turn orange, red and yellow, grass goes golden. December: bare trees with snow on the branches, frosted grass, snow on pine branches, chimney smoke all day. March: green again. Always summer turns it off. |
 | Small life | Police HQ, Fire HQ and University flags wave (still on Smooth). Gulls circle over harbors, piers and beaches (not on Smooth). |
 | Graphics 0.5.18 | Zoom all the way in on Pretty: buildings stay sharp (close-zoom copies). Walls show siding, brick, panels or concrete; windows have frames and sills; house roofs have shingles, lots have flowerbeds and stepping stones. Through the day (Menu → Time of day, or watch Auto) shadows swing from down-right in the morning, short at noon, to long down-left at sunset, across roads and open ground. Streets: trees along the pavement by homes, cars parked by shops and industry, benches and bins by parks. Rain: roads go dark and shiny and dry slowly. After dark windows light up one by one, and some go out late at night. People's legs swing as they walk. Where grass meets sand the edge is soft. |
+| Seasons (gameplay) | Menu → Seasons → Follow the calendar. City → Budget shows the season. Test tools → End month into December: power demand jumps about a quarter (heating), City → Charts shows a Winter line in happiness, growth slows. Spring speeds growth up, summer brings more tourists and a small happiness boost. Autumn: farms pay half as much tax again (harvest). Always summer turns all of it off. |
+| Tourism | Build a beach, marina, pier, museum or stadium (Test tools → Unlock all). City → Budget: Tourists last month · hotel beds, and Tourism income. Grow shops to level 3 (or waterfront shops to level 2) for more beds; Advisors say when visitors can't find rooms. Summer ×1.6, winter ×0.5. |
+| Requests | With 60+ residents a request arrives every few months: a toast, a chip on the left and a card at the top of City → Advisors with the deadline, progress and reward. Goals (health care, parks, buses, clean air, jobs, lower taxes, tourists) pay money and happiness when met, cost happiness when missed. Choices (factory expansion, summer festival, snow) have two buttons; the City button shows a dot while one waits. |
+| Avenues | Build → Avenue: drag over an existing road to widen it ($15 a tile) or build new ($25). A planted median and two lanes each way; it carries twice the traffic before jamming. Upkeep $1/month. Not on bridges. |
+| Metro | Transit → Metro (2,000 residents, next to a road, needs power). One station does nothing; with two or more, every station covers 14 tiles: commutes reach 22 tiles further, fewer cars on the road, happier residents. Views → Metro. |
+| Industry types | Zone industry out in the countryside, away from homes and shops: farms. Next to woods: sawmills. In a town with a university and good schools nearby: tech parks. The Inspector shows the type. Farms: 60% of the jobs, a quarter of the pollution. Forestry: 80% jobs, 60% pollution. Tech: 125% jobs, 20% pollution, 1.4× tax, but needs an educated city. |
 | Moving vans | Set taxes to 20% so people leave: cars with boxes on the roof drive from the homes to the highway and fade out at the map edge. When homes grow, vans drive in from the highway. Homes not linked to the highway send no vans. |
 
 ---
@@ -262,6 +268,16 @@ Freddie saw the landfill painted over the warehouse standing in front of it. A b
 - **Walking:** people's legs swing (`renderer.person`).
 - **Soft ground edges:** `renderer.edgeSprite()` feathers sand into grass and grass into sand along tile edges (cached per side, lighting and season), also inside the ground cache.
 
+## Gameplay update (built in 0.6.0)
+
+All in `sim.js` unless noted.
+- **Seasons:** `SIM_SEASON` by month (0 spring, 1 summer, 2 autumn, 3 winter), `sim.SEASON_NOW` (summer when `seasonsOn` is false; set from Menu → Seasons by `game.js`). Winter: homes use 25% more power (`anNetworks`), homes and shops demand −0.06, happiness −2 (softened by health care). Spring: demand +0.03. Summer: happiness +1 to +3 with amenities, tourists ×1.6. Autumn: farm tax ×1.5 (`recount`, `iTax`).
+- **Tourism** (`sim.tourism()`, run in `anLand`): attraction from parks, piers, beaches, marinas, museums, stadiums, plazas, libraries and waterfront shops, times the season (and a festival boost), capped by hotel beds (30 + 12 per shop at level 3+, 8 per waterfront shop at level 2+). Income `tourists × 3 × (0.6 + shop tax / 22)` a month; visitors raise shop demand.
+- **Requests** (`REQUESTS`, `monthlyRequests`, `answerRequest`, `requestView`): saved in `req`, `reqNext`, `reqDone`; happiness effects in `moods` (shown as a Requests line in happiness). A choice not answered in two months takes its last option.
+- **Avenues:** road tiles with `world.level = 1` (bridges never). Twice the capacity in the jam and commute-cost calculations; upkeep +$0.60. `roadSprite(mask, mode, avenue)` draws the median on straight pieces; the ground cache key includes it.
+- **Metro:** building 27 (`metro: true`), coverage key `metro` (in `COVS`), only when two or more stations are open (`metroLinked`). Commute reach `18 + 12 × buses + 22 × metro`. Cars on the road drop with metro coverage like with buses (`game.js`).
+- **Industry types:** `pickSpec()` when an industry lot first grows; stored in bits 4–5 of `world.variant` (`specOf()`), kept as it grows. Jobs, pollution and tax multipliers `SPEC_JOBS`, `SPEC_POLL`, `SPEC_TAX`; tech lots need city education 40%. Pictures `farm`, `sawmill`, `techPark` in `sprites.js` (`industryArt`; level 4 keeps the hi-tech campus). The renderer passes `variant & 55` so the type reaches the picture.
+
 ## What's next
 
 Nothing agreed yet. Ideas to discuss with Freddie: snow on roofs in winter (would mean a winter copy of every building picture, so check memory on the Infinix first), more variety for level 3 towers and level 4 buildings, people walking on piers and beaches.
@@ -319,6 +335,7 @@ src/App.jsx              all interface panels: top pills, category rail and tool
 
 ## Change history
 
+- **0.6.0:** gameplay update. Seasons change power demand, growth, happiness and tourism; tourists bring income and need hotel beds; residents and businesses make requests with deadlines and choices; avenues carry twice the traffic; a metro links distant stations; industry grows as farms, sawmills or tech parks depending on where it is.
 - **0.5.18:** graphics polish. Sharp pictures when zoomed in, brick, siding and panel walls with framed windows and sills, shadows that follow the sun across the streets, street trees, parked cars and benches, wet roads after rain, windows lighting up one by one, walking people and soft grass and sand edges.
 - **0.5.17:** big buildings (2×2 and 3×3) no longer paint over neighbours standing in front of them; they are drawn in slices with the tiles in front. Gulls over landfills are live instead of painted on.
 - **0.5.16:** graphics step 3. Buildings pick from 8 looks, with solar panels, roof gardens, water tanks, balconies with washing, garden fences, cars in drives and shop signs. Seasons: autumn colours and winter frost with bare trees (Menu → Seasons). Waving flags and gulls over the water.
