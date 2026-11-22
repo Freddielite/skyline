@@ -3,8 +3,10 @@ import { T, TERRAIN } from './world.js';
 import { waterfrontArt, WF_HEIGHTS } from './waterfront.js';
 
 const S = 2;               // supersampling for crisp zoom
+const CAST = false;        // baked cast shadows off: buildings' shadows are drawn by the renderer, across roads and neighbours
 const cache = new Map();
-const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w * S; c.height = h * S; return c; };
+const mk = (w, h, sc = S) => { const c = document.createElement('canvas'); c.width = Math.ceil(w * sc); c.height = Math.ceil(h * sc); return c; };
+const HI = 3.2;             // sharper copies for close zoom (see hiRes): drawn on demand, only for what's on screen
 
 function kit(ctx, mode, ox, oy, lit = true, season = 0) {
   const C = (h) => tint(h, mode);
@@ -55,7 +57,7 @@ function kit(ctx, mode, ox, oy, lit = true, season = 0) {
     ctx.save(); ctx.filter = 'blur(2.2px)';
     ctx.fillStyle = `rgba(0,0,0,${mode === 2 ? 0.3 : 0.24})`;
     path([P(x - 0.06, y - 0.06), P(x + w + 0.08, y - 0.06), P(x + w + 0.08, y + d + 0.08), P(x - 0.06, y + d + 0.08)]); ctx.fill();
-    if (mode !== 2) {
+    if (mode !== 2 && CAST) {                  // the long cast shadow is now drawn live by renderer.shadowLayer (it follows the sun)
       const s = Math.min(1.9, (h / 62) * (mode === 1 ? 1.8 : 1)), o = mode === 1 ? 0.22 : 0.17;
       ctx.filter = `blur(${1.6 + s * 1.4}px)`;
       ctx.fillStyle = `rgba(16,28,52,${o})`;
@@ -74,6 +76,7 @@ function kit(ctx, mode, ox, oy, lit = true, season = 0) {
       else ctx.fillStyle = side ? '#18264a' : '#1f2f5a';
       ctx.fill();
       if (on && r < 0.8) { path(a); ctx.save(); ctx.clip(); ctx.fillStyle = 'rgba(120,70,30,.35)'; ctx.fillRect(0, top, 400, (bot - top) * 0.35); ctx.restore(); }  // curtain
+      if (!gl) { path(a); ctx.strokeStyle = 'rgba(10,14,24,.5)'; ctx.lineWidth = 0.8; ctx.stroke(); }
       return;
     }
     const g = ctx.createLinearGradient(0, top, 0, bot);                    // sky reflected in the glass
@@ -82,8 +85,40 @@ function kit(ctx, mode, ox, oy, lit = true, season = 0) {
     ctx.fillStyle = g; ctx.fill();
     if (!gl && r > 0.7) { ctx.save(); path(a); ctx.clip(); ctx.fillStyle = r > 0.85 ? 'rgba(240,232,214,.85)' : 'rgba(250,250,245,.7)'; ctx.fillRect(0, top, 400, (bot - top) * (0.25 + (r - 0.7) * 2)); ctx.restore(); }   // blinds
     else if (!gl && r < 0.12) { path(a); ctx.fillStyle = 'rgba(30,45,70,.45)'; ctx.fill(); }      // an open, dark window
+    if (!gl) { path(a); ctx.strokeStyle = 'rgba(40,44,56,.45)'; ctx.lineWidth = 1.2; ctx.stroke(); }          // the frame's outer edge
     path(a); ctx.strokeStyle = gl ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.8)'; ctx.lineWidth = gl ? 0.4 : 0.7; ctx.stroke();
+    if (!gl) {                                                                                              // a stone sill with its shadow
+      ctx.beginPath(); ctx.moveTo(a[0][0] - 0.6, a[0][1] + 0.9); ctx.lineTo(a[1][0] + 0.6, a[1][1] + 0.9); ctx.strokeStyle = 'rgba(0,0,0,.22)'; ctx.lineWidth = 0.7; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(a[0][0] - 0.6, a[0][1] + 0.2); ctx.lineTo(a[1][0] + 0.6, a[1][1] + 0.2); ctx.strokeStyle = mode === 1 ? '#f2dcc0' : '#f4f1ea'; ctx.lineWidth = 0.9; ctx.stroke();
+    }
     if (!gl) { const m0 = [(a[0][0] + a[1][0]) / 2, (a[0][1] + a[1][1]) / 2], m1 = [(a[2][0] + a[3][0]) / 2, (a[2][1] + a[3][1]) / 2]; ctx.beginPath(); ctx.moveTo(m0[0], m0[1]); ctx.lineTo(m1[0], m1[1]); ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 0.4; ctx.stroke(); }   // mullion
+  };
+  // Wall materials drawn over a box's two visible faces (before its windows): siding, brick, panels or concrete.
+  const mat = (x, y, w, d, h, type, sd = 0, z0 = 0) => {
+    const L = (u, z) => P(u, y + d, z), R = (v, z) => P(x + w, v, z), top = z0 + h;
+    const ln = (a, b, c, lw) => { ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.strokeStyle = c; ctx.lineWidth = lw; ctx.stroke(); };
+    const both = (fn) => { fn(L, x, x + w, 0); fn(R, y, y + d, 1); };
+    if (type === 'siding') both((F, a, b, sde) => { for (let z = z0 + 1.6; z < top - 0.4; z += 2) { ln(F(a, z), F(b, z), sde ? 'rgba(0,0,0,.13)' : 'rgba(0,0,0,.1)', 0.45); ln(F(a, z + 0.45), F(b, z + 0.45), 'rgba(255,255,255,.14)', 0.35); } });
+    else if (type === 'brick') both((F, a, b, sde) => {
+      const bw = 0.055, rows = Math.floor(h / 1.7);
+      for (let r = 0; r < rows; r++) {
+        const z = z0 + r * 1.7; ln(F(a, z), F(b, z), 'rgba(255,255,255,.17)', 0.3);
+        for (let u = a + (r % 2 ? bw / 2 : 0); u < b - 0.01; u += bw) {
+          ln(F(u, z), F(u, z + 1.7), 'rgba(60,30,20,.14)', 0.3);
+          const hv = hash(sd + r, Math.round(u * 100), sde); if (hv > 0.86) { const q = [F(u, z), F(Math.min(b, u + bw), z), F(Math.min(b, u + bw), z + 1.7), F(u, z + 1.7)]; path(q); ctx.fillStyle = hv > 0.93 ? 'rgba(0,0,0,.07)' : 'rgba(255,255,255,.07)'; ctx.fill(); }
+        }
+      }
+    });
+    else if (type === 'panel') both((F, a, b) => { for (let u = a + 0.16; u < b - 0.05; u += 0.16) ln(F(u, z0), F(u, top), 'rgba(0,0,0,.08)', 0.4); for (let z = z0 + 5; z < top; z += 10) ln(F(a, z), F(b, z), 'rgba(255,255,255,.12)', 0.5); });
+    else if (type === 'concrete') both((F, a, b, sde) => {
+      for (let u = a + 0.22; u < b - 0.05; u += 0.22) { ln(F(u, z0), F(u, top), 'rgba(0,0,0,.09)', 0.5); ln(F(u + 0.012, z0), F(u + 0.012, top), 'rgba(255,255,255,.1)', 0.35); }
+      for (let i = 0; i < 26; i++) { const q = F(a + hash(sd, i, 51 + sde) * (b - a), z0 + hash(sd, i, 53 + sde) * h); ctx.fillStyle = i % 2 ? 'rgba(0,0,0,.08)' : 'rgba(255,255,255,.1)'; ctx.fillRect(q[0], q[1], 0.9, 0.9); }
+      ln(F(a, z0 + 1.2), F(b, z0 + 1.2), 'rgba(0,0,0,.12)', 0.8);      // a darker plinth
+    });
+    // a soft darkening toward the ground on both faces, like light bouncing off the pavement less than the sky
+    for (const q of [[L(x, z0), L(x + w, z0), L(x + w, z0 + Math.min(h, 14)), L(x, z0 + Math.min(h, 14))], [R(y, z0), R(y + d, z0), R(y + d, z0 + Math.min(h, 14)), R(y, z0 + Math.min(h, 14))]]) {
+      const g = ctx.createLinearGradient(0, q[0][1], 0, q[2][1]); g.addColorStop(0, 'rgba(20,30,50,.08)'); g.addColorStop(1, 'rgba(20,30,50,0)'); path(q); ctx.fillStyle = g; ctx.fill();
+    }
   };
   const wins = (x, y, w, d, h, sd, o = {}) => {
     const rh = o.rh || 10, wh = o.wh || 5.5, base = o.base || 8, dn = o.dens || 3.5;
@@ -141,7 +176,7 @@ function kit(ctx, mode, ox, oy, lit = true, season = 0) {
   };
   const smoke = () => {};   // smoke is animated at draw time (see smoke.js)
   const store = () => C(mode === 2 && lit ? '#ffd98c' : '#35566b');
-  return { C, P, path, poly, line, circ, ell, faces, box, sh, win, wins, cyl, tree, pad, smoke, ctx, mode, lit, store };
+  return { C, P, path, poly, line, circ, ell, faces, box, sh, win, wins, mat, cyl, tree, pad, smoke, ctx, mode, lit, store };
 }
 
 const WALL = ['#f2e6cd', '#e8cdb5', '#d9e6ef', '#f5dca8', '#e9d9ee'];
@@ -211,6 +246,7 @@ function house(k, v) {
   poly([P(0.48, 0.64), P(0.7, 0.64), P(0.7, 1), P(0.48, 1)], C('#b4b7bd'), null, true);
   k.sh(x, y, w, d, h + rh * 0.6);
   box(x, y, w, d, h, f);
+  k.mat(x, y, w, d, h, v % 3 === 2 ? 'brick' : 'siding', v + 1);
   win([P(x + 0.2, y + d, 7), P(x + 0.3, y + d, 7), P(x + 0.3, y + d, 15), P(x + 0.2, y + d, 15)], hash(v, 1, 1), 0);
   win([P(x + w, y + 0.1, 7), P(x + w, y + 0.2, 7), P(x + w, y + 0.2, 15), P(x + w, y + 0.1, 15)], hash(v, 2, 1), 1);
   win([P(x + w, y + 0.32, 7), P(x + w, y + 0.42, 7), P(x + w, y + 0.42, 15), P(x + w, y + 0.32, 15)], hash(v, 3, 1), 1);
@@ -220,9 +256,12 @@ function house(k, v) {
   poly([P(x + w, y, h), P(x + w, y + d, h), P(x + w, ym, h + rh)], C(f.r), 'v');
   box(x + w * 0.7, y + 0.05, 0.1, 0.1, 18, faces('#9c5a46'), h - 1);
   poly([pos(0, 0), pos(1, 0), pos(1, 1), pos(0, 1)], C(roof), 'v');
-  for (let i = 1; i < 7; i++) { const t = i / 7; line(pos(0, t), pos(1, t), 'rgba(0,0,0,.2)', 0.6); }
+  for (let i = 1; i < 7; i++) { const t = i / 7; line(pos(0, t), pos(1, t), 'rgba(0,0,0,.2)', 0.6); line(pos(0, t - 0.02), pos(1, t - 0.02), 'rgba(255,255,255,.12)', 0.4); }
+  for (let i = 0; i < 7; i++) for (let j = 0; j < 9; j++) { const u = (j + (i % 2 ? 0.5 : 0)) / 9, t0 = i / 7; if (u > 0.98) continue; line(pos(u, t0), pos(u, t0 + 1 / 7), 'rgba(0,0,0,.09)', 0.4); }   // shingles
   if (hash(v, 4, 4) > 0.5) { poly([pos(0.12, 0.2), pos(0.55, 0.2), pos(0.55, 0.82), pos(0.12, 0.82)], C('#1f3a5f')); line(pos(0.335, 0.2), pos(0.335, 0.82), '#9db6d6', 0.5); line(pos(0.12, 0.5), pos(0.55, 0.5), '#9db6d6', 0.5); }
   circ(P(0.14, 0.8), 4.4, C('#3f8f3a')); circ(P(0.9, 0.86), 3.8, C('#4a9a42')); circ(P(0.32, 0.86), 1.7, C('#e86f9b'));
+  for (let i = 0; i < 5; i++) circ(P(0.82 + (i % 2) * 0.05, 0.12 + i * 0.1), 1.3, C(['#e86f9b', '#f4c542', '#ffffff', '#c86fe8', '#e04848'][(i + v) % 5]));   // flowerbed along the side
+  for (let i = 0; i < 4; i++) k.ell(P(0.33, 0.7 + i * 0.075), 2.2, 1.1, C('#cfc7b4'));   // stepping stones to the door
   if (v >= 4) yard(k, v);
 }
 function apartment(k, v) {
@@ -231,6 +270,7 @@ function apartment(k, v) {
   k.pad('#b9d9a0', ['#4d8f3c', '#8fd070']);
   sh(x, y, w, d, h);
   box(x, y, w, d, h, f);
+  k.mat(x, y, w, d, h, v % 2 ? 'panel' : 'brick', v + 3);
   k.wins(x, y, w, d, h, v + 3, { dens: 3.6, rh: 10, wh: 5.5, base: 14 });
   for (let z = 12; z < h; z += 10) line(P(x, y + d, z), P(x + w, y + d, z), 'rgba(0,0,0,.14)', 0.6);
   poly([P(x + 0.08, y + d, 1), P(x + w - 0.08, y + d, 1), P(x + w - 0.08, y + d, 11), P(x + 0.08, y + d, 11)], k.store());
@@ -245,6 +285,7 @@ function tower(k, v) {
   k.pad('#c8cace', null);
   sh(x, y, w, d, h + 14);
   box(x, y, w, d, h, f);
+  k.mat(x, y, w, d, h, 'panel', v + 11);
   k.wins(x, y, w, d, h, v + 11, { dens: 4.2, rh: 8.5, wh: 4.5, base: 14 });
   poly([P(x + 0.08, y + d, 1), P(x + w - 0.08, y + d, 1), P(x + w - 0.08, y + d, 11), P(x + 0.08, y + d, 11)], k.store());
   box(x + 0.12, y + 0.12, w - 0.24, d - 0.24, 14, f, h);
@@ -257,6 +298,7 @@ function shop(k, v) {
   k.pad('#cfd1d4', null);
   sh(x, y, w, d, h);
   box(x, y, w, d, h, { l: ['#e5d9c0', '#d8c3b0', '#c9d3dc', '#e6cdb5'][v % 4], r: shade(['#e5d9c0', '#d8c3b0', '#c9d3dc', '#e6cdb5'][v % 4], 0.76), t: '#a3a9b3' });
+  k.mat(x, y, w, d, h, v % 2 ? 'brick' : 'siding', v + 5);
   poly([P(x + 0.07, y + d, 1), P(x + w - 0.07, y + d, 1), P(x + w - 0.07, y + d, 14), P(x + 0.07, y + d, 14)], k.store());
   for (let i = 1; i < 6; i++) { const u = lerp(x + 0.07, x + w - 0.07, i / 6); line(P(u, y + d, 1), P(u, y + d, 14), 'rgba(255,255,255,.45)', 0.7); }
   poly([P(x + 0.04, y + d, 17), P(x + w - 0.04, y + d, 17), P(x + w - 0.04, y + d + 0.14, 11), P(x + 0.04, y + d + 0.14, 11)], C(AWN[(v + 1) % 5]));
@@ -277,6 +319,7 @@ function office(k, v) {
   k.pad('#cfd1d4', null);
   sh(x, y, w, d, h);
   box(x, y, w, d, h, f);
+  k.mat(x, y, w, d, h, 'panel', v + 21);
   k.wins(x, y, w, d, h, v + 21, { dens: 3.8, rh: 9, wh: 5, base: 16 });
   poly([P(x + 0.07, y + d, 1), P(x + w - 0.07, y + d, 1), P(x + w - 0.07, y + d, 12), P(x + 0.07, y + d, 12)], k.store());
   poly([P(x + 0.07, y + d, 14), P(x + w - 0.07, y + d, 14), P(x + w - 0.07, y + d + 0.13, 10), P(x + 0.07, y + d + 0.13, 10)], C(AWN[(v + 2) % 5]));
@@ -305,6 +348,7 @@ function warehouse(k, v) {
   k.pad('#a9a493', ['#8a8574', '#bdb8a6']);
   sh(x, y, w, d, h);
   box(x, y, w, d, h, { l: col, r: shade(col, 0.76), t: '#8f98a6' });
+  k.mat(x, y, w, d, h, 'concrete', v + 31);
   for (let i = 1; i < 10; i++) { const u = x + w * i / 10; line(P(u, y, h), P(u, y + d, h), 'rgba(0,0,0,.2)', 0.7); }
   for (let i = 0; i < 3; i++) {
     const u = x + w * (i + 0.2) / 3, u2 = x + w * (i + 0.7) / 3;
@@ -319,6 +363,7 @@ function factory(k, v) {
   k.pad('#a9a493', ['#8a8574', '#bdb8a6']);
   sh(0.1, 0.12, 0.6, 0.66, 38);
   box(0.1, 0.12, 0.6, 0.66, 38, faces(['#b8856a', '#a87a62', '#b58f72', '#9c7160'][v % 4]));
+  k.mat(0.1, 0.12, 0.6, 0.66, 38, 'brick', v + 41);
   k.wins(0.1, 0.12, 0.6, 0.66, 38, v + 41, { dens: 2.6, rh: 10, wh: 5, base: 9 });
   poly([P(0.18, 0.78, 0), P(0.42, 0.78, 0), P(0.42, 0.78, 13), P(0.18, 0.78, 13)], C('#4a5568'));
   box(0.74, 0.14, 0.2, 0.2, 80, faces('#a2493a'));
@@ -430,12 +475,12 @@ const BUILD = {
 const HEIGHTS = { [T.RES]: [100, 150, 230, 290], [T.COM]: [110, 170, 250, 330], [T.IND]: [110, 150, 220, 130] };
 const PAD = { [T.RES]: '#a9dc8e', [T.COM]: '#cfd1d4', [T.IND]: '#a9a493' };
 
-function make(w, h, ox, oy, fn, mode, lit = true, season = 0) {
-  const c = mk(w, h), ctx = c.getContext('2d');
-  ctx.scale(S, S);
+function make(w, h, ox, oy, fn, mode, lit = true, season = 0, sc = S) {
+  const c = mk(w, h, sc), ctx = c.getContext('2d');
+  ctx.scale(sc, sc);
   const k = kit(ctx, mode, ox, oy, lit, season);
   fn(k);
-  return { c, ox, oy, S };
+  return { c, ox, oy, S: sc };
 }
 function memo(key, fn) { let v = cache.get(key); if (!v) { const t0 = performance.now(); v = fn(); cache.set(key, v); spriteBudget.made++; spriteBudget.left -= performance.now() - t0; } return v; }
 // Drawing a building picture for the first time takes a few milliseconds on a slow phone. While the map is being
@@ -451,16 +496,28 @@ export function getSeason() { return SEASON; }
 function seasonal(key, fn) { const v = memoLater(key + 's' + SEASON, fn); if (v) return v; for (let q = 0; q < 3; q++) { const o = cache.get(key + 's' + q); if (o) return o; } return null; }
 const SEASON_TINT = [null, ['#c8b26a', 0.28], ['#e4e9e6', 0.58]];
 const gtint = (c) => (SEASON_TINT[SEASON] ? mix(c, SEASON_TINT[SEASON][0], SEASON_TINT[SEASON][1]) : c);
+// Close-zoom copies are big, so only the most recently used few are kept (the rest are dropped and remade if needed).
+const hiKeys = [];
+function hiRes(key, fn) {
+  const k2 = key + 'H', v = cache.get(k2);
+  if (v) { v.used = performance.now(); return v; }
+  if (spriteBudget.left <= 0) return null;
+  const r = memo(k2, fn); r.used = performance.now(); hiKeys.push(k2);
+  if (hiKeys.length > 36) { hiKeys.sort((a, b) => (cache.get(a) ? cache.get(a).used : 0) - (cache.get(b) ? cache.get(b).used : 0)); for (const old of hiKeys.splice(0, hiKeys.length - 28)) cache.delete(old); }
+  return r;
+}
 function memoLater(key, fn) { const v = cache.get(key); if (v) return v; if (spriteBudget.left <= 0) return null; return memo(key, fn); }
 
 // shore: 0 inland, or the waterfront style (SHORE.POND / LAKE / SEA) from world.shore
-export function buildingSprite(kind, level, variant, mode, lit = true, shore = 0) {
+export function buildingSprite(kind, level, variant, mode, lit = true, shore = 0, hi = false) {
   lit = mode === 2 ? !!lit : true;
-  return memoLater(`b${kind}${level}${variant}${mode}${lit ? 1 : 0}w${shore}`, () => {
+  const key = `b${kind}${level}${variant}${mode}${lit ? 1 : 0}w${shore}`;
+  const fnMake = (sc) => () => {
     const H = shore ? WF_HEIGHTS[kind][level - 1] : HEIGHTS[kind][level - 1];
     const fn = shore ? waterfrontArt(shore, kind, level) : BUILD[kind][level - 1];
-    return make(160, H, 80, H - 64, (k) => fn(k, variant), mode, lit);
-  });
+    return make(160, H, 80, H - 64, (k) => fn(k, variant), mode, lit, 0, sc);
+  };
+  return hi ? hiRes(key, fnMake(HI)) || memoLater(key, fnMake(S)) : memoLater(key, fnMake(S));
 }
 export function parkSprite(variant, mode) {
   const se = SEASON;
@@ -1091,14 +1148,15 @@ function busTerminal(k) {
 const SVC_SPR_X = { 21: [busStop, 1, 1, 70], 22: [busTerminal, 2, 2, 100], 19: [pumpStation, 2, 2, 120], 20: [treatmentPlant, 3, 3, 130], 8: [policeHQ, 2, 2, 150], 9: [fireHQ, 2, 2, 170], 10: [hospital, 2, 2, 170], 11: [university, 3, 3, 190], 12: [plaza, 2, 2, 100], 13: [library, 1, 1, 100], 14: [museum, 2, 2, 130], 15: [stadium, 3, 3, 150], 16: [dump, 2, 2, 100], 17: [recycle, 2, 2, 100], 18: [wte, 2, 2, 170] };
 const SVC_SPR_SHORE = { 23: [pier, 1, 1, 70, 2], 24: [beach, 2, 2, 60, 1], 25: [marina, 2, 2, 80, 2], 26: [ferryPier, 1, 1, 70, 1] };   // last number: tiles the picture reaches beyond its lot
 const SVC_SPR = { ...SVC_SPR_SHORE, 1: [coalPlant, 2, 2, 190], 2: [wind, 1, 1, 130], 3: [waterTower, 1, 1, 130], 4: [police, 1, 1, 100], 5: [fireStation, 1, 1, 130], 6: [clinic, 1, 1, 110], 7: [school, 1, 1, 130], ...SVC_SPR_X };
-export function serviceSprite(id, mode, lit = true, face = 0) {
+export function serviceSprite(id, mode, lit = true, face = 0, hi = false) {
   lit = mode === 2 ? !!lit : true;
-  const e = SVC_SPR[id], pad = e[4] || 0;
-  return memoLater(`s${id}${mode}${lit ? 1 : 0}${pad ? 'f' + face : ''}`, () => {
+  const e = SVC_SPR[id], pad = e[4] || 0, key = `s${id}${mode}${lit ? 1 : 0}${pad ? 'f' + face : ''}`;
+  const fnMake = (sc) => () => {
     const [fn, fw0, fd0, hh] = e, fw = fw0 + 2 * pad, fd = fd0 + 2 * pad;     // shore buildings get a bigger canvas for the part over the water
     const W = (fw + fd) * 32 + 96, ox = fd * 32 + 32, H = hh + (fw + fd) * 16 + 34, oy = H - (fw + fd) * 16 - 34 + pad * 32;
-    return make(W, H, ox, oy, (k) => fn(k, face), mode, lit);
-  });
+    return make(W, H, ox, oy, (k) => fn(k, face), mode, lit, 0, (fw0 + fd0) * 32 * sc > 900 ? Math.min(sc, 2.6) : sc);   // the biggest (3x3) stay a little smaller
+  };
+  return hi ? hiRes(key, fnMake(HI)) || memoLater(key, fnMake(S)) : memoLater(key, fnMake(S));
 }
 
 // Smaller copies of a sprite for zoomed-out drawing (level 1 = half size, 2 = quarter size).

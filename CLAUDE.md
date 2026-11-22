@@ -2,7 +2,7 @@
 
 Isometric city builder for Android. React + Vite + canvas, packaged with Capacitor.
 Project folder on Freddie's machine: `/home/freddielite/Downloads/skyline`
-App ID: `com.wyntek.skyline` · Current version: **0.5.17**
+App ID: `com.wyntek.skyline` · Current version: **0.5.18**
 
 This file is the handover: what has been built, how to push it to the phone, and the rules for future changes.
 Anyone (person or AI assistant) working on this project should read it first.
@@ -12,7 +12,7 @@ Anyone (person or AI assistant) working on this project should read it first.
 ## Rules for every change
 
 1. **Always end with the push command.** Every fix or feature, however small, ends with the full push command below, written out exactly, so it can be copied and run without looking anything up.
-2. **Always bump the version** in `package.json` (0.5.17 → 0.5.18 and so on). The game shows "Updated to version X" on first launch and the version in Menu, which is how we confirm the phone really got the new build.
+2. **Always bump the version** in `package.json` (0.5.18 → 0.5.19 and so on). The game shows "Updated to version X" on first launch and the version in Menu, which is how we confirm the phone really got the new build.
 3. **Deliver the whole project as `skyline.zip`**, with the files at the top level of the zip (no `skyline/` folder inside), and without `node_modules/`, `dist/` or `android/`.
 4. **Add a short entry to the change history** at the bottom of this file and to `README.md`.
 5. **Check performance on a slow phone.** The test phone is an Infinix HOT. Do heavy work once and cache it in sprites. The main view is drawn on the GPU (see "Drawing engine" below): `ctx.filter` (blur) does nothing there, and additive glow (`'lighter'`) is free.
@@ -45,7 +45,7 @@ The `&&` means each step only runs if the one before succeeded. If one fails, th
 
 ## Troubleshooting
 
-**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.5.17 · built (date) UTC`.
+**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.5.18 · built (date) UTC`.
 
 **Check the project folder has the new code:**
 ```bash
@@ -112,6 +112,7 @@ adb install android/app/build/outputs/apk/debug/app-debug.apk
 | Building detail | Zone a neighbourhood and let it grow (new buildings pick from 8 looks). Zoom in: some flat roofs have solar panels, a roof garden, a water tank with air-conditioning units, or a plant room with vents; some apartments have balconies with washing; some houses have a hedge, picket fence and a car in the drive; some shops have a rooftop sign and bins. Older cities keep their buildings until they grow again. |
 | Seasons | Menu → Seasons → Follow the calendar. Test tools → End month until September: trees turn orange, red and yellow, grass goes golden. December: bare trees with snow on the branches, frosted grass, snow on pine branches, chimney smoke all day. March: green again. Always summer turns it off. |
 | Small life | Police HQ, Fire HQ and University flags wave (still on Smooth). Gulls circle over harbors, piers and beaches (not on Smooth). |
+| Graphics 0.5.18 | Zoom all the way in on Pretty: buildings stay sharp (close-zoom copies). Walls show siding, brick, panels or concrete; windows have frames and sills; house roofs have shingles, lots have flowerbeds and stepping stones. Through the day (Menu → Time of day, or watch Auto) shadows swing from down-right in the morning, short at noon, to long down-left at sunset, across roads and open ground. Streets: trees along the pavement by homes, cars parked by shops and industry, benches and bins by parks. Rain: roads go dark and shiny and dry slowly. After dark windows light up one by one, and some go out late at night. People's legs swing as they walk. Where grass meets sand the edge is soft. |
 | Moving vans | Set taxes to 20% so people leave: cars with boxes on the roof drive from the homes to the highway and fade out at the map edge. When homes grow, vans drive in from the highway. Homes not linked to the highway send no vans. |
 
 ---
@@ -250,6 +251,17 @@ Freddie found the interface covered too much of the map (about 40% in landscape)
 Freddie saw the landfill painted over the warehouse standing in front of it. A building bigger than one tile used to be drawn whole when the loop reached its front tile, so anything on a neighbouring tile that is further forward but earlier in the drawing order (same or lower x + y) got painted over. Now `renderer.slices()` draws each multi-tile service building in vertical half-tile strips, each strip with the frontmost footprint tile it crosses (`sliceOf(w, d)`, cached per size; the picture's side margins go with the outermost columns). Construction sites are still drawn whole at the front tile. The landfill's painted gulls are gone (they looked stuck on the building behind); live gulls circle over landfills instead.
 - **How to test:** put industry or homes on the tiles left-front and right-front of a landfill, hospital or other 2×2/3×3 building: they cover it where they stand in front, and it covers what is behind it.
 
+## Graphics polish (built in 0.5.18)
+
+- **Close-zoom pictures:** when `zoom × resolution > 2.2` (and not Smooth), buildings and service buildings use copies drawn at 3.2× instead of 2× (`hiRes()` in `sprites.js`; the biggest 3×3 ones at 2.6×). Only the 28–36 most recently used are kept, so memory stays bounded; check the Infinix with the test tools while zoomed in.
+- **Materials:** `kit.mat()` draws siding, brick (staggered joints, a few lighter and darker bricks), panels or concrete (seams, speckle, plinth) over a box's two visible faces, plus a soft darkening near the ground. Used by houses, apartments, towers, shops, offices, warehouses and factories. Windows (`kit.win`) get a dark outer frame and a stone sill with a shadow. House roofs get shingles; every house lot has a flowerbed and stepping stones.
+- **Live shadows:** baked cast shadows are off (`CAST` in `sprites.js`; the contact shadow at the foot of each building stays). `renderer.shadowLayer()` draws every building as a box swept away from the sun (a hexagon, no allocations) into a canvas at a quarter of the screen size, then lays it over the ground once at one opacity, so overlaps don't darken and edges come out soft. The sun (`renderer.sun()`) follows the day: shadows to +x at sunrise, short at noon, long to +y at sunset, none at night. Heights come from `REAL_H` / `SVC_H` in `construction.js`. Lots draw their own lawn over it, so shadows show on roads, water and open land.
+- **Street life** (`renderer.street()`, per road tile in the object pass, placed by hash): street trees (seasonal tree pictures at 62%) on the pavement by homes, parked cars (`parkedSprite`, 6 colours × 2 directions) by shops and industry, a bench and bin (`benchSprite`) by parks. Skipped when zoomed far out.
+- **Wet roads:** `renderer.wet` rises with rain and dries over about a minute; road tiles get `wetSprite` (darker, with streaks of reflected sky; warm at night). Not drawn into the zoomed-out ground cache.
+- **Lights after dark:** `renderer.litFrac` (from the clock) decides per building, by hash, whether its night picture has lit windows: they come on one by one over the first part of the night and some go out late.
+- **Walking:** people's legs swing (`renderer.person`).
+- **Soft ground edges:** `renderer.edgeSprite()` feathers sand into grass and grass into sand along tile edges (cached per side, lighting and season), also inside the ground cache.
+
 ## What's next
 
 Nothing agreed yet. Ideas to discuss with Freddie: snow on roofs in winter (would mean a winter copy of every building picture, so check memory on the Infinix first), more variety for level 3 towers and level 4 buildings, people walking on piers and beaches.
@@ -307,6 +319,7 @@ src/App.jsx              all interface panels: top pills, category rail and tool
 
 ## Change history
 
+- **0.5.18:** graphics polish. Sharp pictures when zoomed in, brick, siding and panel walls with framed windows and sills, shadows that follow the sun across the streets, street trees, parked cars and benches, wet roads after rain, windows lighting up one by one, walking people and soft grass and sand edges.
 - **0.5.17:** big buildings (2×2 and 3×3) no longer paint over neighbours standing in front of them; they are drawn in slices with the tiles in front. Gulls over landfills are live instead of painted on.
 - **0.5.16:** graphics step 3. Buildings pick from 8 looks, with solar panels, roof gardens, water tanks, balconies with washing, garden fences, cars in drives and shop signs. Seasons: autumn colours and winter frost with bare trees (Menu → Seasons). Waving flags and gulls over the water.
 - **0.5.15:** shore buildings. Fishing pier, beach, marina (with yachts) and ferry pier, each facing the water and reaching out over it. Two ferry piers on the same water run a ferry and extend commute reach like buses. Bridges and ships keep clear of them.

@@ -3,6 +3,7 @@ import { N, T, TERRAIN } from './world.js';
 import { SVC_FLAGS, getSeason, spriteBudget, buildingSprite, parkSprite, zoneSprite, terrainSprite, treeSprite, roadSprite, serviceSprite, mip, bridgeUnder, bridgeTop } from './sprites.js';
 import { tint } from './util.js';
 import { BT } from './buildings.js';
+import { REAL_H, SVC_H } from './construction.js';
 import { drawConstruction } from './construction.js';
 import { drawSmoke, SMOKE } from './smoke.js';
 import { WF_SMOKE } from './waterfront.js';
@@ -22,6 +23,7 @@ function sliceOf(fw, fd) {
   }
   SLICES.set(key, out); return out;
 }
+const D4R = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 // harbor ship colours: hulls, containers, and the loads barges carry (sand, coal, gravel, clay, rubble)
 const HULL = [[38, 52, 78], [128, 44, 36], [34, 78, 62], [42, 42, 48], [26, 92, 120]];
 const BOX = [[196, 70, 52], [52, 110, 176], [222, 168, 52], [64, 148, 96], [200, 200, 205], [150, 74, 140]];
@@ -138,6 +140,14 @@ export class Renderer {
     // ground pass: one continuous water surface, then land, roads and empty lots on top
     if (this.shoreFor !== w) this.shoreMask(w);
     const zd = z * this.dpr, lvl = zd <= 0.5 ? 2 : zd <= 1 ? 1 : 0;      // smaller sprite copies when zoomed out
+    const hi = zd > 2.2 && !g.fast;                                        // close up: sharper copies of buildings
+    { // wet roads after rain (dry slowly), and windows that light up one by one after dark and go out late at night
+      const now = performance.now(), dt = Math.min(0.2, ((now - (this.wetT || now)) / 1000)); this.wetT = now;
+      const rain = g.ambient.weather.k, want = rain > 0.15 ? Math.min(0.75, rain) : 0;
+      this.wet = (this.wet || 0) + (want - (this.wet || 0)) * Math.min(1, dt * (want > (this.wet || 0) ? 0.5 : 0.025));
+      const ph = (g.clock / 180) % 1;
+      this.litFrac = g.timeSetting !== 'auto' ? 1 : ph < 0.62 || ph > 0.9 ? 1 : ph < 0.67 ? 0.2 + (ph - 0.62) / 0.05 * 0.8 : ph > 0.84 ? 1 - (ph - 0.84) / 0.06 * 0.5 : 1;
+    }
     this.drawWater(ctx, w, z, cx, cy, t, mode);
     if (ctx.gpu && !g.fast && zd >= 0.5) this.reflections(ctx, g, w, z, cx, cy, mode, lvl, top, mX);   // land drawn next hides what isn't over water
     if (zd <= 0.7 && this.updateGround(w, mode)) this.drawGroundCache(ctx, z, cx, cy, zd);   // zoomed out: the whole ground is one cached image
@@ -145,7 +155,9 @@ export class Renderer {
       const X = sx(x, y), Y = sy(x, y);
       if (X < -mX || X > W + mX || Y < -34 * z || Y > H) continue;
       this.groundTile(ctx, w, x, y, X, Y, z, mode, lvl);
+      if (this.wet > 0.03 && w.kind[y * N + x] === T.ROAD && w.terrain[y * N + x] !== TERRAIN.WATER) { ctx.globalAlpha = this.wet; ctx.drawImage(this.wetSprite(mode), X - 32 * z, Y, 64 * z, 32 * z); ctx.globalAlpha = 1; }
     }
+    this.shadowLayer(ctx, g, w, z, cx, cy, mode, W, H, top);       // every building's shadow, cast across roads and open ground by the sun
     // life on the water, then the objects pass in painter order
     this.boats(ctx, g, z, cx, cy, t, mode);
     const badges = [], smokeList = [], neon = [], wind = 0.7 + 0.5 * Math.sin(t * 0.07);
@@ -166,7 +178,7 @@ export class Renderer {
         }
         else if (k === T.PARK) { const sp = mip(parkSprite(w.variant[i] % 4, mode), lvl), site = g.sites.get(i); if (!sp) { /* next frame */ } else if (site) drawConstruction(ctx, site, X, Y, z, mode, t, sp, null); else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
         else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) {
-          const shr = w.shore[i], sp = mip(buildingSprite(k, w.level[i], w.variant[i] % 8, mode, g.sim.pw[i] === 1, shr), lvl);
+          const shr = w.shore[i], sp = mip(buildingSprite(k, w.level[i], w.variant[i] % 8, mode, g.sim.pw[i] === 1 && (mode !== 2 || hash(x, y, 17) < this.litFrac), shr, hi), lvl);
           const site = g.sites.get(i), lv = w.level[i];
           if (mode === 2 && ctx.gpu && !g.fast && g.sim.pw[i] === 1 && !site) {
             const r = (40 + lv * 10) * z; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.2 + lv * 0.03;
@@ -189,11 +201,11 @@ export class Renderer {
           // A building bigger than one tile is drawn in slices, each with the tile in front of it, so a neighbour standing
           // in front (a warehouse beside a landfill, say) covers it instead of the whole picture being painted over the neighbour.
           if (multi && !g.sites.has((y - dy) * N + (x - dx))) {
-            const ax = x - dx, ay = y - dy, sp = mip(serviceSprite(bt, mode, def.power ? true : g.sim.pw[ay * N + ax] === 1, def.reach ? w.variant[ay * N + ax] : 0), lvl);
+            const ax = x - dx, ay = y - dy, sp = mip(serviceSprite(bt, mode, def.power ? true : g.sim.pw[ay * N + ax] === 1, def.reach ? w.variant[ay * N + ax] : 0, hi), lvl);
             if (sp) this.slices(ctx, sp, sx(ax, ay), sy(ax, ay), z, sliceOf(def.w, def.d)[dy * def.w + dx]);
           }
           if (last) {
-            const ax = x - dx, ay = y - dy, AX = sx(ax, ay), AY = sy(ax, ay), sp = mip(serviceSprite(bt, mode, def.power ? true : g.sim.pw[ay * N + ax] === 1, def.reach ? w.variant[ay * N + ax] : 0), lvl);
+            const ax = x - dx, ay = y - dy, AX = sx(ax, ay), AY = sy(ax, ay), sp = mip(serviceSprite(bt, mode, def.power ? true : g.sim.pw[ay * N + ax] === 1, def.reach ? w.variant[ay * N + ax] : 0, hi), lvl);
             const site = g.sites.get(ay * N + ax);
             if (!sp) { /* next frame */ }
             else if (site) drawConstruction(ctx, site, AX, AY, z, mode, t, sp, null);
@@ -212,6 +224,7 @@ export class Renderer {
           ctx.strokeStyle = '#3a3d44'; ctx.lineWidth = 1.4 * z; ctx.beginPath(); ctx.moveTo(X, Y + 16 * z); ctx.lineTo(X, Y + 16 * z - 16 * z); ctx.stroke();
           ctx.fillStyle = '#fff2b8'; ctx.beginPath(); ctx.arc(X, Y + 16 * z - 17 * z, 2 * z, 0, 6.3); ctx.fill();
         }
+        if (z >= 0.5 && k === T.ROAD && !w.hw[i] && w.terrain[i] !== TERRAIN.WATER) this.street(ctx, w, x, y, X, Y, z, mode, lvl);
         if (z >= 0.5 && k === T.ROAD && isSignal(w, x, y)) this.signal(ctx, x, y, X, Y, z, g.clock, mode);
         if (k === T.ROAD && w.edgeOpen(x, y)) this.highwaySign(ctx, X, Y, z, mode);
         const rub = g.disasters.rubble.get(i);
@@ -454,6 +467,106 @@ export class Renderer {
     }
   }
 
+  // A band of the neighbour's ground (sand or grass) feathered in from one edge of a tile, with a few ragged blobs.
+  edgeSprite(nt, side, mode, season) {
+    const key = nt * 64 + side * 16 + mode * 4 + season; this.edges = this.edges || new Map(); let c = this.edges.get(key); if (c) return c;
+    c = document.createElement('canvas'); c.width = 128; c.height = 64; const x = c.getContext('2d');
+    x.beginPath(); x.moveTo(64, 0); x.lineTo(128, 32); x.lineTo(64, 64); x.lineTo(0, 32); x.closePath(); x.clip();
+    const E = [[[64, 0], [128, 32]], [[128, 32], [64, 64]], [[64, 64], [0, 32]], [[0, 32], [64, 0]]][side], mx = (E[0][0] + E[1][0]) / 2, my = (E[0][1] + E[1][1]) / 2;
+    const col = nt === TERRAIN.SAND ? (season === 2 ? [235, 227, 200] : [227, 211, 158]) : season === 2 ? [200, 212, 196] : season === 1 ? [184, 186, 110] : [150, 196, 112];
+    const dk = mode === 2 ? 0.5 : mode === 1 ? 0.88 : 1, rgb = (a) => `rgba(${(col[0] * dk) | 0},${(col[1] * dk) | 0},${(col[2] * dk) | 0},${a})`;
+    const g = x.createLinearGradient(mx, my, 64, 32); g.addColorStop(0, rgb(0.85)); g.addColorStop(0.45, rgb(0)); x.fillStyle = g; x.fillRect(0, 0, 128, 64);
+    for (let i = 0; i < 6; i++) { const u = 0.1 + i * 0.16, px = E[0][0] + (E[1][0] - E[0][0]) * u, py = E[0][1] + (E[1][1] - E[0][1]) * u; x.fillStyle = rgb(0.55); x.beginPath(); x.ellipse(px + (64 - px) * 0.08, py + (32 - py) * 0.08, 7 + (i % 3) * 3, 3 + (i % 2) * 1.5, 0, 0, 6.3); x.fill(); }
+    this.edges.set(key, c); return c;
+  }
+  // Where the sun is: shadow direction in tile units (dx, dy) per tile of height, and how dark. Null at night.
+  sun(g, mode) {
+    if (mode === 2) return null;
+    let ph = (g.clock / 180) % 1;
+    if (g.timeSetting !== 'auto') ph = mode === 1 ? 0.53 : 0.2;
+    const t = ph >= 0.9 ? 0 : Math.min(1, ph / 0.55), th = t * Math.PI / 2;            // sunrise: shadows to +x; sunset: to +y
+    const len = Math.min(3, 0.35 + 2.4 * Math.pow(Math.abs(t - 0.5) * 2, 2));
+    return { dx: Math.cos(th) * len, dy: Math.sin(th) * len, a: mode === 1 ? 0.38 : 0.32 };
+  }
+  // All building shadows go into one small canvas as solid shapes, then onto the view at once with one opacity, so where
+  // shadows overlap they don't get darker, and the small size makes their edges soft for free. Drawn after the ground and
+  // before the buildings: shadows fall on roads, water and open land.
+  shadowLayer(ctx, g, w, z, cx, cy, mode, W, H, top) {
+    const sun = this.sun(g, mode); if (!sun || z < 0.3) return;
+    const q = 0.25, cw = Math.max(8, Math.ceil(W * q)), ch = Math.max(8, Math.ceil(H * q));
+    let c = this.shc; if (!c) { c = this.shc = document.createElement('canvas'); c._solo = true; this.shx = c.getContext('2d'); }
+    if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+    const x2 = this.shx; x2.setTransform(1, 0, 0, 1, 0, 0); x2.clearRect(0, 0, cw, ch); x2.fillStyle = '#0a1426'; x2.beginPath();
+    let any = false;
+    const pt = (u, v, first) => { const X = ((u - v) * 32 * z + cx) * q, Y = ((u + v) * 16 * z + cy) * q; if (first) x2.moveTo(X, Y); else x2.lineTo(X, Y); };
+    const add = (x0, y0, fw, fd, h) => {                 // a box swept away from the sun: with dx, dy >= 0 that is always this hexagon
+      const k = Math.min(6, h / 32), ox = sun.dx * k, oy = sun.dy * k, x1 = x0 + fw, y1 = y0 + fd;
+      pt(x0, y0, true); pt(x1, y0); pt(x1 + ox, y0 + oy); pt(x1 + ox, y1 + oy); pt(x0 + ox, y1 + oy); pt(x0, y1); x2.closePath(); any = true;
+    };
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const X = (x - y) * 32 * z + cx, Y = (x + y) * 16 * z + cy;
+      if (X < -260 * z || X > W + 260 * z || Y < -260 * z || Y > H + 40 * z) continue;
+      const i = y * N + x, k = w.kind[i];
+      if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i] && !g.sites.has(i)) add(x + 0.12, y + 0.12, 0.76, 0.76, REAL_H[k][w.level[i] - 1] * 0.8);
+      else if (k === T.SVC && w.bo[i] === 0 && !g.sites.has(i)) { const def = BT[w.bt[i]]; if (!def.reach) add(x + 0.1, y + 0.1, def.w - 0.2, def.d - 0.2, (SVC_H[def.key] || 40) * 0.7); }
+    }
+    if (!any) return;
+    x2.fill(); touched(c);
+    ctx.globalAlpha = sun.a; ctx.drawImage(c, 0, 0, cw / q, ch / q); ctx.globalAlpha = 1;
+  }
+  // Street life on a road tile: trees along the pavement in front of homes, cars parked at the kerb by shops and offices,
+  // benches and bins by parks. Placed by a hash of the tile, so they stay put.
+  street(ctx, w, x, y, X, Y, z, mode, lvl) {
+    const cxT = X, cyT = Y + 16 * z;
+    for (let s = 0; s < 4; s++) {
+      const [dx, dy] = D4R[s], nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+      const q = ny * N + nx, nk = w.kind[q]; if (!(nk === T.PARK || ((nk === T.RES || nk === T.COM || nk === T.IND) && w.level[q]))) continue;
+      const r = hash(x * 4 + s, y, 61), side = (hash(x, y * 4 + s, 62) - 0.5) * 0.5;
+      const px = dx * 0.4 + (dy ? side : 0), py = dy * 0.4 + (dx ? side : 0), PX = cxT + (px - py) * 32 * z, PY = cyT + (px + py) * 16 * z;
+      if (nk === T.RES && r < 0.55) {
+        const sp = mip(treeSprite([1, 4, 1, 2][Math.floor(r * 40) % 4], mode), lvl);
+        if (sp) { const sc = 0.62; ctx.drawImage(sp.c, PX - sp.ox * z * sc, PY - sp.oy * z * sc, (sp.c.width / sp.S) * z * sc, (sp.c.height / sp.S) * z * sc); }
+      } else if ((nk === T.COM || nk === T.IND) && r < 0.5) {
+        const pc = this.parkedSprite(Math.floor(r * 50) % 6, dx !== 0 ? 1 : 0, mode); const qx = dx * 0.34 + (dy ? side : 0), qy = dy * 0.34 + (dx ? side : 0);
+        ctx.drawImage(pc, cxT + (qx - qy) * 32 * z - 9 * z, cyT + (qx + qy) * 16 * z - 9 * z, 18 * z, 13 * z);
+      } else if (nk === T.PARK && r < 0.4) ctx.drawImage(this.benchSprite(mode), PX - 7 * z, PY - 7 * z, 14 * z, 10 * z);
+    }
+  }
+  parkedSprite(col, axis, mode) {
+    const key = col * 8 + axis * 4 + mode; this.parked = this.parked || new Map(); let c = this.parked.get(key); if (c) return c;
+    c = document.createElement('canvas'); c.width = 36; c.height = 26; const x = c.getContext('2d'); x.scale(2, 2);
+    const base = ['#d9534a', '#3d6fb0', '#f2f2f2', '#2c3440', '#e0b526', '#4f9a6a'][col], d = mode === 2 ? 0.55 : mode === 1 ? 0.85 : 1;
+    const sh = (hx, f) => { const n = parseInt(hx.slice(1), 16); return `rgb(${(((n >> 16) & 255) * f * d) | 0},${(((n >> 8) & 255) * f * d) | 0},${((n & 255) * f * d) | 0})`; };
+    const P = (u, v, h = 0) => [9 + (u - v) * 8, 6 + (u + v) * 4 - h];
+    const L = axis ? 0.85 : 0.4, Wd = axis ? 0.4 : 0.85, u0 = -L / 2, v0 = -Wd / 2;
+    const poly = (a, f) => { x.beginPath(); x.moveTo(a[0][0], a[0][1]); for (const p of a.slice(1)) x.lineTo(p[0], p[1]); x.closePath(); x.fillStyle = f; x.fill(); };
+    x.fillStyle = 'rgba(0,0,0,.22)'; x.beginPath(); x.ellipse(10, 7.5, 7, 3.2, 0, 0, 6.3); x.fill();
+    const box = (a, b, c2, dd, h0, h1, f) => { poly([P(a, b + dd, h0), P(a + c2, b + dd, h0), P(a + c2, b + dd, h1), P(a, b + dd, h1)], sh(f, 1)); poly([P(a + c2, b, h0), P(a + c2, b + dd, h0), P(a + c2, b + dd, h1), P(a + c2, b, h1)], sh(f, 0.75)); poly([P(a, b, h1), P(a + c2, b, h1), P(a + c2, b + dd, h1), P(a, b + dd, h1)], sh(f, 1.12)); };
+    box(u0, v0, L, Wd, 0.6, 2.6, base);
+    box(u0 + (axis ? 0.2 : 0.06), v0 + (axis ? 0.06 : 0.2), axis ? L * 0.5 : L - 0.12, axis ? Wd - 0.12 : Wd * 0.5, 2.6, 4.4, base);
+    poly([P(u0 + (axis ? 0.2 : 0.06), v0 + (axis ? 0.06 : 0.2) + (axis ? Wd - 0.12 : Wd * 0.5), 2.8), P(u0 + (axis ? 0.2 + L * 0.5 : L - 0.06), v0 + (axis ? 0.06 : 0.2) + (axis ? Wd - 0.12 : Wd * 0.5), 2.8), P(u0 + (axis ? 0.2 + L * 0.5 : L - 0.06), v0 + (axis ? 0.06 : 0.2) + (axis ? Wd - 0.12 : Wd * 0.5), 4.1), P(u0 + (axis ? 0.2 : 0.06), v0 + (axis ? 0.06 : 0.2) + (axis ? Wd - 0.12 : Wd * 0.5), 4.1)], mode === 2 ? 'rgb(40,52,80)' : 'rgb(120,160,190)');
+    this.parked.set(key, c); return c;
+  }
+  benchSprite(mode) {
+    this.bench = this.bench || []; if (this.bench[mode]) return this.bench[mode];
+    const c = document.createElement('canvas'); c.width = 28; c.height = 20; const x = c.getContext('2d'); x.scale(2, 2);
+    const d = mode === 2 ? 0.55 : mode === 1 ? 0.85 : 1, wood = `rgb(${(150 * d) | 0},${(102 * d) | 0},${(60 * d) | 0})`;
+    x.fillStyle = 'rgba(0,0,0,.18)'; x.beginPath(); x.ellipse(7.5, 7.5, 6, 2, 0, 0, 6.3); x.fill();
+    x.strokeStyle = `rgb(${(60 * d) | 0},${(64 * d) | 0},${(72 * d) | 0})`; x.lineWidth = 0.8; x.beginPath(); x.moveTo(3, 7); x.lineTo(3, 4.5); x.moveTo(11, 7); x.lineTo(11, 4.5); x.stroke();
+    x.fillStyle = wood; x.fillRect(2, 3.6, 10, 1.4); x.fillRect(2, 1.4, 10, 1.1);
+    x.fillStyle = `rgb(${(70 * d) | 0},${(110 * d) | 0},${(70 * d) | 0})`; x.fillRect(12.4, 4, 1.4, 3);       // a bin
+    return (this.bench[mode] = c);
+  }
+  // A wet road: a darker surface with pale streaks of sky reflected in it.
+  wetSprite(mode) {
+    this.wetS = this.wetS || []; if (this.wetS[mode]) return this.wetS[mode];
+    const c = document.createElement('canvas'); c.width = 128; c.height = 64; const x = c.getContext('2d');
+    x.beginPath(); x.moveTo(64, 0); x.lineTo(128, 32); x.lineTo(64, 64); x.lineTo(0, 32); x.closePath(); x.clip();
+    x.fillStyle = mode === 2 ? 'rgba(10,16,30,.35)' : 'rgba(20,30,48,.28)'; x.fillRect(0, 0, 128, 64);
+    const hi = mode === 2 ? 'rgba(255,214,150,.22)' : mode === 1 ? 'rgba(255,200,150,.25)' : 'rgba(210,228,245,.3)';
+    for (let i = 0; i < 7; i++) { const yy = 8 + i * 8 + (i % 2) * 3, xx = 20 + ((i * 37) % 70); x.fillStyle = hi; x.beginPath(); x.ellipse(xx, yy, 14 + (i % 3) * 6, 1.4, 0, 0, 6.3); x.fill(); }
+    return (this.wetS[mode] = c);
+  }
   // Draw the vertical strips [k0, k1) of a picture (in half-tile columns from the anchor's corner, 32 units each).
   slices(ctx, sp, AX, AY, z, ranges) {
     const Wu = sp.c.width / sp.S, Hu = sp.c.height / sp.S;
@@ -927,6 +1040,13 @@ export class Renderer {
     }
     const spr = mip(k === T.ROAD ? roadSprite(w.roadMask(x, y), mode) : terrainSprite(ter, ter === TERRAIN.GRASS ? ((x * 7 + y * 13) % 4) : ((x + y) % 2), mode, w.tone[i]), lvl);
     ctx.drawImage(spr.c, X - 32 * z - 0.3, Y - 0.3, 64 * z + 0.6, 32 * z + 0.6);
+    if (k !== T.ROAD && (ter === TERRAIN.GRASS || ter === TERRAIN.SAND)) {       // soft edges where grass meets sand, instead of a hard tile line
+      for (let s2 = 0; s2 < 4; s2++) {
+        const nx = x + D4R[s2][0], ny = y + D4R[s2][1]; if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+        const q = ny * N + nx, nt = w.terrain[q]; if (w.kind[q] === T.ROAD || nt === ter || nt === TERRAIN.WATER) continue;
+        ctx.drawImage(this.edgeSprite(nt, s2, mode, getSeason()), X - 32 * z, Y, 64 * z, 32 * z);
+      }
+    }
     if ((k === T.RES || k === T.COM || k === T.IND) && !w.level[i]) { const zs = mip(zoneSprite(k, mode), lvl); ctx.drawImage(zs.c, X - 32 * z, Y, 64 * z, 32 * z); }
   }
   // A road over water: the structure underneath, the road deck, then the railings.
@@ -1006,7 +1126,8 @@ export class Renderer {
     const hex = cols[c.col % 8], h = parseInt(hex.slice(1), 16);
     const body = `rgb(${(((h >> 16) & 255) * d) | 0},${(((h >> 8) & 255) * d) | 0},${((h & 255) * d) | 0})`;
     if (mode !== 2) { ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.beginPath(); ctx.ellipse(X + 2 * z, Y + 0.4 * z, 2.6 * z, 1.1 * z, 0, 0, 6.3); ctx.fill(); }
-    ctx.fillStyle = `rgb(${(47 * d) | 0},${(51 * d) | 0},${(64 * d) | 0})`; ctx.fillRect(X - 1.1 * z, Y - 1.6 * z - bob, 0.9 * z, 1.8 * z); ctx.fillRect(X + 0.2 * z, Y - 1.6 * z - bob, 0.9 * z, 1.8 * z);
+    const stride = c.idle || c.still ? 0 : Math.sin(t * 9 + c.col * 3) * 0.9 * z;                       // legs swing as they walk
+    ctx.fillStyle = `rgb(${(47 * d) | 0},${(51 * d) | 0},${(64 * d) | 0})`; ctx.fillRect(X - 1.1 * z + stride * 0.5, Y - 1.6 * z - bob + Math.max(0, stride) * 0.4, 0.9 * z, 1.8 * z - Math.max(0, stride) * 0.4); ctx.fillRect(X + 0.2 * z - stride * 0.5, Y - 1.6 * z - bob + Math.max(0, -stride) * 0.4, 0.9 * z, 1.8 * z - Math.max(0, -stride) * 0.4);
     ctx.fillStyle = body; ctx.fillRect(X - 1.3 * z, Y - 6 * z - bob, 2.6 * z, 4.6 * z);
     ctx.fillStyle = `rgb(${(224 * d) | 0},${(180 * d) | 0},${(140 * d) | 0})`; ctx.beginPath(); ctx.arc(X, Y - 7.4 * z - bob, 1.6 * z, 0, 6.3); ctx.fill();
   }

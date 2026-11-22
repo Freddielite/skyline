@@ -29,6 +29,15 @@ bars, swipe from an edge to peek them, and draws behind the camera cutout). Both
 - Utilities and services: tap a tile to place (the preview shows the footprint); drag to reposition before lifting.
 - With a build tool active, one finger paints and two fingers move the map.
 
+## 0.5.18: graphics polish
+
+- Buildings stay sharp when you zoom right in
+- Walls have brick, siding, panels or concrete; windows have frames and sills; houses have shingled roofs, flowerbeds and stepping stones
+- Shadows follow the sun through the day and fall across streets and open ground
+- Streets have trees along the pavement, cars parked outside shops and benches by parks
+- Roads go dark and shiny in the rain and dry slowly afterwards
+- After dark, windows light up one by one; people's legs move as they walk; grass and sand blend softly
+
 ## 0.5.17: drawing order fix
 
 - Big buildings (landfill, hospital, stadium and other 2×2 and 3×3 buildings) no longer paint over a building standing in front of them
