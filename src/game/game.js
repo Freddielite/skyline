@@ -2,8 +2,10 @@ import { Fleet } from './boats.js';
 import { Ships } from './ships.js';
 import { Movers } from './movers.js';
 import { World, N, T, TERRAIN } from './world.js';
+import { POP_CAP, COM_CAP, IND_CAP } from './sim.js';
 import { Sim, COST, SEASON_NAME, FUND_GROUPS, FUND_NAME, TRADE, WEALTH_NAME } from './sim.js';
 import { BY_KEY, BT } from './buildings.js';
+import { rhythm, clockOf } from './rhythm.js';
 import { ORD, TUTORIAL, UNLOCK } from './rules.js';
 import { SoundEngine } from './audio.js';
 import * as saves from './saves.js';
@@ -16,6 +18,7 @@ import { Transit } from './transit.js';
 import { Ambient } from './ambient.js';
 import { followPass } from './traffic.js';
 import { Life } from './life.js';
+import { Services } from './services.js';
 import { clamp, mulberry32 } from './util.js';
 import { spriteBudget, setSeason, getSeason } from './sprites.js';
 const SEASON_OF = [2, 2, 3, 3, 3, 0, 0, 0, 1, 1, 1, 2];   // by month: winter Dec-Feb, spring Mar-May (blossom), summer Jun-Aug, autumn Sep-Nov
@@ -48,7 +51,7 @@ export class Game {
   }
   initWorldLife(seed) {
     this.transit = new Transit(this.world, this.sim, this.agents, mulberry32(seed + 7));
-    this.agents.transit = this.transit;
+    this.agents.transit = this.transit; this.agents.sim = this.sim;   // the metro network for citizens' trips (0.8.12)
     this.ambient = new Ambient(this.world, mulberry32(seed + 8));
     this.movers = new Movers(this.world, mulberry32(seed + 9));
     this.fleet = new Fleet(this.world, mulberry32(seed + 10));
@@ -197,7 +200,7 @@ export class Game {
       return true;
     } catch (e) { return false; }
   }
-  setTool(t) { this.tool = t; this.preview = null; this.drag = null; if (t) this.clearSel(); }
+  setTool(t) { this.tool = t; this.preview = null; this.drag = null; this.tunnelFrom = -1; if (t) this.clearSel(); }
   setJunction(x, y, v) { this.sim.setJunction(x, y, v); this.dirtySave = true; this.audio.play('tap'); }
   clearSel() { this.selTile = null; this.sel = null; if (this.overlay === 'trips') this.overlay = null; }
   // Advisors' "Show on map": go to a tile, select it (the Inspector opens) and keep the given view.
@@ -256,7 +259,7 @@ export class Game {
   trigger(k) { this.disasters.trigger(k); }
   stats() {
     const s = this.sim;
-    return { seasonName: SEASON_NAME[s.SEASON_NOW], tourists: s.tourists, tourIncome: s.tourIncome, beds: s.beds, attraction: s.attraction, request: s.requestView(), seasons: this.seasons, season: getSeason(), fpsSetting: this.fpsSetting, fpsNow: this.fpsNow, engine: this.renderer.engine, hitches: this.hitchInfo(), pages: this.renderer.ctx.pages ? this.renderer.ctx.pages.length : 0, money: Math.floor(s.money), pop: s.pop, date: s.dateLabel(), rd: s.rd, cd: s.cd, id: s.id, happy: s.happiness, tax: { ...s.tax }, income: s.lastIncome, expense: s.lastExpense, bld: s.bld, roads: s.roads, parks: s.parks, jobs: s.cJobs + s.iJobs, speed: this.speed, mode: this.mode, time: `${String(Math.floor(this.hour)).padStart(2, '0')}:${String(Math.floor((this.hour % 1) * 60)).padStart(2, '0')}`, citizens: this.agents.stats.total, employed: this.agents.stats.employed, tSup: s.net.tSup, tDem: s.net.tDem, wasteUn: s.net.wasteUn, pSup: s.net.pSup, uDiag: s.uDiag || null, pDem: s.net.pDem, wSup: s.net.wSup, wDem: s.net.wDem, upkeep: Math.round(s.net.upkeep), crime: Math.round(s.net.crimeAvg), poll: Math.round(s.net.pollAvg), cov: { police: s.net.police, fire: s.net.fire, health: s.net.health, edu: s.net.edu, fun: s.net.fun }, overlay: this.overlay,
+    return { seasonName: SEASON_NAME[s.SEASON_NOW], tourists: s.tourists, tourIncome: s.tourIncome, beds: s.beds, attraction: s.attraction, request: s.requestView(), seasons: this.seasons, season: getSeason(), fpsSetting: this.fpsSetting, fpsNow: this.fpsNow, engine: this.renderer.engine, hitches: this.hitchInfo(), pages: this.renderer.ctx.pages ? this.renderer.ctx.pages.length : 0, money: Math.floor(s.money), pop: s.pop, date: s.dateLabel(), rd: s.rd, cd: s.cd, id: s.id, happy: s.happiness, tax: { ...s.tax }, income: s.lastIncome, expense: s.lastExpense, bld: s.bld, roads: s.roads, parks: s.parks, jobs: s.cJobs + s.iJobs, speed: this.speed, mode: this.mode, day: clockOf(this).name, time: `${String(Math.floor(this.hour)).padStart(2, '0')}:${String(Math.floor((this.hour % 1) * 60)).padStart(2, '0')}`, citizens: this.agents.stats.total, employed: this.agents.stats.employed, tSup: s.net.tSup, tDem: s.net.tDem, wasteUn: s.net.wasteUn, pSup: s.net.pSup, uDiag: s.uDiag || null, modes: s.modes || null, sewage: s.sewage ? { total: s.sewage.total, treated: s.sewage.treated } : null, roads: s.roadStats ? { worn: s.roadStats.worn, n: s.roadStats.roads, crews: s.roadStats.crews, spend: s.lastRoadSpend || 0 } : null, modesPrev: s.modesPrev || null, pDem: s.net.pDem, wSup: s.net.wSup, wDem: s.net.wDem, upkeep: Math.round(s.net.upkeep), crime: Math.round(s.net.crimeAvg), poll: Math.round(s.net.pollAvg), cov: { police: s.net.police, fire: s.net.fire, health: s.net.health, edu: s.net.edu, fun: s.net.fun }, overlay: this.overlay,
       canUndo: this.history.length, undoLabel: this.history.length ? this.history[this.history.length - 1].label : '', undoLeft: this.history.length ? Math.max(1, Math.ceil((UNDO_MS - (performance.now() - this.history[this.history.length - 1].t)) / 1000)) : 0,
       weather: this.ambient.setting, rain: this.ambient.weather.k, buses: this.transit.buses.length, riders: this.agents.stats.riding, heavyRoads: (() => { let n = 0; const l = this.sim.flowM.load; for (let i = 0; i < l.length; i++) if (l[i] > 1.1) n++; return n; })(),
       grant: s.grant || Math.round(Math.max(0, 300 * (1 - s.pop / 1200))), streak: s.streak, ordCost: s.ordCost(), disastersLevel: s.disasters,
@@ -389,6 +392,13 @@ export class Game {
   updatePreview() {
     const w = this.world, def = BY_KEY[this.tool];
     let tiles;
+    if (this.tool === 'tunnel') { this.tunnelPreview(); return; }
+    if (def && def.metro) {                                   // a new station: how many homes and jobs it would serve (0.8.12)
+      const c = this.drag.cur, ok = this.sim.canPlaceBuilding(this.tool, c.x, c.y).ok; let res = 0, jobs = 0;
+      for (let y = c.y - 10; y <= c.y + 10; y++) for (let x = c.x - 10; x <= c.x + 10; x++) { if (!w.inb(x, y) || Math.hypot(x - c.x, y - c.y) > 10) continue; const i = w.idx(x, y), k = w.kind[i], l = this.sim.lvl(i); if (!l) continue; if (k === T.RES) res += POP_CAP[l]; else if (k === T.COM) jobs += COM_CAP[l]; else if (k === T.IND) jobs += IND_CAP[l]; }
+      this.preview = { tiles: [{ x: c.x, y: c.y, ok }], ring: { x: c.x + 0.5, y: c.y + 0.5, r: 10 } };
+      this.hooks.cost && this.hooks.cost(def.cost, 1, `Serves ${res.toLocaleString('en-US')} residents, ${jobs.toLocaleString('en-US')} jobs`); return;
+    }
     if (def) { const ok = this.sim.canPlaceBuilding(this.tool, this.drag.cur.x, this.drag.cur.y).ok; tiles = this.dragTiles().map((p) => ({ ...p, ok })); this.preview = { tiles }; this.hooks.cost && this.hooks.cost(def.cost, 1, def.name); return; }
     const water = (p) => w.terrain[w.idx(p.x, p.y)] === TERRAIN.WATER, bridge = (p) => water(p) && w.kind[w.idx(p.x, p.y)] === T.ROAD;
     tiles = this.dragTiles().map((p) => ({ ...p, ok: water(p)
@@ -409,7 +419,10 @@ export class Game {
         for (let dy = 0; dy < def.d; dy++) for (let dx = 0; dx < def.w; dx++) set.add(w.idx(ax + dx, ay + dy));
       }
     }
-    return [...set].map((i) => ({ i, kind: w.kind[i], level: w.level[i], variant: w.variant[i], tree: w.tree[i], bt: w.bt[i], bo: w.bo[i], wire: w.wire[i], pipe: w.pipe[i] }));
+    const snap = [...set].map((i) => ({ i, kind: w.kind[i], level: w.level[i], variant: w.variant[i], tree: w.tree[i], bt: w.bt[i], bo: w.bo[i], wire: w.wire[i], pipe: w.pipe[i] }));
+    const links = (this.sim.metroLinks || []).filter(([a, b]) => set.has(a) || set.has(b));   // a metro station's tunnels come back with it on undo (0.8.13)
+    if (links.length) snap.metro = { links: links.map((l) => [...l]), names: Object.fromEntries([...set].filter((i) => this.sim.metroNames[i]).map((i) => [i, this.sim.metroNames[i]])) };
+    return snap;
   }
   record(snap, spent, label) {
     this.history.push({ snap, spent, label, t: performance.now() });
@@ -425,6 +438,11 @@ export class Game {
       w.kind[t.i] = t.kind; w.level[t.i] = t.level; w.variant[t.i] = t.variant; w.tree[t.i] = t.tree; w.bt[t.i] = t.bt; w.bo[t.i] = t.bo; w.wire[t.i] = t.wire; w.pipe[t.i] = t.pipe;
       s.pending.delete(t.i); this.sites.delete(t.i); this.disasters.fires.delete(t.i); this.disasters.rubble.delete(t.i);
     }
+    if (h.snap.metro) {
+      const have = new Set((s.metroLinks || []).map(([a, b]) => (a < b ? a + ':' + b : b + ':' + a)));
+      for (const [a, b] of h.snap.metro.links) if (!have.has(a < b ? a + ':' + b : b + ':' + a)) (s.metroLinks || (s.metroLinks = [])).push([a, b]);
+      Object.assign(s.metroNames, h.snap.metro.names);
+    }
     if (!s.sandbox) s.money += h.spent; s.needAn = true; s.roadsDirty = true; s.recount(); s.analyze(); this.dirtySave = true; this.audio.play('undo');
     this.hooks.toast && this.hooks.toast(`Undid ${h.label}${h.spent ? ' (+$' + h.spent.toLocaleString('en-US') + ')' : ''}`);
     return true;
@@ -432,6 +450,7 @@ export class Game {
 
   commit() {
     const def = BY_KEY[this.tool];
+    if (this.tool === 'tunnel') { this.tunnelTap(); this.hooks.cost && this.hooks.cost(0, 0); return; }
     if (def) {
       const x = this.drag.cur.x, y = this.drag.cur.y, snap = this.snapshot(this.dragTiles());
       const r = this.sim.placeBuilding(this.tool, x, y);
@@ -447,6 +466,40 @@ export class Game {
     if (!n && why) { this.say(why); this.audio.play('error'); }
     else if (n && /money|debt/.test(why)) this.say(why);
     this.hooks.cost && this.hooks.cost(0, 0);
+  }
+  // ---------- metro tunnels (0.8.12): tap a station, then the station to link it to ----------
+  stationAt(t) {
+    const w = this.world; if (!t || !w.inb(t.x, t.y)) return -1;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {        // a near miss on a small station still counts
+      const x = t.x + dx, y = t.y + dy; if (!w.inb(x, y)) continue; const i = w.idx(x, y);
+      if (w.kind[i] === T.SVC && BT[w.bt[i]] && BT[w.bt[i]].metro) { if (!dx && !dy) return i; this._near = i; }
+    }
+    const n = this._near; this._near = -1; return n >= 0 ? n : -1;
+  }
+  tunnelPreview() {
+    const c = this.drag.cur, b = this.stationAt(c), a = this.tunnelFrom;
+    if (a === undefined || a < 0) { this.preview = { tiles: [{ x: c.x, y: c.y, ok: b >= 0 }] }; this.hooks.cost && this.hooks.cost(0, 1, b >= 0 ? `Start at ${this.sim.stationName(b)}` : 'Tap a metro station'); return; }
+    const ax = a % N, ay = (a / N) | 0, tiles = [], n = Math.max(1, Math.ceil(Math.hypot(c.x - ax, c.y - ay) * 2));
+    const chk = b >= 0 ? this.sim.canLinkMetro(a, b) : { ok: false };
+    for (let k = 0; k <= n; k++) { const x = Math.round(ax + (c.x - ax) * k / n), y = Math.round(ay + (c.y - ay) * k / n); if (!tiles.some((p) => p.x === x && p.y === y)) tiles.push({ x, y, ok: chk.ok }); }
+    this.preview = { tiles };
+    this.hooks.cost && this.hooks.cost(chk.ok ? chk.cost : 0, tiles.length, b >= 0 ? (chk.ok ? `Tunnel ${this.sim.stationName(a)} \u2192 ${this.sim.stationName(b)}, ${Math.round(chk.len)} tiles` : chk.why) : `From ${this.sim.stationName(a)}: tap the station to link to`);
+  }
+  tunnelTap() {
+    const b = this.stationAt(this.drag.cur), a = this.tunnelFrom;
+    if (b < 0) { this.say(a >= 0 ? 'Tap the metro station to link it to' : 'Tap a metro station to start a tunnel'); this.audio.play('error'); return; }
+    if (a === undefined || a < 0 || a === b) { this.tunnelFrom = b; this.say(`${this.sim.stationName(b)}: now tap the station to link it to`); this.audio.play('tap'); return; }
+    const r = this.sim.linkMetro(a, b);
+    if (r.ok) { this.dirtySave = true; this.audio.play('build'); this.say(`Tunnel ${this.sim.stationName(a)} \u2192 ${this.sim.stationName(b)} built ($${r.cost.toLocaleString('en-US')})`); this.tunnelFrom = b; }   // carry on from here to build a line
+    else { this.audio.play('error'); if (r.why) this.say(r.why); }
+  }
+  repairRoad(x, y) {                                       // a road's Inspector: Repair now (0.9.0)
+    const r = this.sim.repairRoad(x, y);
+    if (r.ok) { this.dirtySave = true; this.audio.play('build'); this.say(`Road repaired ($${r.cost.toLocaleString('en-US')})`); } else if (r.why) { this.audio.play('error'); this.say(r.why); }
+  }
+  metroAction(id) {                                         // 'a:b' from the station Inspector: remove that tunnel
+    const [a, b] = id.split(':').map(Number), r = this.sim.unlinkMetro(a, b);
+    if (r.ok) { this.dirtySave = true; this.audio.play('bulldoze'); this.say(`Tunnel removed: ${this.sim.stationName(a)} \u2192 ${this.sim.stationName(b)}`); }
   }
   toolLabel() { return ({ avenue: 'avenue', road: 'road', res: 'homes zone', com: 'shops zone', ind: 'industry zone', park: 'park', bulldoze: 'demolition', wire: 'power line', cable: 'cable', pipe: 'pipe' })[this.tool] || this.tool; }
 
@@ -572,15 +625,21 @@ export class Game {
     this.siteCheck = (this.siteCheck || 0) + dt;
     if (this.siteCheck > 1) { this.siteCheck = 0; for (const i of this.sites.keys()) { const k = this.world.kind[i]; if (k === T.EMPTY || k === T.ROAD) { this.sites.delete(i); s.finish(i); } } for (const i of [...s.pending.keys()]) if (!this.sites.has(i)) s.finish(i); }
     // life scales with the city; people follow real routines (home, work, shops, parks)
-    const night = this.mode === 2 ? 0.45 : this.mode === 1 ? 0.8 : 1;
-    const carT = Math.min(60, Math.floor((s.pop / 14 + (s.cJobs + s.iJobs) / 30) * night * (1 - 0.45 * Math.max(s.net.transit, (s.net.metro || 0) * 1.2))), Math.floor(s.roads / 2));   // good bus coverage takes cars off the road
-    const sig = this.clock, veh = this.traffic.cars.concat(this.agents.drivers, this.transit.buses, this.movers.vans);
+    { // 0.9.0: wind for the turbines (with the weather) and daylight for the solar farms' "right now"
+      const wk = 0.5 + 0.22 * Math.sin(this.clock / 37) + 0.12 * Math.sin(this.clock / 11.3 + 1) + 0.4 * (this.ambient ? this.ambient.weather.k : 0);
+      s.windK = Math.max(0.15, Math.min(1, wk)); const h = this.hour; s.sunNow = this.timeSetting && this.timeSetting !== 'auto' ? (this.mode === 2 ? 0 : 1) : Math.max(0, Math.sin(((h - 6) / 13.5) * Math.PI));
+    }
+    const rhy = this.rhy = rhythm(this), night = rhy.traffic;          // rush hours, quiet nights and weekends (rhythm.js, 0.8.11)
+    const carT = Math.min(72, Math.floor((s.pop / 14 + (s.cJobs + s.iJobs) / 30) * night * (1 - 0.45 * Math.max(s.net.transit, (s.net.metro || 0) * 1.2))), Math.floor(s.roads / 2));   // good bus coverage takes cars off the road
+    if (!this.services || this.services.w !== this.world) this.services = new Services(this, mulberry32(this.world.seed + 11));
+    const sig = this.clock, veh = this.traffic.cars.concat(this.agents.drivers, this.transit.buses, this.movers.vans, this.services.list.filter((c) => !c.ped));
     followPass(veh);                                                       // vehicles queue behind each other
     this.traffic.update(dt * live, Math.floor(carT * 0.3), sig);
     this.agents.update(dt * live, dt, this.abs, Math.min(240, Math.floor(s.pop / 4)), sig);
     this.transit.update(dt * live, dt, sig);
     this.movers.update(dt * live, sig);
-    this.garbage.update(dt * live, Math.min(10, s.facilities.length * 2), sig);
+    this.services.sigT = sig; this.services.update(dt * live, rhy);              // police, ambulances, fire engines, the school run, goods lorries
+    this.garbage.update(dt * live, Math.min(10, s.facilities.length * 2), sig, s.hauls, s.haulVer);
     this.ambient.update(live > 0 ? dt : 0, this.mode);
     if (!this.life) this.life = new Life(this);
     this.life.update(live > 0 ? dt : 0);                                  // people at parks, beaches, piers and on the dirt tracks

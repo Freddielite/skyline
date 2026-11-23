@@ -34,6 +34,8 @@ export class World {
     this.bo = new Uint8Array(N * N);   // offset from anchor tile: dx | dy << 2
     this.wire = new Uint8Array(N * N); // 0 none, 1 overhead line, 2 underground cable
     this.pipe = new Uint8Array(N * N); // 1 = underground water pipe
+    this.wear = new Uint8Array(N * N); // road wear 0..100 (0.9.0)
+    this.fix = new Uint8Array(N * N);  // road repair: 1 one lane closed, 2 road closed (0.9.0)
     this.hw = new Uint8Array(N * N);   // 1 = regional highway (the city's link to the outside world)
     this.tone = new Uint8Array(N * N); // derived, not saved: grass shade 0..5 (dry to lush)
     this.depth = new Uint8Array(N * N);// derived, not saved: water depth 0..3 (shallows to deep)
@@ -52,7 +54,7 @@ export class World {
   generate(seed, map = 'classic') {
     this.seed = seed; this.map = map;
     const n1 = makeNoise(seed), n2 = makeNoise(seed + 77), n3 = makeNoise(seed + 151), rnd = mulberry32(seed + 5);
-    this.terrain.fill(0); this.tree.fill(0); this.kind.fill(0); this.level.fill(0); this.variant.fill(0); this.bt.fill(0); this.bo.fill(0); this.wire.fill(0); this.pipe.fill(0); if (this.hw) this.hw.fill(0);
+    this.terrain.fill(0); this.tree.fill(0); this.kind.fill(0); this.level.fill(0); this.variant.fill(0); this.bt.fill(0); this.bo.fill(0); this.wire.fill(0); this.pipe.fill(0); this.wear.fill(0); this.fix.fill(0); if (this.hw) this.hw.fill(0);
     const bodies = [], side = Math.floor(rnd() * 4), mr = mulberry32(seed + 19);
     const place = (n, r0, r1, wob, slope, margin) => {          // waters of a given size, kept apart from each other
       for (let k = 0, tries = 0; k < n && tries < 200; tries++) {
@@ -200,7 +202,7 @@ export class World {
   }
   toJSON() {
     const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); };
-    return { n: N, seed: this.seed, map: this.map, terrain: b64(this.terrain), tree: b64(this.tree), kind: b64(this.kind), level: b64(this.level), variant: b64(this.variant), bt: b64(this.bt), bo: b64(this.bo), wire: b64(this.wire), pipe: b64(this.pipe), hw: b64(this.hw) };
+    return { n: N, seed: this.seed, map: this.map, terrain: b64(this.terrain), tree: b64(this.tree), kind: b64(this.kind), level: b64(this.level), variant: b64(this.variant), bt: b64(this.bt), bo: b64(this.bo), wire: b64(this.wire), pipe: b64(this.pipe), hw: b64(this.hw), wear: b64(this.wear), fix: b64(this.fix) };
   }
   static fromJSON(o) {
     const on = o.n || 64, w = new World(o.seed), off = (N - on) >> 1;
@@ -217,6 +219,8 @@ export class World {
     if (o.bt) { un(o.bt, w.bt); un(o.bo, w.bo); }
     if (o.wire) un(o.wire, w.wire);
     if (o.pipe) un(o.pipe, w.pipe);
+    if (o.wear) un(o.wear, w.wear);
+    if (o.fix) un(o.fix, w.fix);
     if (o.hw && !w.migrated) un(o.hw, w.hw);
     else w.ensureHighway();                          // older save: route a highway to the existing roads
     w.derive();

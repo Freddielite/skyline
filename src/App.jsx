@@ -5,6 +5,9 @@ const I = {
   hand: 'M8 13V5.5a1.5 1.5 0 013 0V11m0-6.5a1.5 1.5 0 013 0V11m0-5a1.5 1.5 0 013 0V13m0-4a1.5 1.5 0 013 0v6.5A6.5 6.5 0 0113 22h-1.6a6 6 0 01-4.7-2.3L3.5 15.5a1.5 1.5 0 012.3-1.9L8 16',
   road: 'M9 3L5 21M15 3l4 18M12 4v3m0 4v3m0 4v3',
   avenue: 'M7 3L3 21M17 3l4 18M12 4v4m0 4v4m0 4v4M9.5 5l-1 15M14.5 5l1 15',
+  battery: 'M7 6h10v15H7V6zM10 3h4v3M10 12l3-3v3h2l-3 4v-3h-2',
+  sewage: 'M4 15c2 0 2 2 4 2s2-2 4-2 2 2 4 2 2-2 4-2M4 19c2 0 2 2 4 2s2-2 4-2 2 2 4 2 2-2 4-2M12 3v8M9 8l3 3 3-3',
+  tunnel: 'M3 20v-7a9 9 0 0118 0v7M7 20v-6a5 5 0 0110 0v6M3 20h18',
   metro: 'M12 3a9 9 0 110 18 9 9 0 010-18zM7.5 16V8l4.5 6 4.5-6v8',
   pier: 'M3 19c2 0 2-1.5 4.5-1.5S10 19 12 19s2-1.5 4.5-1.5S19 19 21 19M3 12h18M6 12v5M12 12v5M18 12v5M17 12V6',
   umbrella: 'M12 4a8 8 0 018 8H4a8 8 0 018-8zm0 8l-2 7M3 20c2 0 2-1 4.5-1s2.5 1 4.5 1 2-1 4.5-1 2.5 1 4.5 1',
@@ -33,6 +36,7 @@ const I = {
   wire: 'M4 5h16M8 5v15M16 5v15M4 9c4 3.5 12 3.5 16 0',
   cable: 'M3 12h5l2-5 4 10 2-5h5',
   trash: 'M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v6M14 11v6',
+  truck: 'M3 7h11v9H3V7zm11 3h4l3 3v3h-7v-6zM7 19a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm10 0a1.5 1.5 0 100-3 1.5 1.5 0 000 3z',
   recycle: 'M20 12a8 8 0 01-13.5 5.8M4 12a8 8 0 0113.5-5.8M17.5 3v3.5H14M6.5 21v-3.5H10',
   ball: 'M12 3a9 9 0 100 18 9 9 0 000-18zM12 8l3.5 2.5-1.3 4h-4.4l-1.3-4L12 8zM12 3v5M20.5 9.5L15.5 10.5M3.5 9.5l5 1M7 19l2.8-4.5M17 19l-2.8-4.5',
   bank: 'M3 10l9-6 9 6M5 10v8m4-8v8m6-8v8m4-8v8M3 20h18',
@@ -59,6 +63,7 @@ const T = {
   road: { id: 'road', label: 'Road', icon: 'road', cost: 10 },
   avenue: { id: 'avenue', label: 'Avenue', icon: 'avenue', cost: 25 },
   metro: { id: 'metro', label: 'Metro', icon: 'metro', cost: 5000 },
+  tunnel: { id: 'tunnel', label: 'Tunnel', icon: 'tunnel', cost: 40 },
   res: { id: 'res', label: 'Homes', icon: 'home', cost: 5, zone: 'r' },
   com: { id: 'com', label: 'Shops', icon: 'shop', cost: 5, zone: 'c' },
   ind: { id: 'ind', label: 'Industry', icon: 'gear', cost: 5, zone: 'i' },
@@ -72,6 +77,8 @@ const T = {
   water: { id: 'water', label: 'Water tower', icon: 'drop', cost: 800 },
   pump: { id: 'pump', label: 'Pump station', icon: 'drop', cost: 2600 },
   treat: { id: 'treat', label: 'Treatment', icon: 'drop', cost: 7500 },
+  battery: { id: 'battery', label: 'Battery', icon: 'battery', cost: 2500 },
+  sewage: { id: 'sewage', label: 'Sewage works', icon: 'sewage', cost: 4500 },
   pipe: { id: 'pipe', label: 'Pipe', icon: 'pipe', cost: 6 },
   police: { id: 'police', label: 'Police', icon: 'shield', cost: 600 },
   fire: { id: 'fire', label: 'Fire', icon: 'flame', cost: 600 },
@@ -82,6 +89,8 @@ const T = {
   dump: { id: 'dump', label: 'Landfill', icon: 'trash', cost: 1200 },
   recycle: { id: 'recycle', label: 'Recycling', icon: 'recycle', cost: 3200 },
   wte: { id: 'wte', label: 'Waste power', icon: 'bolt', cost: 5200 },
+  xfer: { id: 'xfer', label: 'Transfer', icon: 'truck', cost: 900 },
+  rcomplex: { id: 'rcomplex', label: 'Big recycling', icon: 'recycle', cost: 14000 },
   police2: { id: 'police2', label: 'Police HQ', icon: 'shield', cost: 2400 },
   fire2: { id: 'fire2', label: 'Fire HQ', icon: 'flame', cost: 2400 },
   hospital: { id: 'hospital', label: 'Hospital', icon: 'cross', cost: 3400 },
@@ -99,10 +108,10 @@ const T = {
 };
 const CATS = [
   { id: 'build', label: 'Build', short: 'Build', icon: 'road', tools: ['move', 'road', 'avenue', 'res', 'com', 'ind', 'park', 'clear'] },
-  { id: 'util', label: 'Power & water', short: 'Utilities', icon: 'bolt', tools: ['move', 'coal', 'gas', 'solar', 'nuclear', 'wind', 'wire', 'cable', 'water', 'pump', 'treat', 'pipe', 'clear'] },
-  { id: 'waste', label: 'Waste', short: 'Waste', icon: 'trash', tools: ['move', 'dump', 'recycle', 'wte', 'clear'] },
+  { id: 'util', label: 'Power & water', short: 'Utilities', icon: 'bolt', tools: ['move', 'coal', 'gas', 'solar', 'nuclear', 'wind', 'battery', 'wire', 'cable', 'water', 'pump', 'treat', 'sewage', 'pipe', 'clear'] },
+  { id: 'waste', label: 'Waste', short: 'Waste', icon: 'trash', tools: ['move', 'dump', 'recycle', 'xfer', 'wte', 'rcomplex', 'clear'] },
   { id: 'svc', label: 'Services', short: 'Services', icon: 'shield', tools: ['move', 'police', 'police2', 'fire', 'fire2', 'clinic', 'hospital', 'school', 'university', 'clear'] },
-  { id: 'transit', label: 'Transit', short: 'Transit', icon: 'bus', tools: ['move', 'busstop', 'busterm', 'ferry', 'metro', 'clear'] },
+  { id: 'transit', label: 'Transit', short: 'Transit', icon: 'bus', tools: ['move', 'busstop', 'busterm', 'ferry', 'metro', 'tunnel', 'clear'] },
   { id: 'fun', label: 'Amenities', short: 'Fun', icon: 'ball', tools: ['move', 'pier', 'beach', 'plaza', 'library', 'marina', 'museum', 'stadium', 'clear'] },
 ];
 // Buildings from content packs (src/game/content.js) join the build menu under their category.
@@ -113,11 +122,22 @@ export function registerTools(list) {
     cat.tools.splice(at < 0 ? cat.tools.length : at, 0, t.id);
   }
 }
-const VIEWS = [
-  { id: 'commute', label: 'Commutes' }, { id: 'traffic', label: 'Traffic' }, { id: 'transit', label: 'Transit' }, { id: 'metro', label: 'Metro' }, { id: 'value', label: 'Land value' }, { id: 'crime', label: 'Crime' }, { id: 'pollution', label: 'Pollution' },
-  { id: 'power', label: 'Power' }, { id: 'water', label: 'Water' },
-  { id: 'waste', label: 'Waste' }, { id: 'fun', label: 'Amenities' },
-  { id: 'police', label: 'Police' }, { id: 'fire', label: 'Fire' }, { id: 'health', label: 'Health' }, { id: 'edu', label: 'Education' },
+const VIEWS = [   // 0.8.13: every view has a one-line legend under its tag
+  { id: 'commute', label: 'Commutes', hint: 'Green: linked to the highway with jobs (or workers) in reach. Red: none in reach. Grey: not linked to the highway. Blue roads reach the highway' },
+  { id: 'traffic', label: 'Traffic', hint: 'Roads as busy as they are at this hour: green free, yellow busy, red jammed. Worn roads are slower: tap one to repair it' },
+  { id: 'transit', label: 'Transit', hint: 'Teal: within reach of a bus stop or terminal. Stronger colour, better service' },
+  { id: 'metro', label: 'Metro', hint: 'Homes: red no jobs in reach, orange a long trip, blue go by metro. Jobs in red have no workers. Arrows: where a line would help most' },
+  { id: 'value', label: 'Land value', hint: 'Green high, yellow middling, red low. Buildings need high land value to grow' },
+  { id: 'crime', label: 'Crime', hint: 'Green safe, red high crime. Police stations bring it down' },
+  { id: 'pollution', label: 'Pollution', hint: 'Coloured where there is pollution: green a little, yellow more, red a lot. Parks and distance help' },
+  { id: 'power', label: 'Power', hint: 'Green: has power. Red: no power. Yellow: live lines. Grey: lines with no power. Tap a plant to see what it really makes and why' },
+  { id: 'water', label: 'Water', hint: 'Green: has water. Red: no water. Blue: pipes with water. Grey: dry pipes. Brown water on the map: untreated sewage (build a Sewage works on the pipes)' },
+  { id: 'waste', label: 'Waste', hint: 'Green: garbage collected. Red: not collected. Brown: within reach of a waste building' },
+  { id: 'fun', label: 'Amenities', hint: 'Purple: near parks, plazas and fun places. Stronger colour, more to do' },
+  { id: 'police', label: 'Police', hint: 'Blue: covered by a police station. Stronger colour, better cover' },
+  { id: 'fire', label: 'Fire', hint: 'Orange: covered by a fire station. Stronger colour, quicker help' },
+  { id: 'health', label: 'Health', hint: 'Pink: covered by a clinic or hospital. Stronger colour, better care' },
+  { id: 'edu', label: 'Education', hint: 'Yellow: covered by a school or university. Stronger colour, better schooling' },
 ];
 const VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
 const BUILT = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '';
@@ -154,6 +174,18 @@ function Chart({ title, data, series, fmt }) {
   );
 }
 
+// City → Budget (0.8.13): how residents get to work, with the change since the start of the month
+const MODES = [['car', 'Car', '#e0a43a'], ['bus', 'Bus', '#3fbfb0'], ['metro', 'Metro', '#5a9bff'], ['walk', 'Walk', '#a5d86b'], ['none', 'No job in reach', '#ef6f5e']];
+function Modes({ now, prev }) {
+  return (
+    <div className="modes">
+      <h3>How people get to work</h3>
+      <div className="modebar">{MODES.map(([k, , c]) => now[k] > 0 && <i key={k} style={{ width: now[k] + '%', background: c }} />)}</div>
+      <div className="modekey">{MODES.map(([k, l, c]) => { const d = prev ? now[k] - prev[k] : 0; return (now[k] > 0 || d) ? <span key={k}><i style={{ background: c }} />{l} {now[k]}%{d ? <em className={(k === 'none' || k === 'car' ? d < 0 : d > 0) ? 'pos' : 'neg'}>{d > 0 ? ' +' : ' '}{d}</em> : null}</span> : null; })}</div>
+      <p className="hint">Changes since the start of the month. A metro line or buses take people out of cars; red are residents with no job they can reach.</p>
+    </div>
+  );
+}
 function Inspector({ info, onClose, low, onAction, active }) {
   return (
     <section className={"inspect" + (low ? " low" : "")} aria-label={info.title}>
@@ -363,7 +395,7 @@ export default function App() {
     const onKey = (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && gameRef.current) { e.preventDefault(); gameRef.current.undo(); } };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, []);
-  const pick = (id) => { setTool(id); setFly(false); g && g.setTool(id); if (id) { setPanel(null); g.setOverlay(id === 'wire' || id === 'cable' ? 'power' : id === 'pipe' ? 'water' : null); } };
+  const pick = (id) => { setTool(id); setFly(false); g && g.setTool(id); if (id) { setPanel(null); g.setOverlay(id === 'wire' || id === 'cable' ? 'power' : id === 'pipe' ? 'water' : id === 'metro' || id === 'tunnel' ? 'metro' : null); } };
   const speed = (s) => { g.setSpeed(s); setSt(g.stats()); };
   const setTax = (k, v) => { g.setTax(k, v); setSt(g.stats()); };
   const pickTime = (v) => { setTimeSet(v); g.setTime(v); };
@@ -404,7 +436,7 @@ export default function App() {
             </button>
           </header>}
           {ui && <div className="hud hud-r">
-            <div className="clock" title={st.date}><Icon n="clock" size={14} /><b>{st.time}</b><span>{st.date.replace(/\s\d{4}$/, '')}</span></div>
+            <div className="clock" title={st.date}><Icon n="clock" size={14} /><b>{st.day ? st.day + ' ' : ''}{st.time}</b><span>{st.date.replace(/\s\d{4}$/, '')}</span></div>
             <div className="speed" role="group" aria-label="Game speed">
               {[[0, 'pause'], [1, 'play'], [2, 'ff'], [4, 'fff']].map(([v, ic]) => (
                 <button key={v} className={st.speed === v ? 'on' : ''} onClick={() => speed(v)} aria-label={v ? `Speed ${v}` : 'Pause'}><Icon n={ic} size={15} fill={ic !== 'pause'} /></button>
@@ -438,6 +470,7 @@ export default function App() {
             {st.canUndo > 0 && <button className="chip undo" onClick={() => { g.undo(); setSt(g.stats()); }} title={'Undo ' + st.undoLabel}><Icon n="undo" size={15} /><b>Undo</b><em>{st.undoLeft}s</em></button>}
             {st.request && !tool && <button className="chip reqchip" onClick={() => openCity('advice')}><Icon n="news" size={14} /><b>{st.request.choice ? 'Decide' : 'Request'}</b><em>{st.request.title}</em></button>}
             {view && <button className="viewtag" onClick={() => setView(null)}>{view.label} view <Icon n="close" size={14} /></button>}
+            {view && view.hint && !panel && <div className="viewhint">{view.hint}</div>}
             {st.tut && !panel && !fly && <section className="guide" aria-label="Getting started">
               <div className="gstep">Step {st.tut.i + 1} of {st.tut.n}</div>
               <h2>{st.tut.title}</h2>
@@ -445,7 +478,7 @@ export default function App() {
               <div className="gbtn">{st.tut.cat && <button onClick={() => showMe(st.tut)}>{st.tut.tool ? 'Pick the tool' : 'Pick Move'}</button>}<button className="ghost" onClick={() => { g.skipTutorial(); setSt(g.stats()); }}>Skip guide</button></div>
             </section>}
           </div>}
-          {ui && st.inspect && !panel && <Inspector low={st.alerts.length > 0} info={st.inspect} active={st.overlay === 'trips'} onAction={(id) => { if (id.startsWith('jn:')) { g.setJunction(st.inspect.x, st.inspect.y, id.slice(3)); } else g.setOverlay(st.overlay === id ? null : id); setSt(g.stats()); }} onClose={() => { g.clearSel(); setSt(g.stats()); }} />}
+          {ui && st.inspect && !panel && <Inspector low={st.alerts.length > 0} info={st.inspect} active={st.overlay === 'trips'} onAction={(id) => { if (id.startsWith('jn:')) { g.setJunction(st.inspect.x, st.inspect.y, id.slice(3)); } else if (id.startsWith('mx:')) { g.metroAction(id.slice(3)); } else if (id === 'rd:now') { g.repairRoad(st.inspect.x, st.inspect.y); } else g.setOverlay(st.overlay === id ? null : id); setSt(g.stats()); }} onClose={() => { g.clearSel(); setSt(g.stats()); }} />}
           {ui && news && !(cost && tool) && <div className="ticker" role="status"><Icon n="news" size={15} /><span>{news}</span></div>}
           {ui && st.alerts.length > 0 && <div className="alerts" role="alert">{st.alerts.map((a) => <span key={a}>{a}</span>)}</div>}
 
@@ -485,10 +518,12 @@ export default function App() {
                   <div><span>Tourism income</span><b className="pos">{money(st.tourIncome || 0)}</b></div>
                   <div><span>Regional grant (fades as you grow)</span><b>{money(st.grant)}</b></div>
                   <div><span>Service &amp; utility upkeep</span><b>{money(st.upkeep)}</b></div>
+                  {st.roads && <div><span>Road repairs last month · worn roads</span><b className={st.roads.worn > st.roads.n * 0.08 ? 'neg' : ''}>{money(st.roads.spend)} · {st.roads.worn} of {st.roads.n}</b></div>}
                   <div><span>Ordinances</span><b>{money(st.ordCost)}</b></div>
                   {st.trade && (st.trade.income > 0 || st.trade.cost > 0) && <div><span>Trade with neighbours (sold · paid)</span><b>{money(st.trade.income)} · {money(-st.trade.cost)}</b></div>}
                   <div><span>Power supply / demand</span><b className={supplyClass(st.pSup, st.pDem) === 'ok' ? 'pos' : 'neg'}>{st.pSup} / {st.pDem}</b></div>
                   <div><span>Water supply / demand</span><b className={supplyClass(st.wSup, st.wDem) === 'ok' ? 'pos' : 'neg'}>{st.wSup} / {st.wDem}</b></div>
+                  {st.sewage && st.sewage.total > 0 && <div><span>Sewage treated</span><b className={st.sewage.treated < st.sewage.total * 0.85 ? 'neg' : 'pos'}>{st.sewage.treated} / {st.sewage.total}</b></div>}
                   <div><span>Waste capacity / output</span><b className={supplyClass(st.tSup, st.tDem) === 'ok' ? 'pos' : 'neg'}>{st.tSup} / {st.tDem}</b></div>
                   {st.uDiag && (st.uDiag.unpowered > 0 || st.uDiag.unwatered > 0) && <div><span>Buildings without power · water</span><b className="neg">{st.uDiag.unpowered} · {st.uDiag.unwatered}</b></div>}
                   <div><span>Uncollected waste</span><b className={st.wasteUn > 0.2 ? 'neg' : ''}>{Math.round(st.wasteUn * 100)}% of buildings</b></div>
@@ -497,6 +532,7 @@ export default function App() {
                   <div><span>Citizens · with a job</span><b>{st.citizens} · {st.employed}</b></div>
                   <div><span>Buildings (R / C / I)</span><b>{st.bld.r} / {st.bld.c} / {st.bld.i}</b></div>
                 </div>
+                {st.modes && <Modes now={st.modes} prev={st.modesPrev} />}
                 <h3>Tax rates</h3>
                 {[['r', 'Residential', '#4caf50'], ['c', 'Commercial', '#3d8bd9'], ['i', 'Industrial', '#e0b526']].map(([k, l, c]) => (
                   <label className="tax" key={k}>

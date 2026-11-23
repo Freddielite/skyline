@@ -1,4 +1,6 @@
 import { hash } from './util.js';
+import { rhythm } from './rhythm.js';
+import { LINE_COLS, WALK_R } from './metro.js';
 import { N, T, TERRAIN } from './world.js';
 import { SVC_FLAGS, getSeason, spriteBudget, buildingSprite, parkSprite, zoneSprite, terrainSprite, treeSprite, roadSprite, serviceSprite, mip, bridgeUnder, bridgeTop } from './sprites.js';
 import { tint } from './util.js';
@@ -32,6 +34,9 @@ const BOX = [[196, 70, 52], [52, 110, 176], [222, 168, 52], [64, 148, 96], [200,
 const CARGO = [[214, 190, 140], [70, 66, 64], [168, 150, 128], [190, 120, 80], [120, 130, 110]];
 
 const BG = [['#2a78a8', '#6fb4d6'], ['#3a4f86', '#c98a78'], ['#050a1f', '#14204a']];
+// people of every skin tone (0.8.11; everyone had the same one before)
+const SKIN = [[92, 58, 33], [141, 85, 36], [176, 116, 66], [198, 134, 66], [224, 172, 105], [241, 194, 125], [232, 190, 160]];
+const skinRGB = (k, d) => { const s = SKIN[k % SKIN.length]; return `rgb(${(s[0] * d) | 0},${(s[1] * d) | 0},${(s[2] * d) | 0})`; };
 const CAR_COLS = ['#e0b43a', '#4a7fc7', '#c9372c', '#7a5bd0', '#4aa36a', '#f2f2f2', '#e67e22', '#2c3e50'];
 
 const BADGE_H = [0, 34, 60, 100, 190];
@@ -149,12 +154,26 @@ export class Renderer {
     const hi = zd > 2.2 && !g.fast;                                        // close up: sharper copies of buildings
     { // wet roads after rain (dry slowly), and windows that light up one by one after dark and go out late at night
       const now = performance.now(), dt = Math.min(0.2, ((now - (this.wetT || now)) / 1000)); this.wetT = now;
+      this.bladePh = ((this.bladePh || 0) + dt * 1.8 * (0.2 + (g.sim.windK ?? 0.6) * 1.2)) % 6283;   // turbines turn with the wind (0.9.0)
       const rain = g.ambient.weather.k, want = rain > 0.15 ? Math.min(0.75, rain) : 0;
       this.wet = (this.wet || 0) + (want - (this.wet || 0)) * Math.min(1, dt * (want > (this.wet || 0) ? 0.5 : 0.025));
       const ph = (g.clock / 180) % 1;
       this.litFrac = g.timeSetting !== 'auto' ? 1 : ph < 0.62 || ph > 0.9 ? 1 : ph < 0.67 ? 0.2 + (ph - 0.62) / 0.05 * 0.8 : ph > 0.84 ? 1 - (ph - 0.84) / 0.06 * 0.5 : 1;
+      // 0.8.11: each kind of building keeps its own hours after dark (rhythm.js): homes light up through the evening and go
+      // dark one by one, offices empty out after work, shops close, factories keep a night shift. And car parks fill and
+      // empty: by shops and offices in the day, outside homes in the evening. In steps of 5%, so the still view is only
+      // redrawn when a step changes.
+      const r = g.rhy || rhythm(g), q = (v) => Math.round(Math.min(1, v) * 20) / 20, fix = g.timeSetting !== 'auto';
+      const ramp = ph >= 0.62 && ph < 0.66 ? 0.35 + (ph - 0.62) / 0.04 * 0.65 : 1;            // the first minutes of night: lights still coming on
+      this.litK = fix ? null : [q(r.homeLit * ramp), q(r.shopLit * ramp), q(r.officeLit * ramp), q(r.indLit)];
+      this.parkK = [q(0.12 + r.home * 0.45), q(0.08 + r.shop * 0.6), q(0.06 + r.work * 0.6), q(0.12 + r.work * 0.5)];   // homes, shops, offices, industry
+      this.rhySig = (this.litK ? this.litK.join('') : '') + this.parkK.join('');
     }
     this.drawWater(ctx, w, z, cx, cy, t, mode);
+    { // 0.9.0: water fouled by untreated sewage, murky brown-green
+      const dl = g.sim.dirtyList, dw = g.sim.dirtyWater;
+      if (dl && dl.length) { const d = mode === 2 ? 0.45 : mode === 1 ? 0.8 : 1; for (const i of dl) { const x = i % N, y = (i / N) | 0, X = (x - y) * 32 * z + cx, Y = (x + y) * 16 * z + cy; if (X < -40 * z || X > this.W + 40 * z || Y < -40 * z || Y > this.H + 10) continue; ctx.fillStyle = `rgba(${(118 * d) | 0},${(104 * d) | 0},${(54 * d) | 0},${(0.62 * Math.min(1, dw[i] * 1.2)).toFixed(3)})`; ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(X + 32 * z, Y + 16 * z); ctx.lineTo(X, Y + 32 * z); ctx.lineTo(X - 32 * z, Y + 16 * z); ctx.closePath(); ctx.fill(); } }
+    }
     if (ctx.gpu && !g.fast && zd >= 0.5) this.reflections(ctx, g, w, z, cx, cy, mode, lvl, top, mX);   // land drawn next hides what isn't over water
     // far out: the whole city is one cached picture (citycache.js); nearer, the ground alone is cached
     let farOk = false;
@@ -196,7 +215,7 @@ export class Renderer {
     const badges = [], smokeList = [], neon = [], wind = 0.7 + 0.5 * Math.sin(t * 0.07);
     // vehicles and people sorted into their tiles with two reusable arrays (no new lists or maps every frame)
     const cars = this.carsL || (this.carsL = []); cars.length = 0;
-    for (const Lst of [g.traffic.cars, g.agents.drivers, g.transit.buses, g.movers.vans, g.people, g.garbage.trucks, g.disasters.responders, g.life ? g.life.people : []]) for (let jx = 0; jx < Lst.length; jx++) cars.push(Lst[jx]);
+    for (const Lst of [g.traffic.cars, g.agents.drivers, g.transit.buses, g.movers.vans, g.people, g.garbage.trucks, g.disasters.responders, g.life ? g.life.people : [], g.services ? g.services.list : []]) for (let jx = 0; jx < Lst.length; jx++) cars.push(Lst[jx]);
     const bh = this.bHead || (this.bHead = new Int32Array(N * N).fill(-1)); if (!this.bNext || this.bNext.length < cars.length) this.bNext = new Int32Array(cars.length * 2 + 64); const bn = this.bNext, bt = this.bTouched || (this.bTouched = []);
     for (const q of bt) bh[q] = -1; bt.length = 0;
     for (let jx = cars.length - 1; jx >= 0; jx--) { const c = cars[jx], key = Math.max(0, Math.min(N - 1, Math.floor(c.py))) * N + Math.max(0, Math.min(N - 1, Math.floor(c.px))); if (bh[key] < 0) bt.push(key); bn[jx] = bh[key]; bh[key] = jx; }
@@ -226,7 +245,7 @@ export class Renderer {
         else if (k === T.PARK) { const sp = mip(parkSprite(w.variant[i] % 4, mode), lvl), site = g.sites.get(i); if (!sp) { this.layerMiss = true; } else if (site && L) addLive(i, 'site'); else if (site) drawConstruction(ctx, site, X, Y, z, mode, t, sp, null); else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
         else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) {
           const emp = g.sim.aband[i];                       // standing empty (0.8.6): dark windows, no smoke or signs, a boarded-up badge
-          const shr = w.shore[i], sp = mip(buildingSprite(k, w.level[i], (w.variant[i] & 63), mode, !emp && g.sim.pw[i] === 1 && (mode !== 2 || hash(x, y, 17) < this.litFrac), shr, hi), lvl);
+          const shr = w.shore[i], sp = mip(buildingSprite(k, w.level[i], (w.variant[i] & 63), mode, !emp && g.sim.pw[i] === 1 && (mode !== 2 || hash(x, y, 17) < this.litOf(k, w.level[i])), shr, hi), lvl);
           const site = g.sites.get(i), lv = w.level[i];
           if (mode === 2 && ctx.gpu && !g.fast && g.sim.pw[i] === 1 && !site && !emp) {
             const r = (40 + lv * 10) * z; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.2 + lv * 0.03;
@@ -326,6 +345,8 @@ export class Renderer {
         ctx.fillStyle = p.ok ? 'rgba(242,184,75,.38)' : 'rgba(239,111,94,.42)'; ctx.fill();
         ctx.strokeStyle = p.ok ? 'rgba(242,184,75,.95)' : 'rgba(239,111,94,.95)'; ctx.lineWidth = 1.2; ctx.stroke();
       }
+      const rg = g.preview.ring;                                  // a new metro station: the area people walk from (0.8.12)
+      if (rg) { const X = (rg.x - rg.y) * 32 * z + cx, Y = (rg.x + rg.y) * 16 * z + cy; ctx.strokeStyle = 'rgba(242,184,75,.9)'; ctx.lineWidth = 2 * z; ctx.setLineDash([6 * z, 5 * z]); ctx.beginPath(); ctx.ellipse(X, Y, 45.25 * rg.r * z, 22.6 * rg.r * z, 0, 0, 6.3); ctx.stroke(); ctx.setLineDash([]); }
     }
     this.weather(ctx, g, t, mode);
     if (!g.fast) { this.mist(ctx, g, w, z, cx, cy, t); this.grade(ctx, mode, g); }
@@ -367,7 +388,7 @@ export class Renderer {
   // Everything the still layer depends on, as one string: the view, the light, and every tile in view that can look
   // different (its lot, building, look, tree, power and water, garbage, lit windows at night, building site, rubble).
   viewSig(g, w, z, cx, cy, mode, zd, hi, lvl, W, H, top, mX) {
-    const sim = g.sim, lf = this.litFrac;
+    const sim = g.sim;
     let h = 0;
     for (let s = 0; s < 2 * N - 1; s++) {
       const Yd = s * 16 * z + cy; if (Yd < top || Yd > H + 360 * z) continue;
@@ -375,8 +396,10 @@ export class Renderer {
       for (let x = xa; x <= xb; x++) {
         const y = s - x, i = y * N + x, k = w.kind[i];
         let v = k + (w.level[i] << 3) + ((w.variant[i] & 63) << 6) + (w.tree[i] << 12) + (w.bt[i] << 16) + (w.bo[i] << 24);
-        if (k >= 2) { v ^= (sim.pw[i] << 28) ^ (sim.wt[i] << 29) ^ (sim.ts[i] << 30) ^ (sim.aband[i] ? 0x13579 : 0); if (mode === 2 && sim.pw[i] && hash(x, y, 17) < lf) v ^= 1 << 27; }
+        if (k >= 2) { v ^= (sim.pw[i] << 28) ^ (sim.wt[i] << 29) ^ (sim.ts[i] << 30) ^ (sim.aband[i] ? 0x13579 : 0); if (mode === 2 && sim.pw[i] && hash(x, y, 17) < this.litOf(k, w.level[i])) v ^= 1 << 27; }
         if (w.wire[i] || w.pipe[i]) v ^= (w.wire[i] * 0x9e3) ^ (w.pipe[i] * 0x3c5a7);       // 0.8.7: new lines and pipes show at once
+        if (w.tun && w.tun[i]) v ^= 0x2b5d1;                                             // 0.8.12: grates over a new tunnel
+        if (k === T.ROAD && w.wear) v ^= ((w.wear[i] >> 4) * 0x1f3) ^ (w.fix[i] * 0x7a1d);   // 0.9.0: cracks, potholes and road works
         if (k === T.ROAD && z >= 0.5) v ^= junctionType(w, x, y) * 0x51ed27;                 // and a junction's lights or give-way signs
         if (g.sites.has(i)) v ^= 0x55555;
         if (g.disasters.rubble.has(i)) v ^= 0x2a2a2;
@@ -384,7 +407,7 @@ export class Renderer {
       }
     }
     const gv = this.gc ? (this.gc._v | 0) + (this.gJob ? 1e6 : 0) : 0;
-    return `${h},${cx | 0},${cy | 0},${z},${mode},${getSeason()},${g.fast ? 1 : 0},${W},${H},${this.dpr},${hi ? 1 : 0},${lvl},${sim.flowM.version},${sim.trackVer},${this.zebraV | 0},${Math.round((this.wet || 0) * 20)},${gv},${w.seed}`;
+    return `${h},${cx | 0},${cy | 0},${z},${mode},${getSeason()},${g.fast ? 1 : 0},${W},${H},${this.dpr},${hi ? 1 : 0},${lvl},${sim.flowM.version},${sim.trackVer},${this.zebraV | 0},${Math.round((this.wet || 0) * 20)},${gv},${w.seed},${this.rhySig || ''}`;
   }
   // The live pass over the still layer, in painter order: what moves (or animates) on each tile, then the still
   // pictures of later tiles that stand in front of it, so a car behind a tower stays hidden behind it.
@@ -512,7 +535,7 @@ export class Renderer {
     const i = y * N + x, k = w.kind[i];
     if (k === T.EMPTY && w.tree[i]) return mip(treeSprite(w.tree[i], mode), lvl);
     if (k === T.PARK) return g.sites.has(i) ? null : mip(parkSprite(w.variant[i] % 4, mode), lvl);
-    if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) return g.sites.has(i) ? null : mip(buildingSprite(k, w.level[i], w.variant[i] & 63, mode, !g.sim.aband[i] && g.sim.pw[i] === 1 && (mode !== 2 || hash(x, y, 17) < this.litFrac), w.shore[i], hi), lvl);
+    if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) return g.sites.has(i) ? null : mip(buildingSprite(k, w.level[i], w.variant[i] & 63, mode, !g.sim.aband[i] && g.sim.pw[i] === 1 && (mode !== 2 || hash(x, y, 17) < this.litOf(k, w.level[i])), w.shore[i], hi), lvl);
     if (k === T.SVC) {
       const def = BT[w.bt[i]]; if (!def) return null; const dx = w.bo[i] & 3, dy = w.bo[i] >> 2, ax = x - dx, ay = y - dy, a = ay * N + ax;
       if (g.sites.has(a)) return null;
@@ -873,6 +896,11 @@ export class Renderer {
   // Street life on a road tile: trees along the pavement in front of homes, cars parked at the kerb by shops and offices,
   // benches and bins by parks. Placed by a hash of the tile, so they stay put.
   street(ctx, w, x, y, X, Y, z, mode, lvl) {
+    if (w.wear) { const i0 = y * N + x, wr = w.wear[i0]; if (wr >= 60 && !w.fix[i0]) ctx.drawImage(this.crackSprite(wr >= 85 ? 1 : 0, (x * 7 + y * 3) & 3, mode), X - 32 * z, Y, 64 * z, 32 * z); if (w.fix[i0]) this.roadWork(ctx, w, x, y, X, Y, z, mode, w.fix[i0]); }
+    if (w.tun && w.tun[y * N + x] && hash(x, y, 77) < 0.45) {   // a metro tunnel below: a ventilation grate in the road (0.8.12)
+      const u = 0.18 + hash(x, y, 78) * 0.3, v = 0.5 + (hash(x, y, 79) - 0.5) * 0.3, GX = X + (u - v) * 32 * z, GY = Y + (u + v) * 16 * z;
+      ctx.drawImage(this.grateSprite(mode), GX - 9 * z, GY - 5 * z, 18 * z, 10 * z);
+    }
     const cxT = X, cyT = Y + 16 * z;
     for (let s = 0; s < 4; s++) {
       const [dx, dy] = D4R[s], nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
@@ -886,11 +914,68 @@ export class Renderer {
         const sp = mip(treeSprite([1, 3, 1, 3][Math.floor(r * 40) % 4], mode), lvl);
         if (sp) { const sc = 0.62, TX = cxT + (dx - dy) * 0.43 * 32 * z + ((dy ? side : 0) - (dx ? side : 0)) * 32 * z, TY = cyT + (dx + dy) * 0.43 * 16 * z + ((dy ? side : 0) + (dx ? side : 0)) * 16 * z;
           ctx.drawImage(sp.c, TX - sp.ox * z * sc, TY - (sp.oy + 16) * z * sc, (sp.c.width / sp.S) * z * sc, (sp.c.height / sp.S) * z * sc); }
-      } else if ((nk === T.COM || nk === T.IND) && r < 0.5) {
+      } else if ((nk === T.COM || nk === T.IND || nk === T.RES) && this.parkedHere(nk, w.level[q], r, hash(x * 4 + s, y, 63))) {
         const pc = this.parkedSprite(Math.floor(r * 50) % 6, dx !== 0 ? 1 : 0, mode); const qx = dx * 0.34 + (dy ? side : 0), qy = dy * 0.34 + (dx ? side : 0);
         ctx.drawImage(pc, cxT + (qx - qy) * 32 * z - 9 * z, cyT + (qx + qy) * 16 * z - 9 * z, 18 * z, 13 * z);
       } else if (nk === T.PARK && r < 0.4) ctx.drawImage(this.benchSprite(mode), PX - 7 * z, PY - 7 * z, 14 * z, 10 * z);
     }
+  }
+  // A car parked at the kerb in front of this lot right now? Shops and offices fill up in the day and empty at night,
+  // homes the other way round (0.8.11). Before, the cars by shops and offices stood there day and night. `r` picks the
+  // spot (homes keep their street tree below 0.55), `u` decides whether this spot is taken at the moment.
+  parkedHere(k, l, r, u) {
+    const P = this.parkK || [0.4, 0.5, 0.5, 0.5];
+    if (k === T.RES) return r >= 0.55 && u < P[0] * 1.6;
+    if (r >= 0.62) return false;
+    return u < (k === T.IND ? P[3] : l <= 1 ? P[1] : P[2]) * 1.4;
+  }
+  // Worn roads (0.9.0): thin cracks, then potholes. One cached picture per look (2 levels, 4 variants, 3 lights).
+  crackSprite(lv, v, mode) {
+    const key = lv * 12 + v * 3 + mode; this.cracks = this.cracks || []; if (this.cracks[key]) return this.cracks[key];
+    const c = document.createElement('canvas'); c.width = 128; c.height = 64; const x = c.getContext('2d'); x.scale(2, 2);
+    const P = (u, w2) => [32 + (u - w2) * 32, (u + w2) * 16], r = (k) => hash(v * 13 + k, lv, 31), d = mode === 2 ? 0.55 : mode === 1 ? 0.8 : 1;
+    x.strokeStyle = `rgba(${(22 * d) | 0},${(24 * d) | 0},${(28 * d) | 0},.75)`; x.lineWidth = 0.7; x.lineCap = 'round';
+    for (let k = 0; k < 3 + lv * 2; k++) {
+      let u = 0.25 + r(k) * 0.5, w2 = 0.25 + r(k + 9) * 0.5; x.beginPath(); x.moveTo(...P(u, w2));
+      for (let s2 = 0; s2 < 4; s2++) { u += (r(k * 5 + s2) - 0.5) * 0.16; w2 += (r(k * 7 + s2 + 3) - 0.5) * 0.16; x.lineTo(...P(Math.max(0.2, Math.min(0.8, u)), Math.max(0.2, Math.min(0.8, w2)))); }
+      x.stroke();
+    }
+    if (lv) for (let k = 0; k < 3; k++) { const p = P(0.3 + r(k + 20) * 0.4, 0.3 + r(k + 30) * 0.4); x.fillStyle = `rgba(${(34 * d) | 0},${(32 * d) | 0},${(30 * d) | 0},.85)`; x.beginPath(); x.ellipse(p[0], p[1], 2.6 + r(k) * 1.6, 1.3 + r(k + 1) * 0.8, 0, 0, 6.3); x.fill(); x.fillStyle = `rgba(${(90 * d) | 0},${(85 * d) | 0},${(78 * d) | 0},.6)`; x.beginPath(); x.ellipse(p[0] - 0.6, p[1] - 0.4, 1.2, 0.6, 0, 0, 6.3); x.fill(); }
+    return (this.cracks[key] = c);
+  }
+  // Road works (0.9.0): cones along the closed lane, or barriers across a closed road with a digger and a worker.
+  roadWork(ctx, w, x, y, X, Y, z, mode, fx) {
+    const m = w.roadMask(x, y), alongX = (m & 10) || !(m & 5), d = mode === 2 ? 0.55 : mode === 1 ? 0.85 : 1;
+    const S = (u, v) => [X + (u - v) * 32 * z, Y + (u + v) * 16 * z], at = (a, b) => (alongX ? S(a, b) : S(b, a));
+    const cone = (p) => { ctx.fillStyle = `rgb(${(240 * d) | 0},${(120 * d) | 0},${(30 * d) | 0})`; ctx.beginPath(); ctx.moveTo(p[0], p[1] - 6 * z); ctx.lineTo(p[0] + 2 * z, p[1]); ctx.lineTo(p[0] - 2 * z, p[1]); ctx.closePath(); ctx.fill(); ctx.fillStyle = `rgb(${(245 * d) | 0},${(245 * d) | 0},${(240 * d) | 0})`; ctx.fillRect(p[0] - 1.2 * z, p[1] - 3.6 * z, 2.4 * z, 1 * z); };
+    if (fx === 1) {
+      for (let k = 0; k < 5; k++) cone(at(0.1 + k * 0.2, 0.5));
+      const pv = at(0.45, 0.68); ctx.fillStyle = `rgb(${(70 * d) | 0},${(70 * d) | 0},${(74 * d) | 0})`; ctx.fillRect(pv[0] - 7 * z, pv[1] - 2 * z, 14 * z, 4 * z);   // the patch being laid
+      this.worker(ctx, at(0.62, 0.72), z, d);
+    } else {
+      for (const a of [0.08, 0.92]) { const p0 = at(a, 0.15), p1 = at(a, 0.85); ctx.strokeStyle = `rgb(${(200 * d) | 0},${(40 * d) | 0},${(40 * d) | 0})`; ctx.lineWidth = 2.2 * z; ctx.setLineDash([3 * z, 3 * z]); ctx.beginPath(); ctx.moveTo(p0[0], p0[1] - 4 * z); ctx.lineTo(p1[0], p1[1] - 4 * z); ctx.stroke(); ctx.setLineDash([]); ctx.strokeStyle = `rgb(${(240 * d) | 0},${(240 * d) | 0},${(235 * d) | 0})`; ctx.lineWidth = 0.8 * z; for (const p of [p0, p1]) { ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[0], p[1] - 5 * z); ctx.stroke(); } }
+      const h = at(0.5, 0.5); ctx.fillStyle = `rgb(${(92 * d) | 0},${(72 * d) | 0},${(52 * d) | 0})`; ctx.beginPath(); ctx.ellipse(h[0], h[1], 14 * z, 6 * z, 0, 0, 6.3); ctx.fill();   // the road dug up
+      const dg = at(0.32, 0.4); ctx.fillStyle = `rgb(${(230 * d) | 0},${(178 * d) | 0},${(40 * d) | 0})`; ctx.fillRect(dg[0] - 6 * z, dg[1] - 7 * z, 12 * z, 5 * z); ctx.fillRect(dg[0] - 2 * z, dg[1] - 11 * z, 5 * z, 4 * z);
+      ctx.strokeStyle = `rgb(${(200 * d) | 0},${(150 * d) | 0},${(30 * d) | 0})`; ctx.lineWidth = 1.6 * z; ctx.beginPath(); ctx.moveTo(dg[0] + 4 * z, dg[1] - 9 * z); ctx.lineTo(dg[0] + 11 * z, dg[1] - 13 * z); ctx.lineTo(dg[0] + 14 * z, dg[1] - 6 * z); ctx.stroke();
+      ctx.fillStyle = `rgb(${(40 * d) | 0},${(40 * d) | 0},${(44 * d) | 0})`; ctx.fillRect(dg[0] - 6 * z, dg[1] - 2 * z, 12 * z, 2 * z);
+      this.worker(ctx, at(0.68, 0.62), z, d);
+    }
+  }
+  worker(ctx, p, z, d) {                                   // a road worker in a hi-vis vest and a hard hat
+    ctx.fillStyle = `rgb(${(47 * d) | 0},${(51 * d) | 0},${(64 * d) | 0})`; ctx.fillRect(p[0] - 1.1 * z, p[1] - 1.8 * z, 0.9 * z, 1.8 * z); ctx.fillRect(p[0] + 0.2 * z, p[1] - 1.8 * z, 0.9 * z, 1.8 * z);
+    ctx.fillStyle = `rgb(${(250 * d) | 0},${(190 * d) | 0},${(30 * d) | 0})`; ctx.fillRect(p[0] - 1.4 * z, p[1] - 6.2 * z, 2.8 * z, 4.6 * z);
+    ctx.fillStyle = skinRGB(1, d); ctx.beginPath(); ctx.arc(p[0], p[1] - 7.6 * z, 1.5 * z, 0, 6.3); ctx.fill();
+    ctx.fillStyle = `rgb(${(250 * d) | 0},${(250 * d) | 0},${(245 * d) | 0})`; ctx.fillRect(p[0] - 1.7 * z, p[1] - 9.2 * z, 3.4 * z, 1.1 * z);
+  }
+  grateSprite(mode) {
+    this.grate = this.grate || []; if (this.grate[mode]) return this.grate[mode];
+    const c = document.createElement('canvas'); c.width = 36; c.height = 20; const x = c.getContext('2d'); x.scale(2, 2);
+    const d = mode === 2 ? 0.5 : mode === 1 ? 0.8 : 1, g = (v) => `rgb(${(v * d) | 0},${(v * d) | 0},${((v + 6) * d) | 0})`, P = (u, v) => [9 + (u - v) * 7, 5 + (u + v) * 3.5];
+    const quad = (a, f) => { x.beginPath(); x.moveTo(...a[0]); for (const p of a.slice(1)) x.lineTo(...p); x.closePath(); x.fillStyle = f; x.fill(); };
+    quad([P(-0.62, -0.62), P(0.62, -0.62), P(0.62, 0.62), P(-0.62, 0.62)], g(150));
+    quad([P(-0.5, -0.5), P(0.5, -0.5), P(0.5, 0.5), P(-0.5, 0.5)], g(48));
+    x.strokeStyle = g(120); x.lineWidth = 0.7; for (let k = -2; k <= 2; k++) { x.beginPath(); x.moveTo(...P(k * 0.2, -0.5)); x.lineTo(...P(k * 0.2, 0.5)); x.stroke(); }
+    return (this.grate[mode] = c);
   }
   parkedSprite(col, axis, mode) {
     const key = col * 8 + axis * 4 + mode; this.parked = this.parked || new Map(); let c = this.parked.get(key); if (c) return c;
@@ -1116,25 +1201,33 @@ export class Renderer {
     const d = mode === 2 ? 0.45 : mode === 1 ? 0.85 : 1;
     const sh = (hex, f) => { const h = parseInt(hex.slice(1), 16); return `rgb(${Math.min(255, ((h >> 16) & 255) * f * d) | 0},${Math.min(255, ((h >> 8) & 255) * f * d) | 0},${Math.min(255, (h & 255) * f * d) | 0})`; };
     const poly = (a, f) => { ctx.beginPath(); ctx.moveTo(a[0][0], a[0][1]); for (let i = 1; i < a.length; i++) ctx.lineTo(a[i][0], a[i][1]); ctx.closePath(); ctx.fillStyle = f; ctx.fill(); };
-    const boxAt = (px, py, l, wd, z0, z1, col) => {
+    const boxAt = (px, py, l, wd, z0, z1, col, noTop) => {
       const horiz = c.dx !== 0, bw = horiz ? l : wd, bd = horiz ? wd : l, x = px - bw / 2, y = py - bd / 2;
       poly([P(x, y + bd, z0), P(x + bw, y + bd, z0), P(x + bw, y + bd, z1), P(x, y + bd, z1)], sh(col, 1));
       poly([P(x + bw, y, z0), P(x + bw, y + bd, z0), P(x + bw, y + bd, z1), P(x + bw, y, z1)], sh(col, 0.76));
-      poly([P(x, y, z1), P(x + bw, y, z1), P(x + bw, y + bd, z1), P(x, y + bd, z1)], sh(col, 1.1));
+      if (!noTop) poly([P(x, y, z1), P(x + bw, y, z1), P(x + bw, y + bd, z1), P(x, y + bd, z1)], sh(col, 1.1));
     };
     const fx = c.dx > 0 || c.dy > 0 ? 1 : -1;      // screen-order: draw the part behind first
-    const parts = [[c.px - c.dx * 0.07, c.py - c.dy * 0.07, 0.3, 0.17, 1, 8, c.fire ? '#cf3a2e' : '#3f8f5a'], [c.px + c.dx * 0.18, c.py + c.dy * 0.18, 0.14, 0.17, 1, 6, '#f1f1ee']];
-    for (const q of (fx > 0 ? parts : parts.slice().reverse())) boxAt(...q.slice(0, 4), q[4], q[5], q[6]);
-    if (c.fire) {
-      const on = Math.floor(now * 6) % 2, p = P(c.px + c.dx * 0.16, c.py + c.dy * 0.16, 8);
-      ctx.save(); ctx.globalCompositeOperation = 'lighter';
-      for (const [o, col] of [[-3, on ? 'rgba(255,50,40,.9)' : 'rgba(255,50,40,.15)'], [3, on ? 'rgba(60,120,255,.15)' : 'rgba(60,120,255,.9)']]) { const g2 = ctx.createRadialGradient(p[0] + o * z, p[1], 0, p[0] + o * z, p[1], 9 * z); g2.addColorStop(0, col); g2.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g2; ctx.fillRect(p[0] + o * z - 9 * z, p[1] - 9 * z, 18 * z, 18 * z); }
-      ctx.restore();
-    }
+    const parts = [[c.px - c.dx * 0.07, c.py - c.dy * 0.07, 0.3, 0.17, 1, 8, c.body || (c.fire ? '#cf3a2e' : '#3f8f5a')], [c.px + c.dx * 0.18, c.py + c.dy * 0.18, 0.14, 0.17, 1, 6, c.cab || '#f1f1ee']];
+    const band = c.amb ? [c.px - c.dx * 0.07, c.py - c.dy * 0.07, 0.305, 0.175, 3.6, 5, '#d9312a'] : null;   // the ambulance's red band
+    for (const q of (fx > 0 ? parts : parts.slice().reverse())) { boxAt(...q.slice(0, 4), q[4], q[5], q[6]); if (band && q === parts[0]) boxAt(...band.slice(0, 4), band[4], band[5], band[6], true); }
+    if ((c.fire && !c.quiet) || c.siren) { const p = P(c.px + c.dx * 0.16, c.py + c.dy * 0.16, 8); this.beacon(ctx, p[0], p[1], z, now); }
     if (mode === 2 || (mode === 1 && ctx.gpu)) this.headlights(ctx, c, z, cx, cy, mode, 0.32);
   }
+  // the share of buildings of this kind and level with their lights on after dark (litK from the daily rhythm)
+  litOf(k, l) {
+    const L = this.litK; if (!L) return this.litFrac;
+    return k === T.RES ? L[0] : k === T.COM ? (l <= 1 ? L[1] : L[2]) : k === T.IND ? L[3] : this.litFrac;
+  }
+  // flashing red and blue lights (fire engines, ambulances, police on a call)
+  beacon(ctx, X, Y, z, now) {
+    const on = Math.floor(now * 6) % 2;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    for (const [o, col] of [[-3, on ? 'rgba(255,50,40,.9)' : 'rgba(255,50,40,.15)'], [3, on ? 'rgba(60,120,255,.15)' : 'rgba(60,120,255,.9)']]) { const g2 = ctx.createRadialGradient(X + o * z, Y, 0, X + o * z, Y, 9 * z); g2.addColorStop(0, col); g2.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g2; ctx.fillRect(X + o * z - 9 * z, Y - 9 * z, 18 * z, 18 * z); }
+    ctx.restore();
+  }
   blades(ctx, X, Y, z, t, mode) {
-    const a0 = t * 1.8, L = 25 * z;
+    const a0 = this.bladePh ?? t * 1.8, L = 25 * z;
     ctx.lineCap = 'round';
     for (let i = 0; i < 3; i++) {
       const a = a0 + (i * 2 * Math.PI) / 3, ex = X + Math.cos(a) * L, ey = Y + Math.sin(a) * L * 0.9;
@@ -1185,7 +1278,7 @@ export class Renderer {
     ctx.fillStyle = 'rgba(8,16,30,.4)'; ctx.fillRect(0, 0, W, H);
     let pr = ov === 'trips' ? sim.flowM.pr : null;        // only for the road that is selected, once it has been traced
     if (pr && (!g.sel || pr.tile !== g.sel.y * N + g.sel.x || pr.total <= 0)) pr = null;
-    const ramp = (v, a) => `hsla(${Math.round(120 * Math.max(0, Math.min(1, v)))},78%,50%,${a})`;
+    const ramp = (v, a) => `hsla(${Math.round(120 * Math.max(0, Math.min(1, v)))},78%,50%,${a})`, jamK = (g.rhy || rhythm(g)).jam;
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       const X = (x - y) * 32 * z + cx, Y = (x + y) * 16 * z + cy;
       if (X < -40 * z || X > W + 40 * z || Y < -34 * z || Y > H) continue;
@@ -1215,9 +1308,14 @@ export class Renderer {
         case 'police': if (sim.cov.police[i] > 0.02) col = `rgba(80,140,255,${0.2 + sim.cov.police[i] * 0.5})`; break;
         case 'fire': if (sim.cov.fire[i] > 0.02) col = `rgba(255,110,70,${0.2 + sim.cov.fire[i] * 0.5})`; break;
         case 'health': if (sim.cov.health[i] > 0.02) col = `rgba(255,120,170,${0.2 + sim.cov.health[i] * 0.5})`; break;
-        case 'traffic': if (w.kind[i] === T.ROAD) col = ramp(1 - Math.min(1, sim.flowM.load[i] / 1.4), 0.75); break;
+        case 'traffic': if (w.kind[i] === T.ROAD) col = ramp(1 - Math.min(1, sim.flowM.load[i] * jamK / 1.4), 0.75); break;   // as busy as the roads are at this hour (0.8.11)
         case 'transit': if (sim.cov.transit[i] > 0.02) col = `rgba(70,200,190,${0.2 + sim.cov.transit[i] * 0.5})`; break;
-        case 'metro': if (sim.cov.metro[i] > 0.02) col = `rgba(220,70,60,${0.2 + sim.cov.metro[i] * 0.5})`; break;
+        case 'metro': {                                   // 0.8.12: where a metro is needed. Homes: red no jobs in reach, orange a long trip, green fine, blue by metro. Jobs: red no workers in reach
+          const k2 = w.kind[i], l2 = k2 >= 2 && k2 <= 4 ? sim.lvl(i) : 0; if (!l2) break;
+          if (k2 === T.RES) col = sim.metroRide[i] ? 'rgba(80,150,255,.7)' : !sim.jobReach[i] ? 'rgba(239,90,80,.75)' : sim.commute[i] > 13 ? 'rgba(245,165,60,.6)' : 'rgba(95,211,166,.45)';
+          else col = !sim.workReach[i] ? 'rgba(239,90,80,.55)' : 'rgba(95,211,166,.25)';
+          break;
+        }
         case 'fun': if (sim.cov.fun[i] > 0.02) col = `rgba(190,120,255,${0.2 + sim.cov.fun[i] * 0.5})`; break;
         case 'waste': { const m = sim.wasteMap[i]; col = m === 3 ? 'rgba(95,211,166,.7)' : m === 2 ? 'rgba(239,111,94,.8)' : m === 1 ? 'rgba(176,132,76,.38)' : null; break; }
         case 'edu': if (sim.cov.edu[i] > 0.02) col = `rgba(240,200,70,${0.2 + sim.cov.edu[i] * 0.5})`; break;
@@ -1251,6 +1349,43 @@ export class Renderer {
         ctx.stroke(); ctx.setLineDash([]);
         ctx.fillStyle = live ? '#ffd166' : '#8a93a3'; ctx.beginPath(); ctx.arc(X, Y, (wv === 2 ? 2.2 : 3) * z, 0, 6.3); ctx.fill();
       }
+    }
+    if (ov === 'metro') this.metroMap(ctx, g, z, cx, cy);
+  }
+  // Views → Metro (0.8.12): arrows from homes with no jobs in reach to the jobs they could go to, the tunnels in the colour
+  // of their network, the stations with their names, and the area each serves.
+  metroMap(ctx, g, z, cx, cy) {
+    const sim = g.sim, net = sim.metroNet, S = (x, y) => [(x - y) * 32 * z + cx, (x + y) * 16 * z + cy], zp = Math.max(z, 0.7);   // lines and stations stay readable far out
+    for (const a of sim.metroArrows || []) {
+      const [x0, y0] = S(a.fx + 0.5, a.fy + 0.5), [x1, y1] = S(a.tx + 0.5, a.ty + 0.5), wd = Math.max(2, Math.min(9, a.n / 60)) * zp, ang = Math.atan2(y1 - y0, x1 - x0);
+      ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = wd; ctx.setLineDash([10 * zp, 7 * zp]); ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1 - Math.cos(ang) * 10 * zp, y1 - Math.sin(ang) * 10 * zp); ctx.stroke(); ctx.setLineDash([]);
+      const hl = 10 * zp + wd; ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1 - Math.cos(ang - 0.45) * hl, y1 - Math.sin(ang - 0.45) * hl); ctx.lineTo(x1 - Math.cos(ang + 0.45) * hl, y1 - Math.sin(ang + 0.45) * hl); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(x0, y0, wd * 0.9, 0, 6.3); ctx.fill();
+    }
+    if (!net) return;
+    const col = (st) => (st.links.length ? LINE_COLS[st.comp % LINE_COLS.length] : '#9aa3ad');
+    for (const s of net.st) {                                  // walking catchment
+      const [X, Y] = S(s.cx, s.cy); ctx.strokeStyle = col(s); ctx.globalAlpha = 0.5; ctx.lineWidth = 1.4 * zp; ctx.setLineDash([5 * zp, 5 * zp]);
+      ctx.beginPath(); ctx.ellipse(X, Y, 45.25 * WALK_R * z, 22.6 * WALK_R * z, 0, 0, 6.3); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+    for (const e of net.edges) {
+      const A = net.by.get(e.a), B = net.by.get(e.b), [x0, y0] = S(A.cx, A.cy), [x1, y1] = S(B.cx, B.cy), on = A.on && B.on;
+      ctx.lineCap = 'round'; ctx.strokeStyle = 'rgba(10,14,22,.85)'; ctx.lineWidth = 8 * zp; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      ctx.strokeStyle = on ? col(A) : '#8a93a3'; ctx.lineWidth = 5 * zp; ctx.setLineDash(on ? [] : [6 * zp, 5 * zp]); ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.textAlign = 'center'; ctx.font = `600 ${Math.max(9, Math.round(11 * Math.min(1.4, z)))}px system-ui, sans-serif`;
+    for (const s of net.st) {
+      const [X, Y] = S(s.cx, s.cy), big = s.links.length >= 3, r = (big ? 9 : 6.5) * zp;
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(X, Y, r, 0, 6.3); ctx.fill();
+      ctx.strokeStyle = col(s); ctx.lineWidth = (big ? 3.2 : 2.6) * zp; ctx.stroke();
+      if (big) { ctx.strokeStyle = 'rgba(10,14,22,.85)'; ctx.lineWidth = 1.2 * zp; ctx.beginPath(); ctx.arc(X, Y, r * 0.45, 0, 6.3); ctx.stroke(); }
+      if (!s.on) { ctx.strokeStyle = '#ef6f5e'; ctx.lineWidth = 2 * zp; ctx.beginPath(); ctx.moveTo(X - r * 0.5, Y - r * 0.5); ctx.lineTo(X + r * 0.5, Y + r * 0.5); ctx.stroke(); }
+      const ty = Y - r - 6 * zp, tw = ctx.measureText(s.name).width + 10;
+      ctx.fillStyle = 'rgba(10,14,22,.78)'; ctx.fillRect(X - tw / 2, ty - 12, tw, 16); ctx.fillStyle = '#ffffff'; ctx.fillText(s.name, X, ty);
+    }
+    if (g.tool === 'tunnel' && g.tunnelFrom >= 0) {             // the station a new tunnel starts from
+      const x = g.tunnelFrom % N, y = (g.tunnelFrom / N) | 0, [X, Y] = S(x + 0.5, y + 0.5), p = 1 + 0.25 * Math.sin(performance.now() / 160);
+      ctx.strokeStyle = '#f2b84b'; ctx.lineWidth = 3 * z; ctx.beginPath(); ctx.arc(X, Y, 13 * z * p, 0, 6.3); ctx.stroke();
     }
   }
   drawSlab(ctx, z, cx, cy, mode) {
@@ -1508,11 +1643,13 @@ export class Renderer {
   }
   person(ctx, c, z, cx, cy, mode, t) {
     const X = (c.px - c.py) * 32 * z + cx, Y = (c.px + c.py) * 16 * z + cy;
+    if (c.kid) z *= 0.72;                                                // children on the school run
+    if (c.skin === undefined) c.skin = Math.floor(hash(c.col * 31 + ((c.tx * 7 + c.ty * 13) | 0), c.ty | 0, 91) * SKIN.length);
     const fade = c.alpha !== undefined && c.alpha < 1; if (fade) { if (c.alpha <= 0) return; ctx.globalAlpha = c.alpha; }
     if (c.swim) {                                                        // a swimmer: head and shoulders, and a ring of ripples
       const d = mode === 2 ? 0.5 : mode === 1 ? 0.85 : 1, r = 2.6 + Math.sin(t * 2 + c.col) * 0.5;
       ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 0.6 * z; ctx.beginPath(); ctx.ellipse(X, Y, r * z, r * 0.45 * z, 0, 0, 6.3); ctx.stroke();
-      ctx.fillStyle = `rgb(${(224 * d) | 0},${(180 * d) | 0},${(140 * d) | 0})`; ctx.beginPath(); ctx.arc(X, Y - 1.2 * z, 1.4 * z, 0, 6.3); ctx.fill();
+      ctx.fillStyle = skinRGB(c.skin, d); ctx.beginPath(); ctx.arc(X, Y - 1.2 * z, 1.4 * z, 0, 6.3); ctx.fill();
       if (fade) ctx.globalAlpha = 1; return;
     }
     const d = mode === 2 ? 0.5 : mode === 1 ? 0.85 : 1, bob = c.idle || c.still ? 0 : Math.abs(Math.sin(t * 7 + c.col * 3)) * 0.8 * z;
@@ -1522,17 +1659,17 @@ export class Renderer {
     const stride = c.idle || c.still ? 0 : Math.sin(t * 9 + c.col * 3) * 0.9 * z;                       // legs swing as they walk
     ctx.fillStyle = `rgb(${(47 * d) | 0},${(51 * d) | 0},${(64 * d) | 0})`; ctx.fillRect(X - 1.1 * z + stride * 0.5, Y - 1.6 * z - bob + Math.max(0, stride) * 0.4, 0.9 * z, 1.8 * z - Math.max(0, stride) * 0.4); ctx.fillRect(X + 0.2 * z - stride * 0.5, Y - 1.6 * z - bob + Math.max(0, -stride) * 0.4, 0.9 * z, 1.8 * z - Math.max(0, -stride) * 0.4);
     ctx.fillStyle = body; ctx.fillRect(X - 1.3 * z, Y - 6 * z - bob, 2.6 * z, 4.6 * z);
-    ctx.fillStyle = `rgb(${(224 * d) | 0},${(180 * d) | 0},${(140 * d) | 0})`; ctx.beginPath(); ctx.arc(X, Y - 7.4 * z - bob, 1.6 * z, 0, 6.3); ctx.fill();
+    ctx.fillStyle = skinRGB(c.skin, d); ctx.beginPath(); ctx.arc(X, Y - 7.4 * z - bob, 1.6 * z, 0, 6.3); ctx.fill();
     if (fade) ctx.globalAlpha = 1;
   }
   // A car is drawn from a small cached picture (one per color, direction and lighting) instead of six shapes every frame.
-  carSprite(col, horiz, mode, van) {
-    const cache = this.carCache || (this.carCache = []), key = col * 12 + (van ? 6 : 0) + (horiz ? 3 : 0) + mode;
+  carSprite(col, horiz, mode, van, pol) {
+    const cache = this.carCache || (this.carCache = []), key = pol ? 200 + (horiz ? 3 : 0) + mode : col * 12 + (van ? 6 : 0) + (horiz ? 3 : 0) + mode;
     if (cache[key]) return cache[key];
     const P = (x, y, h = 0) => [(x - y) * 32, (x + y) * 16 - h];
     const l = 0.3, wd = 0.14, bw = horiz ? l : wd, bd = horiz ? wd : l, x = -bw / 2, y = -bd / 2;
     const sh = (hex, f) => { const h = parseInt(hex.slice(1), 16), d = mode === 2 ? 0.45 : mode === 1 ? 0.85 : 1; return `rgb(${Math.min(255, ((h >> 16) & 255) * f * d) | 0},${Math.min(255, ((h >> 8) & 255) * f * d) | 0},${Math.min(255, (h & 255) * f * d) | 0})`; };
-    const hb = 4.5, cw = horiz ? bw * 0.5 : bw * 0.86, cd = horiz ? bd * 0.86 : bd * 0.5, x2 = x + (bw - cw) / 2, y2 = y + (bd - cd) / 2, h2 = hb + 3.4, base = CAR_COLS[col];
+    const hb = 4.5, cw = horiz ? bw * 0.5 : bw * 0.86, cd = horiz ? bd * 0.86 : bd * 0.5, x2 = x + (bw - cw) / 2, y2 = y + (bd - cd) / 2, h2 = hb + 3.4, base = pol ? '#f4f4f2' : CAR_COLS[col];
     const polys = [
       [[P(x, y + bd, 0), P(x + bw, y + bd, 0), P(x + bw, y + bd, hb), P(x, y + bd, hb)], sh(base, 1)],
       [[P(x + bw, y, 0), P(x + bw, y + bd, 0), P(x + bw, y + bd, hb), P(x + bw, y, hb)], sh(base, 0.76)],
@@ -1541,6 +1678,12 @@ export class Renderer {
       [[P(x2 + cw, y2, hb), P(x2 + cw, y2 + cd, hb), P(x2 + cw, y2 + cd, h2), P(x2 + cw, y2, h2)], sh('#9cbfd4', 1)],
       [[P(x2, y2, h2), P(x2 + cw, y2, h2), P(x2 + cw, y2 + cd, h2), P(x2, y2 + cd, h2)], sh('#e1eff7', 1)],
     ];
+    if (pol) {                                              // police: a dark blue band along the doors and a light bar on the roof
+      polys.splice(2, 0, [[P(x, y + bd, 1.6), P(x + bw, y + bd, 1.6), P(x + bw, y + bd, 3), P(x, y + bd, 3)], sh('#1f3f8f', 1)], [[P(x + bw, y, 1.6), P(x + bw, y + bd, 1.6), P(x + bw, y + bd, 3), P(x + bw, y, 3)], sh('#1f3f8f', 0.8)]);
+      const lw = horiz ? cw * 0.3 : cw * 0.9, ld = horiz ? cd * 0.9 : cd * 0.3, lx = x2 + (cw - lw) / 2, ly = y2 + (cd - ld) / 2;
+      polys.push([[P(lx, ly + ld, h2), P(lx + lw, ly + ld, h2), P(lx + lw, ly + ld, h2 + 1.2), P(lx, ly + ld, h2 + 1.2)], sh('#d9312a', 1)]);
+      polys.push([[P(lx, ly, h2 + 1.2), P(lx + lw, ly, h2 + 1.2), P(lx + lw, ly + ld, h2 + 1.2), P(lx, ly + ld, h2 + 1.2)], sh('#3d6fd9', 1.1)]);
+    }
     if (van) {                                              // moving day: boxes strapped to the roof
       const box = (bx, by, bw2, bd2, h0, h1, c) => {
         polys.push([[P(bx, by + bd2, h0), P(bx + bw2, by + bd2, h0), P(bx + bw2, by + bd2, h1), P(bx, by + bd2, h1)], sh(c, 0.95)]);
@@ -1559,11 +1702,12 @@ export class Renderer {
     return (cache[key] = { c, ox, oy, S });
   }
   car(ctx, c, z, cx, cy, mode) {
-    const zd = z * this.dpr, sp = mip(this.carSprite(c.col % CAR_COLS.length, c.dx !== 0, mode, !!c.van), zd <= 1 ? 2 : zd <= 2 ? 1 : 0);
+    const zd = z * this.dpr, sp = mip(this.carSprite(c.col % CAR_COLS.length, c.dx !== 0, mode, !!c.van, !!c.police), zd <= 1 ? 2 : zd <= 2 ? 1 : 0);
     const X = (c.px - c.py) * 32 * z + cx, Y = (c.px + c.py) * 16 * z + cy;
     const fade = c.alpha !== undefined && c.alpha < 1; if (fade) ctx.globalAlpha = Math.max(0, c.alpha);   // vans fade at the map edge
     ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
     if (fade) ctx.globalAlpha = 1;
+    if (c.siren) this.beacon(ctx, X, Y - 9 * z, z * 0.8, performance.now() / 1000);
     if (mode === 2 || (mode === 1 && ctx.gpu)) this.headlights(ctx, c, z, cx, cy, mode, 0.2);
   }
 

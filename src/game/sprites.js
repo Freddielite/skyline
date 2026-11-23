@@ -1247,6 +1247,151 @@ function recycle(k) {
   for (let i = 0; i < 6; i++) box(1.1 + (i % 3) * 0.22, 1.4 + Math.floor(i / 3) * 0.2, 0.2, 0.18, 8, faces(bc[i % 4]));
   box(0.2, 1.6, 0.5, 0.18, 7, faces('#3f8f5a')); box(0.2, 1.6, 0.16, 0.18, 5, faces('#f2f2f2'), 7);
 }
+// the recycling sign: a green disc with three white arrows chasing each other round a triangle
+function recycleSign(k, t, r) {
+  const { circ, C, ctx } = k;
+  circ(t, r + 1, C('#f4f4f0')); circ(t, r, C('#3a9d6e'));
+  const v = [0, 1, 2].map((i) => { const a = -Math.PI / 2 + i * 2.0944; return [t[0] + Math.cos(a) * r * 0.62, t[1] + Math.sin(a) * r * 0.62 + r * 0.08]; });
+  ctx.strokeStyle = '#ffffff'; ctx.fillStyle = '#ffffff'; ctx.lineWidth = Math.max(0.7, r * 0.22); ctx.lineCap = 'round';
+  for (let i = 0; i < 3; i++) {
+    const a = v[i], b = v[(i + 1) % 3], ax = a[0] + (b[0] - a[0]) * 0.18, ay = a[1] + (b[1] - a[1]) * 0.18, ex = a[0] + (b[0] - a[0]) * 0.7, ey = a[1] + (b[1] - a[1]) * 0.7;
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.stroke();
+    const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L, hl = r * 0.36;
+    ctx.beginPath(); ctx.moveTo(ex + ux * hl * 0.8, ey + uy * hl * 0.8); ctx.lineTo(ex - uy * hl * 0.6, ey + ux * hl * 0.6); ctx.lineTo(ex + uy * hl * 0.6, ey - ux * hl * 0.6); ctx.closePath(); ctx.fill();
+  }
+}
+// Transfer station (0.8.10): a small tipping hall where the collection trucks unload, a compactor pressing it into a
+// container, and a hook-lift lorry that takes full containers to the landfill or recycling center.
+function transferStation(k) {
+  const { P, poly, box, faces, C, line, circ } = k;
+  padRect(k, 1, 1, '#b4ae9e', ['#9d978a', '#c6c0b0']);
+  const x = 0.1, y = 0.1, w = 0.62, d = 0.5, h = 22;
+  box(x, y, w, d, h, { l: '#cfd6cf', r: shade('#cfd6cf', 0.76), t: '#7f8a84' });
+  poly([P(x, y + d, h - 6), P(x + w, y + d, h - 6), P(x + w, y + d, h - 3), P(x, y + d, h - 3)], C('#3a9d6e'));     // green band
+  poly([P(x + w, y, h - 6), P(x + w, y + d, h - 6), P(x + w, y + d, h - 3), P(x + w, y, h - 3)], C(shade('#3a9d6e', 0.8)));
+  poly([P(x + 0.1, y + d, 0), P(x + 0.44, y + d, 0), P(x + 0.44, y + d, 13), P(x + 0.1, y + d, 13)], C(k.mode === 2 ? '#e9c77a' : '#3b4048'));   // open tipping door
+  for (let i = 1; i < 4; i++) line(P(x + 0.1, y + d, i * 3.2), P(x + 0.44, y + d, i * 3.2), 'rgba(255,255,255,.12)', 0.5);
+  poly([P(x + w, y + 0.12, 3), P(x + w, y + 0.36, 3), P(x + w, y + 0.36, 9), P(x + w, y + 0.12, 9)], C(k.mode === 2 ? '#ffe7a0' : '#5d7f9a'));   // office window
+  // the compactor pressing garbage into its container on the right, and a spare skip in front
+  box(0.76, 0.14, 0.16, 0.24, 9, faces('#e3b33c'));
+  box(0.76, 0.4, 0.16, 0.24, 7, faces('#5b6f86'));
+  for (let i = 1; i < 4; i++) line(P(0.92, 0.4 + i * 0.06, 0.5), P(0.92, 0.4 + i * 0.06, 6.5), 'rgba(0,0,0,.18)', 0.5);
+  box(0.12, 0.7, 0.3, 0.16, 5, faces('#3f8f5a'));
+  // the hook-lift lorry pointing out of the gate: an orange container behind a white cab
+  box(0.5, 0.72, 0.3, 0.15, 7, faces('#e07a2e'), 2);
+  for (let i = 1; i < 4; i++) line(P(0.5 + i * 0.075, 0.87, 2.5), P(0.5 + i * 0.075, 0.87, 8.5), 'rgba(0,0,0,.18)', 0.5);
+  box(0.81, 0.72, 0.11, 0.15, 9, faces('#f2f2f0'), 2);
+  poly([P(0.92, 0.74, 6.5), P(0.92, 0.85, 6.5), P(0.92, 0.85, 10), P(0.92, 0.74, 10)], C(k.mode === 2 ? '#ffe7a0' : '#6d8fa8'));
+  for (const u of [0.57, 0.73, 0.88]) circ(P(u, 0.87, 1.6), 1.6, C('#22262b'));
+  // the sign at the left corner
+  line(P(0.12, 0.9), P(0.12, 0.9, 20), C('#5a6270'), 1);
+  recycleSign(k, P(0.12, 0.9, 23), 3.6);
+}
+// Recycling complex (0.8.10): the big waste building for a grown city. A sorting hall with a sawtooth roof fed by a conveyor
+// from the tipping bunker, a baling shed, sorted bales stacked in the yard, glass bunkers, an office and a weighbridge.
+function recycleComplex(k) {
+  const { P, poly, box, faces, C, line, circ, tree } = k;
+  padRect(k, 3, 3, '#aaa594', ['#8e8a7c', '#bcb7a7']);
+  poly([P(0.1, 2.5), P(2.9, 2.5), P(2.9, 2.78), P(0.1, 2.78)], C('#9a9688'), null, true);       // the yard road along the front
+  for (let i = 0; i < 7; i++) line(P(0.2 + i * 0.4, 2.64, 0.3), P(0.4 + i * 0.4, 2.64, 0.3), 'rgba(255,255,255,.35)', 0.8);
+  // baling shed, back right (drawn first: it stands behind the hall's right end)
+  const bx = 2.05, by = 0.15, bw = 0.8, bd = 0.85, bh = 24;
+  box(bx, by, bw, bd, bh, { l: '#c2c8cf', r: shade('#c2c8cf', 0.76), t: '#8d96a1' });
+  for (let i = 1; i < 6; i++) line(P(bx + bw, by + i * bd / 6, 1), P(bx + bw, by + i * bd / 6, bh - 1), 'rgba(0,0,0,.14)', 0.5);   // cladding ribs
+  poly([P(bx + bw, by + 0.1, 0), P(bx + bw, by + 0.62, 0), P(bx + bw, by + 0.62, 15), P(bx + bw, by + 0.1, 15)], C(k.mode === 2 ? '#d9b46a' : '#40464f'));   // open bay facing the side road
+  const bale = (x, y, z, col) => box(x, y, 0.12, 0.13, 6, faces(col), z);
+  for (let i = 0; i < 3; i++) bale(bx + bw - 0.02, by + 0.14 + i * 0.16, 0, ['#3d8bd9', '#e4e2da', '#a3aab3'][i]);
+  bale(bx + bw - 0.02, by + 0.3, 6, '#b08a5a');
+  // the sorting hall, back left: long, with a green band, a strip of windows and a sawtooth roof of north lights
+  const x = 0.15, y = 0.15, w = 1.8, d = 1.05, h = 36;
+  box(x, y, w, d, h, { l: '#dfe6e2', r: shade('#dfe6e2', 0.76), t: '#9aa5a0' });
+  poly([P(x, y + d, h - 9), P(x + w, y + d, h - 9), P(x + w, y + d, h - 4), P(x, y + d, h - 4)], C('#3a9d6e'));
+  poly([P(x + w, y, h - 9), P(x + w, y + d, h - 9), P(x + w, y + d, h - 4), P(x + w, y, h - 4)], C(shade('#3a9d6e', 0.8)));
+  k.wins(x, y, w, d, h, 141, { dens: 2.2, rh: 10, wh: 4.5, base: 12 });
+  for (let i = 0; i < 6; i++) {                                         // sawtooth: each tooth's glass faces the back
+    const u0 = x + 0.06 + i * 0.28, u1 = u0 + 0.26;
+    poly([P(u0, y + 0.06, h), P(u0, y + d - 0.06, h), P(u0, y + d - 0.06, h + 9), P(u0, y + 0.06, h + 9)], C(k.mode === 2 ? '#e8d59a' : '#8fb4c9'));
+    poly([P(u0, y + 0.06, h + 9), P(u0, y + d - 0.06, h + 9), P(u1, y + d - 0.06, h), P(u1, y + 0.06, h)], C(SNOW ? '#eef2f6' : '#a7b1ad'));
+    line(P(u0, y + d - 0.06, h + 9), P(u1, y + d - 0.06, h), 'rgba(0,0,0,.25)', 0.6);
+  }
+  // big doors on the front face, where the trucks unload
+  for (const u of [0.35, 1.25]) poly([P(x + u, y + d, 0), P(x + u + 0.36, y + d, 0), P(x + u + 0.36, y + d, 17), P(x + u, y + d, 17)], C(k.mode === 2 ? '#f0cf82' : '#4a525c'));
+  for (const u of [0.35, 1.25]) for (let j = 1; j < 5; j++) line(P(x + u, y + d, j * 3.4), P(x + u + 0.36, y + d, j * 3.4), 'rgba(255,255,255,.12)', 0.5);
+  // the recycling sign on the band
+  recycleSign(k, P(x + 1.02, y + d, h - 1), 5.6);
+  // tipping bunker and the conveyor up into the hall's right side
+  box(2.15, 1.25, 0.5, 0.42, 6, faces('#8d949c'));
+  poly([P(2.2, 1.3, 6), P(2.6, 1.3, 6), P(2.6, 1.62, 6), P(2.2, 1.62, 6)], C('#6f6452'));
+  const tc = ['#b9b2a4', '#8a8f96', '#a8826a', '#d8d4c8', '#7f8fa6', '#c8bc8a'];
+  for (let i = 0; i < 22; i++) { const q = P(2.23 + hash(i, 21, 3) * 0.34, 1.33 + hash(i, 22, 3) * 0.26, 6.5); k.ctx.fillStyle = C(tc[i % tc.length]); k.ctx.fillRect(q[0] - 1, q[1] - 0.8, 2, 1.6); }
+  const c0 = P(2.25, 1.35, 6), c1 = P(x + w, 0.95, 26);
+  line(c0, c1, C('#5f6670'), 4.2); line([c0[0], c0[1] - 1.6], [c1[0], c1[1] - 1.6], C('#9aa2ab'), 1.4);
+  for (let i = 1; i < 4; i++) { const f = i / 4, px = c0[0] + (c1[0] - c0[0]) * f, py = c0[1] + (c1[1] - c0[1]) * f; line([px, py + 2], [px, py + 2 + 26 * f * 0.9], C('#6b7280'), 0.9); }
+  // sorted bales in the yard, front left: paper (blue), plastic (white), cans (silver), cardboard (brown)
+  const cols = ['#3d8bd9', '#e4e2da', '#a3aab3', '#b08a5a'];
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 4; c++) {
+    const bx0 = 0.3 + c * 0.32, by0 = 1.55 + r * 0.32, col = cols[(c + r) % 4], n = 1 + ((c + r * 3) % 3);
+    for (let z = 0; z < n; z++) box(bx0, by0, 0.24, 0.22, 6.5, faces(col), z * 6.5);
+  }
+  // glass bunkers: three bays of green, brown and clear glass
+  for (let i = 0; i < 3; i++) {
+    const u = 0.3 + i * 0.36;
+    box(u, 2.2, 0.32, 0.2, 4, faces('#9a968a'));
+    poly([P(u + 0.03, 2.23, 4.2), P(u + 0.29, 2.23, 4.2), P(u + 0.29, 2.37, 4.2), P(u + 0.03, 2.37, 4.2)], C(['#4f9a6a', '#8a5a34', '#cfe3e8'][i]));
+  }
+  // office with a glass front, and the weighbridge, front right
+  box(1.85, 1.75, 0.55, 0.38, 16, faces('#eceae4'));
+  poly([P(1.88, 2.13, 3), P(2.37, 2.13, 3), P(2.37, 2.13, 13), P(1.88, 2.13, 13)], C(k.mode === 2 ? '#ffe7a0' : '#6f93ad'), 'glass');
+  poly([P(1.85, 2.13, 14), P(2.4, 2.13, 14), P(2.4, 2.13, 16), P(1.85, 2.13, 16)], C('#3a9d6e'));
+  poly([P(2.5, 1.8, 0.5), P(2.85, 1.8, 0.5), P(2.85, 2.38, 0.5), P(2.5, 2.38, 0.5)], C('#7d838c'));
+  line(P(2.5, 1.8, 0.5), P(2.5, 2.38, 0.5), C('#5d636c'), 0.8);
+  // a lorry on the weighbridge
+  box(2.56, 1.86, 0.22, 0.34, 8, faces('#3a9d6e'), 2);
+  box(2.56, 2.2, 0.22, 0.1, 9, faces('#f2f2f0'), 2);
+  for (const v of [1.94, 2.24]) circ(P(2.8, v, 1.6), 1.7, C('#22262b'));
+  // trees at the front corners and a low fence with the gate at the yard road
+  tree(0.2, 2.86, 0, 41); tree(2.86, 1.6, 3, 42);
+  for (let i = 0; i <= 12; i++) { const u = i / 4; line(P(2.97, u), P(2.97, u, 6), C('#6b7280'), 0.6); }
+  line(P(2.97, 0, 6), P(2.97, 2.45, 6), C('#6b7280'), 0.7);
+}
+// Battery storage (0.9.0): rows of white battery cabinets with cooling fans on top, a transformer and a fence
+function batteryStore(k) {
+  const { P, poly, box, faces, C, line, circ } = k;
+  padRect(k, 1, 1, '#b8b4a8', ['#a29e92', '#c8c4b8']);
+  for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) {
+    const x = 0.1 + c * 0.25, y = 0.12 + r * 0.36;
+    box(x, y, 0.21, 0.28, 12, { l: '#eceef0', r: shade('#eceef0', 0.78), t: '#d4d8dc' });
+    poly([P(x + 0.03, y + 0.28, 3), P(x + 0.18, y + 0.28, 3), P(x + 0.18, y + 0.28, 9), P(x + 0.03, y + 0.28, 9)], C('#3a9d6e'));
+    circ(P(x + 0.105, y + 0.14, 12), 2.2, C('#7b828c'));
+  }
+  box(0.82, 0.18, 0.12, 0.2, 10, faces('#8a9099'));
+  line(P(0.88, 0.28, 10), P(0.88, 0.28, 16), C('#5a6270'), 0.9);
+  circ(P(0.06, 0.94, 7), 1.6, C(k.mode === 2 ? '#7dffa0' : '#3a9d6e'));
+  for (let i = 0; i <= 4; i++) { const u = i / 4; line(P(u, 0.98), P(u, 0.98, 5), C('#6b7280'), 0.6); line(P(0.98, u), P(0.98, u, 5), C('#6b7280'), 0.6); }
+  line(P(0, 0.98, 5), P(1, 0.98, 5), C('#6b7280'), 0.7); line(P(0.98, 0, 5), P(0.98, 1, 5), C('#6b7280'), 0.7);
+}
+// Sewage works (0.9.0): round settling tanks of murky water with turning arms, an aeration basin, the works building
+function sewageWorks(k) {
+  const { P, poly, box, faces, C, line, ell, circ } = k;
+  padRect(k, 2, 2, '#b7b3a3', ['#9f9b8c', '#c9c5b5']);
+  const tank = (x, y, r, water) => {
+    const c = P(x, y);
+    ell([c[0], c[1] + 3], r, r * 0.5, C('#8f969e')); ell([c[0], c[1] + 1], r, r * 0.5, C('#c4c9cf')); ell([c[0], c[1]], r - 3, (r - 3) * 0.5, C(water));
+    const a = k.mode === 0 ? 2.2 : 0.8; line([c[0], c[1]], [c[0] + Math.cos(a) * (r - 4), c[1] + Math.sin(a) * (r - 4) * 0.5], C('#f2f2f2'), 1.4); circ([c[0], c[1]], 1.8, C('#6b7280'));
+  };
+  tank(0.55, 0.55, 22, '#8a8a5a'); tank(1.45, 0.55, 22, '#6f8f7a');
+  // aeration basin: a long tank with bubbles
+  box(0.15, 1.15, 1.0, 0.5, 4, { l: '#c4c9cf', r: '#a3a9b0', t: '#c4c9cf' });
+  poly([P(0.19, 1.19, 4), P(1.11, 1.19, 4), P(1.11, 1.61, 4), P(0.19, 1.61, 4)], C('#7f9a86'));
+  for (let i = 0; i < 16; i++) circ(P(0.24 + (i % 8) * 0.12, 1.28 + Math.floor(i / 8) * 0.2, 4.4), 1, 'rgba(255,255,255,.55)');
+  // the works building with a blue band
+  box(1.3, 1.15, 0.55, 0.6, 20, { l: '#e6e2d8', r: shade('#e6e2d8', 0.78), t: '#8d969e' });
+  poly([P(1.3, 1.75, 12), P(1.85, 1.75, 12), P(1.85, 1.75, 15), P(1.3, 1.75, 15)], C('#3d8bd9'));
+  poly([P(1.42, 1.75, 3), P(1.62, 1.75, 3), P(1.62, 1.75, 9), P(1.42, 1.75, 9)], C(k.mode === 2 ? '#ffe7a0' : '#5d7f9a'));
+  line(P(1.15, 1.4, 3), P(1.3, 1.4, 3), C('#aeb7c2'), 3.4);
+  for (let i = 0; i <= 8; i++) { const u = i / 4; line(P(u, 1.97), P(u, 1.97, 6), C('#6b7280'), 0.7); line(P(1.97, u), P(1.97, u, 6), C('#6b7280'), 0.7); }
+  line(P(0, 1.97, 6), P(2, 1.97, 6), C('#6b7280'), 0.8); line(P(1.97, 0, 6), P(1.97, 2, 6), C('#6b7280'), 0.8);
+}
 function wte(k) {
   const { P, poly, box, faces, sh, C, line, cyl, circ } = k;
   padRect(k, 2, 2, '#a9a493', ['#8a8574', '#bdb8a6']);
@@ -1365,6 +1510,8 @@ function metro(k) {
 }
 const SVC_SPR_SHORE = { 23: [pier, 1, 1, 70, 2], 24: [beach, 2, 2, 60, 1], 25: [marina, 2, 2, 80, 2], 26: [ferryPier, 1, 1, 70, 1] };   // last number: tiles the picture reaches beyond its lot
 const SVC_SPR = { ...SVC_SPR_SHORE, 1: [coalPlant, 2, 2, 190], 2: [wind, 1, 1, 130], 3: [waterTower, 1, 1, 130], 4: [police, 1, 1, 100], 5: [fireStation, 1, 1, 130], 6: [clinic, 1, 1, 110], 7: [school, 1, 1, 130], ...SVC_SPR_X };
+SVC_SPR[33] = [batteryStore, 1, 1, 60]; SVC_SPR[34] = [sewageWorks, 2, 2, 80];
+SVC_SPR[31] = [transferStation, 1, 1, 70]; SVC_SPR[32] = [recycleComplex, 3, 3, 110];
 SVC_SPR[28] = [gasPlant, 3, 3, 150]; SVC_SPR[29] = [solarFarm, 3, 3, 60]; SVC_SPR[30] = [nuclearPlant, 4, 4, 130];
 export function serviceSprite(id, mode, lit = true, face = 0, hi = false) {
   lit = mode === 2 ? !!lit : true;

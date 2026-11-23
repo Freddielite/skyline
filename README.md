@@ -216,6 +216,58 @@ Graphics and sound
 - Manhole covers hint at buried pipes in the normal view; the water view shows live pipes in blue and dead ones in gray
 - Older saves have no pipes: connect your towers to the buildings with pipes (you get 90 days before buildings without water start losing upgrades)
 
+## 0.9.0: roads, power and sewage
+
+- Roads wear out with traffic: cracks, then potholes, and worn roads are slower
+- Repair crews fix the worst roads: cones close one lane for a small repair, barriers and a digger close the road for a big one and traffic goes round
+- Tap a road to see its condition and Repair now; City → Services has a Road repairs budget; the Budget shows what repairs cost
+- Solar farms make 320 in full sun but nothing at night: 160 on average. Wind turbines follow the wind and the weather
+- New Battery storage stores sun and wind for the night and calm days
+- Nuclear plants need cooling water (a lake or the sea next to them, or a pipe); gas plants need cooling and a road to the highway for gas; coal plants need a road to the highway, and coal lorries drive in
+- Tap a power plant to see what it really makes and why
+- New Sewage works: without one, sewage pours into the nearest lake or sea, the water turns brown, the shore smells and beaches lose visitors. Cleaned water partly comes back as supply
+- Existing cities: check your power. Inland nuclear plants without a pipe, and coal or gas plants with no road to the highway, now make less or nothing (the advisors say so)
+
+## 0.8.13: quick wins
+
+- Every view explains its colours in a short legend under the view's name
+- City → Budget shows how people get to work: car, bus, metro, walking, or no job in reach, and how that changed since the start of the month
+- More advisor messages have Show on map: power, water, garbage, transfer stations and metro problems take you to the place
+- Undo after bulldozing a metro station brings its tunnels back
+
+## 0.8.12: metro network
+
+- Link metro stations with tunnels: Transit → Tunnel, tap a station, then another ($40 a tile). Keep tapping to build a line
+- A station can have several tunnels, so lines can branch, loop and meet at interchanges
+- People take the metro when it is quicker than driving: homes far from the jobs get them in reach, empty workplaces fill and fewer cars are on the road
+- Citizens walk to the station, go underground and come up near where they are going
+- Views → Metro shows homes with no jobs in reach, empty workplaces, arrows where a line would help most, and your lines in colour with station names
+- Placing a station shows how many residents and jobs it would serve
+- Tap a station to see its tunnels and riders, or remove a tunnel; tap a home to see how its people get to work
+- Ventilation grates on the streets above tunnels
+- Older cities keep working: their stations are linked automatically
+
+## 0.8.11: a city with a daily rhythm
+
+- Rush hours: the roads fill around 08:00 and 17:00, quieten at midday and are almost empty at night. Weekends are calmer, and the clock shows the day of the week
+- The Traffic view shows how busy the roads are at this hour
+- Cars park by shops and offices in the day and outside homes in the evening
+- After dark, homes go dark one by one through the night, offices empty out, shops keep their displays lit and factories run a night shift
+- Police cars patrol around their stations, sometimes with flashing lights
+- Ambulances drive out to homes with lights flashing and back to the clinic or hospital
+- Fire engines make inspection runs on weekdays
+- School buses and children walking to and from school on weekday mornings and afternoons (not in the summer holidays)
+- Goods lorries drive from factories to shops and out along the highway
+- People now have a range of skin tones
+
+## 0.8.10: transfer stations and a big recycling complex
+
+- New Recycling complex (Waste → Big recycling, unlocks at 2,500 residents): one 3×3 building holds 1,200 garbage, as much as about five recycling centers, and reaches 22 tiles
+- New Transfer station (Waste → Transfer, $900, unlocks at 600): place it next to a road. It collects garbage from buildings within 10 tiles and trucks it by road to any landfill, recycling center, waste-to-energy plant or complex that still has room, nearest first
+- Garbage lorries drive between transfer stations and the waste buildings they send to
+- Tap a waste building to see how full it is; tap a transfer station to see where its garbage goes
+- Advisors tell you when a transfer station has no road, can't reach a waste building, or everything it reaches is full
+
 ## 0.8.9: every building on its own lot
 
 - The stadium is redrawn to fit its lot: it no longer spreads over the roads around it
@@ -267,6 +319,11 @@ Graphics and sound
 - When you're not moving the map, the city is drawn once and reused, and only the moving things (cars, people, ships, traffic lights, flags, building sites, smoke) are drawn each frame. About five times less drawing work in a big city, with every graphics setting still on
 - Trees sway while you move the map and hold still when the view is still
 
+- **0.9.0:** roads, power and sewage get real. Roads wear with traffic (cracks, potholes, slower); crews repair the worst, closing a lane or the whole road so drivers go round; Repair now in a road's Inspector; a Road repairs budget. Solar makes 320 in full sun but 160 on average; wind turbines follow the wind; batteries store sun and wind for the night; nuclear and gas plants need cooling water (a lake or sea next to them, or pipes); coal and gas need a road to the highway for their fuel, and coal lorries drive in. Sewage from buildings with water goes into the nearest water unless a Sewage works cleans it; dirty water shows on the map, smells, and keeps visitors from beaches, piers and marinas; cleaned water partly comes back as supply.
+- **0.8.13:** quick wins. Every view has a one-line legend; City → Budget shows how people get to work (car, bus, metro, walk, no job in reach) with the change since the start of the month; more advisor messages have Show on map (power, water, waste, transfer stations, metro); Undo after bulldozing a metro station brings its tunnels back.
+- **0.8.12:** a real metro network. Transit → Tunnel: tap a station, then another, and the game digs the tunnel ($40 a tile); stations can have several tunnels, so lines branch, loop and meet at interchanges. Commutes go walk, ride, walk through the whole network and people take the metro when it is quicker than the road, so homes far from jobs get them in reach and fewer cars drive. Citizens walk to stations, go underground and come up near work. Views → Metro shows homes with no jobs in reach, empty workplaces, arrows where a line would help, and the lines in colour with station names; placing a station shows how many residents and jobs it would serve. Ventilation grates over tunnels. Older cities get tunnels between their stations.
+- **0.8.11:** the city's daily rhythm and services you can see. Traffic follows the clock (morning and evening rush, quiet nights, calmer weekends; the clock shows the weekday) and the Traffic view shows the roads at this hour. Car parks fill by shops and offices in the day and outside homes in the evening. After dark homes go dark one by one, offices empty out, shops keep their displays lit, factories run a night shift. Police patrols, ambulances, fire engine inspections, school buses and children on the school run, and goods lorries to shops and the highway. People have a range of skin tones.
+- **0.8.10:** bigger garbage handling. New Recycling complex (3×3, holds 1,200, reaches 22 tiles, unlocks at 2,500 residents) and Transfer stations (1×1, $900, unlock at 600): a station collects garbage within 10 tiles and trucks it by road to whichever landfill, recycling center, waste-to-energy plant or complex has room, nearest by road first. Lorries drive the real routes. The Inspector shows how full each waste building is and where a station sends its garbage; the advisors say when a station has no road, no road to a waste building, or everything it reaches is full.
 - **0.8.9:** every building now stays on its own lot. The stadium is redrawn to fit its 3×3 lot (it spread over the roads around it), and palms, trees, treatment basins and a factory tank that hung over the edge of their lots are moved in. All 546 building pictures checked. New rule 6 for future art. Details in "Buildings on their lots" above.
 - **0.8.8:** street trees stand on the pavement instead of in the road; street trees, parked cars, benches, give-way signs and power lines no longer blink out around traffic when the view is still; traffic lights no longer come and go when a junction's traffic hovers around the limit, and they're kept in the save. Details in "Street trees, lights and blinking objects" above.
 - **0.8.7:** Pretty no longer lags when a lot is happening. Every picture is trimmed to what is actually drawn (about 70% of a building's picture was empty), so a busy view fits in the graphics chip's memory again instead of reloading about 60 MB of pictures every frame; the "redraw what stands in front of a car" step is clipped on the CPU so the whole frame stays a handful of draw calls instead of up to 200; and a busy city redraws its still layer at most twice a second. Looks the same. Also fixed: cars, people and building sites could show through buildings in front of them with the still view, and tall buildings just below the bottom edge of the screen were missing. Details in "Busy views on Pretty" above.
@@ -404,7 +461,7 @@ New buildings and pictures are files, not code. Everything lives in `public/cont
 - Power now travels over wires you place: overhead lines (cheap, open ground and roads only) and underground cable (costs more, can run under buildings). Buildings within 2 tiles of a live line get power; generators must touch a line
 - Bigger services: Police HQ, Fire HQ, Hospital, University (wider radius, stronger effect)
 - Amenities: plaza, library, museum, stadium (happiness, land value, stadiums boost shops)
-- Waste: landfill, recycling center, waste-to-energy (also generates power). Garbage trucks run from the facilities. Uncollected waste pollutes and blocks tier 3 growth
+- Waste: landfill, recycling center, waste-to-energy (also generates power), recycling complex, and transfer stations that truck garbage by road to any of them with room. Garbage trucks run from the facilities. Uncollected waste pollutes and blocks tier 3 growth
 - New map views: waste, amenities; power view shows lines and cables
 
 ## Stage 2

@@ -43,8 +43,9 @@ export const UNLOCK = {
   hospital: 1000, museum: 1000,
   university: 1500, wte: 1500, treat: 1500,
   stadium: 2500, sky: 2500, metro: 2000,
+  xfer: 600, rcomplex: 2500, tunnel: 2000, battery: 1200, sewage: 400,
 };
-export const UNLOCK_NAME = { sky: 'Skyscrapers (level 4 buildings)' };
+export const UNLOCK_NAME = { sky: 'Skyscrapers (level 4 buildings)', tunnel: 'Metro tunnels' };
 
 // Loans from the regional bank: money now, repaid in fixed monthly installments
 export const LOANS = [

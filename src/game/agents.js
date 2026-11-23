@@ -107,6 +107,15 @@ export class Agents {
     const pts = this.route(from, dest); if (!pts) return false;
     const tiles = pts.length - 2;
     a.vis = true; a.idle = false; a.still = false;
+    // long trips go by metro when it is quicker than the road (0.8.12): walk to the station, ride underground, walk on
+    if (tiles > 9 && this.sim && this.sim.metroNet) {
+      const plan = this.sim.metroPlanFor(from.x + from.w / 2, from.y + from.d / 2, dest.x + dest.w / 2, dest.y + dest.d / 2, tiles * (a.hasCar ? 1 : 1.6));
+      const p1 = plan && this.route(from, plan.A);
+      if (p1) {
+        a.plan = { A: plan.A, B: plan.B, dest, final: st, ride: plan.ride, metro: true }; a.pts = p1; a.seg = 0; a.t = 0; a.st = 'toMetro';
+        a.ped = true; a.speed = WALK * (0.95 + this.rnd() * 0.25); a.dest = dest; return true;
+      }
+    }
     // long trips without a car (or by choice) go by bus when stops are close at both ends
     if (tiles > 9 && this.transit && this.transit.ready && (!a.hasCar || this.rnd() < 0.12)) {
       const plan = this.transit.plan(from, dest);
@@ -126,6 +135,7 @@ export class Agents {
       const A = a.plan.A; a.st = 'waiting'; a.vis = true; a.still = true; a.ped = true; a.waitUntil = abs + 3;
       a.px = A.x + A.w / 2 + rr(this.rnd, -0.25, 0.25); a.py = A.y + A.d / 2 + rr(this.rnd, -0.25, 0.25); return;
     }
+    if (a.st === 'toMetro') { a.st = 'underground'; a.vis = false; a.surfaceAt = abs + Math.max(0.15, a.plan.ride * 0.06); return; }   // down the stairs; out at the other end later
     if (a.st === 'fromStop') { a.st = a.plan.final; a.plan = null; }
     if (a.st === 'toWork') a.st = 'work';
     else if (a.st === 'toHome') a.st = 'home';
@@ -153,6 +163,12 @@ export class Agents {
       if (abs >= a.waitUntil) {                            // no bus came: walk the whole way
         const pts = this.route(a.plan.A, a.plan.dest);
         if (pts) { a.pts = pts; a.seg = 0; a.t = 0; a.st = 'fromStop'; a.vis = true; a.still = false; a.ped = true; } else { a.st = a.plan.final === 'toWork' ? 'work' : 'home'; a.vis = false; a.plan = null; }
+      }
+    } else if (a.st === 'underground') {
+      if (abs >= a.surfaceAt) {                            // up the stairs at the station near where they are going
+        const pts = this.route(a.plan.B, a.plan.dest);
+        if (pts) { a.pts = pts; a.seg = 0; a.t = 0; a.st = 'fromStop'; a.vis = true; a.still = false; a.ped = true; a.speed = WALK * (0.95 + this.rnd() * 0.25); a.px = pts[0][0]; a.py = pts[0][1]; }
+        else { a.st = a.plan.final === 'toWork' ? 'work' : a.plan.final === 'toOut' ? 'out' : 'home'; a.vis = false; a.plan = null; if (a.st === 'out') a.stayUntil = abs + 1; }
       }
     } else if (a.st === 'out') {
       if (abs >= a.stayUntil || hour >= 22.5) { if (!this.go(a, a.home, 'toHome', abs)) { a.st = 'home'; a.vis = false; } }
@@ -203,7 +219,7 @@ export class Agents {
         else this.think(a, hour, day, abs);
         if (a.idle) this.wander(a, dt);
       }
-      if (a.st === 'riding') riding++;
+      if (a.st === 'riding' || a.st === 'underground') riding++;
       if (a.vis) { moving++; (a.ped ? this.walkers : this.drivers).push(a); }
     }
     this.stats = { employed: emp, moving, total: this.list.length, riding };

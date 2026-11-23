@@ -4,6 +4,7 @@
 // quickest route takes the last loads into account, so new roads, avenues and transit really pull traffic away.
 // The work is spread over frames (one district at a time, a couple of milliseconds per frame) and a full pass takes a
 // few seconds; the result is blended into the previous one so routes settle instead of flipping back and forth.
+import { wearMul, capMul } from './roads.js';
 import { N, T, TERRAIN } from './world.js';
 import { PRI_V, PRI_H, SIGNAL, defaultJunction } from './traffic.js';
 
@@ -29,8 +30,8 @@ export class Flow {
     this.job = null; this.dirty = true; this.passes = 0; this.lastDay = -99; this.version = 0;
     this.pickTiles = new Int32Array(0); this.pickCum = new Float32Array(0); this.total = 0;
   }
-  capOf(i) { const w = this.w; return w.hw[i] ? CAP.highway : w.level[i] === 1 && w.terrain[i] !== TERRAIN.WATER ? CAP.avenue : CAP.street; }
-  baseOf(i) { const w = this.w; return w.hw[i] ? 0.6 : w.level[i] === 1 && w.terrain[i] !== TERRAIN.WATER ? 0.7 : 1; }
+  capOf(i) { const w = this.w; return (w.hw[i] ? CAP.highway : w.level[i] === 1 && w.terrain[i] !== TERRAIN.WATER ? CAP.avenue : CAP.street) * capMul(w, i); }   // a lane closed for repairs halves it (0.9.0)
+  baseOf(i) { const w = this.w; return (w.hw[i] ? 0.6 : w.level[i] === 1 && w.terrain[i] !== TERRAIN.WATER ? 0.7 : 1) * wearMul(w, i); }   // worn roads are slower; a closed one is avoided
   // Called every frame; does at most `ms` milliseconds of work.
   step(sim, ms) {
     if (this.pq) { this.probeStep(ms); return; }           // a road's trips being traced for the Inspector come first
@@ -61,7 +62,7 @@ export class Flow {
     this.wId = (SEQ = SEQ + 1); this.wBusy = true; this.wAt = performance.now(); this.wSim = sim;
     this.dirty = false; this.lastDay = sim.day;
     WORKER.postMessage({ id: this.wId, kind: w.kind.slice(), level: w.level.slice(), hw: w.hw.slice(), terrain: w.terrain.slice(), cost: this.cost.slice(), lvl,
-      transit: sim.cov.transit.slice(), metro: sim.cov.metro ? sim.cov.metro.slice() : new Float32Array(n), day: sim.day });
+      transit: sim.cov.transit.slice(), metro: sim.metroRide ? sim.metroRide.slice() : new Float32Array(n), day: sim.day });   // homes that go by metro (0.8.12)
     return true;
   }
   // Gather the districts: where homes, jobs, shops and industry are, and one road tile to stand for each.
@@ -72,7 +73,7 @@ export class Flow {
       const l = sim.lvl(i); if (!l) continue;
       const x = i % N, y = (i / N) | 0, d = ((y / DS) | 0) * DN + ((x / DS) | 0);
       let wt = 0;
-      if (k === T.RES) { const p = POP_CAP[l] * 0.5 * PEAK; H[d] += p; tr[d] += p * Math.min(0.7, 0.4 * sim.cov.transit[i] + 0.55 * (sim.cov.metro ? sim.cov.metro[i] : 0)); wt = p; }
+      if (k === T.RES) { const p = POP_CAP[l] * 0.5 * PEAK; H[d] += p; tr[d] += p * Math.min(0.8, 0.4 * sim.cov.transit[i] + 0.7 * (sim.metroRide ? sim.metroRide[i] : 0)); wt = p; }
       else if (k === T.COM) { J[d] += COM_CAP[l]; S[d] += COM_CAP[l]; wt = COM_CAP[l]; }
       else { const j = IND_CAP[l]; J[d] += j; F[d] += j * 0.25 * PEAK; wt = j; }
       sx[d] += x * wt; sy[d] += y * wt; sw[d] += wt;

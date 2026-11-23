@@ -4,6 +4,8 @@ import { clamp, mulberry32, hash } from './util.js';
 import { Flow, DISTRICT, DISTRICTS } from './flow.js';
 import { junctionType, greenShare, defaultJunction, SIGNAL, PRI_V, PRI_H, CYCLE } from './traffic.js';
 import { BT, BY_KEY, ELEC, WATER, WASTE, CUT_STAGE, cutGroup, frontTiles, berthTile } from './buildings.js';
+import { buildMetro, metroCommutes, metroNeed, canLink, serving, metroPlan, TUNNEL_UPKEEP, LINE_COLS, WALK_R } from './metro.js';
+import { roadDay, repairNow, repairNowCost, REPAIR_AT, BIG_AT } from './roads.js';
 import { ORD, GOALS, UNLOCK, UNLOCK_NAME, LOANS, OVERDRAFT_RATE, TUTORIAL } from './rules.js';
 
 export const COST = { avenue: 25, road: 10, bridge: 60, zone: 5, park: 25, bulldoze: 2, wire: 4, cable: 12, pipe: 6 };
@@ -29,7 +31,8 @@ export const LEVEL_NAME = {
   [T.IND]: ['Empty lot', 'Warehouse', 'Factory', 'Heavy plant', 'Hi-tech campus'],
 };
 export const ZONE_NAME = { [T.RES]: 'Homes', [T.COM]: 'Shops', [T.IND]: 'Industry' };
-const COMMUTE = 18;                                  // road tiles people will travel to work (more with transit)
+const COMMUTE = 18;
+const METRO_EXTRA = 14;                              // how much longer a commute people accept when it is by metro (0.8.12)                                  // road tiles people will travel to work (more with transit)
 const CUT_NAMES = { fun: 'amenities', edu: 'schools', transit: 'buses', safety: 'police, fire and health care' };
 const fmt$ = (n) => (n < 0 ? '-$' : '$') + Math.abs(Math.round(n)).toLocaleString('en-US');
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -37,8 +40,8 @@ const D4 = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 const ZK = { [T.RES]: 'r', [T.COM]: 'c', [T.IND]: 'i' };
 const COVS = ['police', 'fire', 'health', 'edu', 'fun', 'transit', 'metro'];
 // ---- 0.8.6: people, goods, service budgets, elections and the region ----
-export const FUND_GROUPS = ['police', 'fire', 'health', 'edu', 'transit', 'fun'];
-export const FUND_NAME = { police: 'Police', fire: 'Fire', health: 'Health care', edu: 'Schools', transit: 'Transit', fun: 'Parks & fun' };
+export const FUND_GROUPS = ['police', 'fire', 'health', 'edu', 'transit', 'fun', 'roads'];
+export const FUND_NAME = { police: 'Police', fire: 'Fire', health: 'Health care', edu: 'Schools', transit: 'Transit', fun: 'Parks & fun', roads: 'Road repairs' };
 // which budget a service building is paid from: its first kind of coverage (the metro counts as transit)
 export function fundGroup(def) { if (!def || !def.cov) return null; const k = def.cov[0][0]; return k === 'metro' ? 'transit' : k; }
 export const WORK_SHARE = 0.6;                     // working residents per resident (matches the job demand in recount)
@@ -104,6 +107,8 @@ export class Sim {
     this.seasonsOn = true; this.tourists = 0; this.attraction = 0; this.beds = 0; this.tourIncome = 0; this.avenues = 0; this.metroLinked = false;
     this.peakPop = s.peakPop ?? 0;
     this.tut = s.tut ?? (s.day ? TUTORIAL.length : 0);   // older cities skip the guide
+    this.metroLinks = Array.isArray(s.metroLinks) ? s.metroLinks : null; this.metroNames = s.metroNames && typeof s.metroNames === 'object' ? s.metroNames : {};   // metro network (0.8.12); null: an older city, linked on first look
+    this.repairs = new Map(Array.isArray(s.repairs) ? s.repairs.map(([i, big, left]) => [i, { big: !!big, left }]) : []);   // road repairs under way (0.9.0)
     this.inspected = !!s.inspected; this.jfix = s.jfix && typeof s.jfix === 'object' ? s.jfix : {}; world.jfix = this.jfix; this.sandbox = !!s.sandbox; this.sbMoney = s.sbMoney == null ? null : s.sbMoney;
     this.fund = { ...Object.fromEntries(FUND_GROUPS.map((k) => [k, 100])), ...(s.fund || {}) };   // service budgets, 50 to 150%
     this.trade = { power: false, water: false, waste: false, ...(s.trade || {}) };                 // deals with the neighbouring towns
@@ -126,12 +131,13 @@ export class Sim {
     this.crime = new Float32Array(n); this.poll = new Float32Array(n);
     this.cov = {}; for (const k of COVS) this.cov[k] = new Float32Array(n);
     this.powerMap = new Uint8Array(n); this.waterMap = new Uint8Array(n); this.wasteMap = new Uint8Array(n);
-    this.facilities = [];
+    this.facilities = []; this.hauls = []; this.haulVer = 0; this.facLoad = new Map(); this.xferInfo = new Map();
     this.hwNet = new Uint8Array(n); this.jobReach = new Uint8Array(n); this.workReach = new Uint8Array(n);
     this.seaLink = new Uint8Array(n);              // land tiles: 1 = ships from here reach the open sea, 2 = a bridge blocks the way, 0 = inland water or none
     this.ports = 0; this.portsBlocked = 0;
     this.trackX = new Uint8Array((N + 1) * (N + 1)); this.trackY = new Uint8Array((N + 1) * (N + 1)); this.trackLot = new Uint8Array(n); this.trackVer = 0;
     this.commute = new Float32Array(n); this.jam = new Float32Array(n); this.roadComp = new Int32Array(n);
+    this.metroRide = new Float32Array(n); this.metroVia = new Int32Array(n).fill(-1); this.metroCost = new Float32Array(n).fill(Infinity); this.metroArrows = []; this.metroNet = null;
     this.hwRoads = 0; this.hasUni = false; this.plants = 0; this.zoned = { r: 0, c: 0, i: 0 };
     this.pending = new Map();          // tile -> { from } while a building is still under construction
     this.defer = false;                // set by the game: new buildings only count once finished
@@ -160,7 +166,7 @@ export class Sim {
   get dom() { return (this.day % 30) + 1; }
   get SEASON_NOW() { return this.seasonsOn ? SIM_SEASON[this.month] : 1; }
   dateLabel() { return `${this.dom} ${MONTHS[this.month]} ${this.year}`; }
-  state() { return { req: this.req, reqNext: this.reqNext, reqDone: this.reqDone, moods: this.moods, tourBoost: this.tourBoost, money: this.money, day: this.day, tax: this.tax, lastIncome: this.lastIncome, lastExpense: this.lastExpense, ord: this.ord, done: [...this.done], streak: this.streak, disasters: this.disasters, loans: this.loans, lastInterest: this.lastInterest, lastLoanPay: this.lastLoanPay, history: this.history, news: this.news, peakPop: this.peakPop, tut: this.tut, inspected: this.inspected, jfix: this.jfix, sandbox: !!this.sandbox, sbMoney: this.sbMoney == null ? null : this.sbMoney,
+  state() { return { req: this.req, reqNext: this.reqNext, reqDone: this.reqDone, moods: this.moods, tourBoost: this.tourBoost, money: this.money, day: this.day, tax: this.tax, lastIncome: this.lastIncome, lastExpense: this.lastExpense, ord: this.ord, done: [...this.done], streak: this.streak, disasters: this.disasters, loans: this.loans, lastInterest: this.lastInterest, lastLoanPay: this.lastLoanPay, history: this.history, news: this.news, peakPop: this.peakPop, tut: this.tut, inspected: this.inspected, jfix: this.jfix, repairs: [...this.repairs].map(([i, r]) => [i, r.big ? 1 : 0, r.left]), lastRoadSpend: this.lastRoadSpend || 0, metroLinks: this.metroLinks || [], metroNames: this.metroNames, sandbox: !!this.sandbox, sbMoney: this.sbMoney == null ? null : this.sbMoney,
     fund: this.fund, trade: this.trade, ages: this.ages, approval: this.approval, taxCap: this.taxCap, lastVote: this.lastVote, prevPop: this.prevPop,
     aband: (() => { const a = []; for (let i = 0; i < N * N; i++) if (this.aband[i] && this.w.level[i]) a.push([i, this.aband[i]]); return a; })(),
     lights: (() => { const a = [], jn = this.w.jn; if (jn) for (let i = 0; i < N * N; i++) if (jn[i] === SIGNAL) a.push(i); return a; })() }; }
@@ -269,7 +275,21 @@ export class Sim {
     for (const a of plants) { let first = -1; ring(a.x, a.y, a.def.w, a.def.d, 1, (c) => { if (c >= 0) { if (first < 0) first = c; else union(first, c); } }); a.comp = first; }
     const out = new Map(), dem = new Map();
     let pSup = 0, pDem = 0;
-    for (const a of plants) { pSup += a.def.power; if (a.comp >= 0) { const r = find(a.comp); out.set(r, (out.get(r) || 0) + a.def.power); } }
+    // 0.9.0: what each plant really makes (plantOutput): solar averaged over day and night, wind with the weather, nuclear
+    // and gas need cooling water, coal and gas need their fuel by road from the highway. Batteries (touching a line) firm up
+    // sun and wind on their network: they store the daytime surplus for the night and calm days.
+    const info = this.plantInfo = new Map(), vari = new Map();
+    for (const a of plants) {
+      const o = this.plantOutput(a); info.set(a.i, o); pSup += o.out;
+      if (a.comp >= 0) { const r = find(a.comp); out.set(r, (out.get(r) || 0) + o.out); if (o.vari) vari.set(r, (vari.get(r) || 0) + o.vari); }
+    }
+    const batts = anchors.filter((a) => a.def.store);
+    for (const a of batts) {
+      let r = -1; ring(a.x, a.y, a.def.w, a.def.d, 1, (c) => { if (r < 0 && c >= 0) r = find(c); }); a.comp = r;
+      const add = r >= 0 ? Math.min(a.def.store, vari.get(r) || 0) : 0;
+      if (add > 0) { out.set(r, (out.get(r) || 0) + add); vari.set(r, vari.get(r) - add); pSup += add; }
+      info.set(a.i, { out: add, note: r < 0 ? 'Not touching a power line' : add < a.def.store ? (add > 0 ? 'Storing all the spare sun and wind on its lines' : 'No solar farm or wind turbine on its lines to store from') : 'Full use' });
+    }
     const consumers = [];
     const heat = this.SEASON_NOW === 3 ? 1.25 : 1;                 // homes use more power for heating in winter
     for (const z of zones) consumers.push({ i: z.i, x: z.x, y: z.y, l: z.l, fw: 1, fd: 1, p: Math.ceil(ELEC[z.z][z.l] * (this.ordOn('energy') ? 0.85 : 1) * (z.z === 'r' ? heat : 1)), wa: Math.ceil(WATER[z.z][z.l] * (this.ordOn('water') ? 0.8 : 1)), ws: Math.ceil(WASTE[z.z][z.l] * (this.ordOn('recycle') ? 0.75 : 1)), zone: true });
@@ -312,6 +332,8 @@ export class Sim {
       if (live) this.powerMap[i] = 3;
     }
 
+    // cooling water from the pipes for nuclear and gas plants that aren't by a lake or the sea (0.9.0)
+    for (const a of plants) { const o = info.get(a.i); if (o.coolPipe) consumers.push({ i: a.i, x: a.x, y: a.y, fw: a.def.w, fd: a.def.d, p: 0, wa: o.coolPipe, ws: 0, cool: true }); }
     // water: sources must touch a pipe; buildings pick up water from pipes within 2 tiles
     const pc = new Int32Array(n).fill(-1), pp = []; let pn = 0;
     for (let s0 = 0; s0 < n; s0++) {
@@ -335,23 +357,50 @@ export class Sim {
       c.wc = cs; if (cs.length === 1) { c.wroot = cs[0]; wdem.set(cs[0], (wdem.get(cs[0]) || 0) + c.wa); } else c.wroot = -1;
     }
     for (const c of consumers) if (c.wc.length > 1) c.wroot = pick(c.wc, wout, wdem, c.wa);
+    // 0.9.0 sewage: buildings that get water (level 2 and up; houses have septic tanks) send it back down the pipes. A sewage
+    // works touching a network's pipes cleans up to its capacity (30% without power) and 35% of what it cleans comes back as
+    // water for that network. The rest flows untreated into the nearest lake, river or sea (or a ditch on dry land).
+    {
+      const treat = new Map(), sin = new Map(), cnt = new Map(), cx = new Map(), cy = new Map(), works = anchors.filter((a) => a.def.sewer);
+      for (const a of works) { let f = -1; pring(a.x, a.y, a.def.w, a.def.d, 1, (c) => { if (f < 0 && c >= 0) f = c; }); a.pcomp = f; if (f >= 0) { const r = pfind(f); a.sroot = r; treat.set(r, (treat.get(r) || 0) + a.def.sewer * (this.pw[a.i] ? 1 : 0.3)); } }
+      for (const c of consumers) if (c.zone && c.l >= 2 && c.wroot >= 0 && (wout.get(c.wroot) || 0) > 0) {   // no water in the pipes, no sewage
+        const r = c.wroot, v = c.wa * 0.9; sin.set(r, (sin.get(r) || 0) + v); cnt.set(r, (cnt.get(r) || 0) + 1); cx.set(r, (cx.get(r) || 0) + c.x * v); cy.set(r, (cy.get(r) || 0) + c.y * v); }
+      let total = 0, treated = 0, bad = 0; const outs = [], info = new Map();
+      for (const [r, v] of sin) {
+        const t = Math.min(v, treat.get(r) || 0), u = v - t; total += v; treated += t;
+        if (t > 0) { wout.set(r, (wout.get(r) || 0) + t * 0.35); wSup += Math.round(t * 0.35); }
+        if (u > 1) { const nb = Math.round((cnt.get(r) || 0) * u / v); bad += nb; outs.push({ x: Math.round(cx.get(r) / v), y: Math.round(cy.get(r) / v), amt: u, nb }); }
+      }
+      for (const a of works) { const r = a.sroot, cap = a.def.sewer * (this.pw[a.i] ? 1 : 0.3), all = r !== undefined ? treat.get(r) || 0 : 0, load = r !== undefined && all > 0 ? Math.min(sin.get(r) || 0, all) * (cap / all) : 0; info.set(a.i, { cap: Math.round(cap), load: Math.round(load), back: Math.round(load * 0.35), piped: a.pcomp >= 0 }); }
+      // where it comes out: the water tile nearest the middle of the network's homes and businesses
+      for (const o of outs) {
+        let best = -1, bd = 1e9;
+        for (let y = Math.max(0, o.y - 40); y <= Math.min(N - 1, o.y + 40); y++) for (let x = Math.max(0, o.x - 40); x <= Math.min(N - 1, o.x + 40); x++) { const q = y * N + x; if (w.terrain[q] !== TERRAIN.WATER || w.kind[q] === T.ROAD) continue; const d = (x - o.x) ** 2 + (y - o.y) ** 2; if (d < bd) { bd = d; best = q; } }
+        o.water = best >= 0; if (best >= 0) { o.x = best % N; o.y = (best / N) | 0; }
+      }
+      this.sewage = { total: Math.round(total), treated: Math.round(treated), outs, buildings: bad }; this.sewInfo = info;
+    }
     this.wt.fill(0); this.waterMap.fill(0);
     for (const c of consumers) {
       const o = c.wroot >= 0 ? wout.get(c.wroot) || 0 : 0, d = wdem.get(c.wroot) || 1, ratio = Math.min(1, o / d);
       const ok = c.wroot >= 0 && o > 0 && hash(c.x, c.y, 2) < ratio + 1e-6;
       this.wt[c.i] = ok ? 1 : 0; this.waterMap[c.i] = ok ? 3 : 2;
     }
+    const coolWas = this.coolOk; this.coolOk = new Set(consumers.filter((c) => c.cool && this.wt[c.i]).map((c) => c.i));   // read by plantOutput next time
+    if (!coolWas || [...this.coolOk].some((i) => !coolWas.has(i)) || [...coolWas].some((i) => !this.coolOk.has(i) && info.has(i))) this.needAn = true;   // cooling changed: work power out again soon
     for (let i = 0; i < n; i++) if (pc[i] >= 0 && this.waterMap[i] === 0) this.waterMap[i] = (wout.get(pfind(pc[i])) || 0) > 0 ? 4 : 5;
 
     // waste: facilities collect from buildings in range, up to capacity (recycling needs power)
-    const fac = this.facilities, fcap = fac.map((f) => f.def.waste * (!f.def.use || this.pw[f.i] ? 1 : 0.3)), fload = fac.map(() => 0);
+    const fac = this.facilities, fcap = fac.map((f) => f.def.waste * (!f.def.use || this.pw[f.i] ? 1 : 0.3)), fload = fac.map(() => 0), fvia = fac.map(() => 0);
+    const xfs = anchors.filter((a) => a.def.xfer);       // transfer stations (0.8.10): collect around them, send it on by road
     this.wasteMap.fill(0); this.ts.fill(0);
-    for (const f of fac) {
-      const cx = f.x + f.def.w / 2, cy = f.y + f.def.d / 2, R = f.def.radius;
+    const reach = (cx, cy, R) => {
       for (let y = Math.max(0, Math.floor(cy - R)); y <= Math.min(N - 1, Math.ceil(cy + R)); y++) for (let x = Math.max(0, Math.floor(cx - R)); x <= Math.min(N - 1, Math.ceil(cx + R)); x++) {
         if (Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= R) this.wasteMap[y * N + x] = 1;
       }
-    }
+    };
+    for (const f of fac) reach(f.x + f.def.w / 2, f.y + f.def.d / 2, f.def.radius);
+    for (const s of xfs) reach(s.x + 0.5, s.y + 0.5, s.def.radius);
     let tDem = 0, tSup = 0, wUn = 0, zc = 0; for (const f of fac) tSup += f.def.waste;
     // Every building is served by the nearest landfill or recycling center in range that still has room. (Before 0.7.2 it
     // only tried the nearest one, so a full landfill left its street uncollected while another one nearby sat half empty.)
@@ -361,22 +410,59 @@ export class Sim {
       fac.forEach((f, fi) => { const d = Math.hypot(c.x + 0.5 - (f.x + f.def.w / 2), c.y + 0.5 - (f.y + f.def.d / 2)); if (d <= f.def.radius) { pairs.push([d, ci, fi]); c.inRange = true; } });
     }
     // buildings that need collection (level 2 and up) are served first; houses at level 1 only take what is left
-    pairs.sort((a, b) => (zc2[a[1]].l >= 2 ? 0 : 1) - (zc2[b[1]].l >= 2 ? 0 : 1) || a[0] - b[0]);
+    const needFirst = (a, b) => (zc2[a[1]].l >= 2 ? 0 : 1) - (zc2[b[1]].l >= 2 ? 0 : 1) || a[0] - b[0];
+    pairs.sort(needFirst);
     for (const [, ci, fi] of pairs) { const c = zc2[ci]; if (c.fac >= 0 || fload[fi] + c.ws > fcap[fi]) continue; c.fac = fi; fload[fi] += c.ws; }
-    let wOut = 0, wFull = 0, wasteOut = 0;
+    // Transfer stations take what is left: each one sends its garbage to the waste building with room that is nearest by road,
+    // then the next nearest, and so on. Only buildings that weren't served directly go through a station.
+    const routes = this.xferRoutes(xfs, fac), xinfo = new Map();
+    xfs.forEach((s, si) => xinfo.set(s.i, { road: routes[si].road, dests: routes[si].dests.map((t) => ({ name: fac[t.fi].def.name, i: fac[t.fi].i, dist: t.dist, amt: 0 })), served: 0, stuck: 0, sent: 0 }));
+    const xpairs = [];
+    for (let ci = 0; ci < zc2.length; ci++) {
+      const c = zc2[ci]; if (c.fac >= 0) continue;
+      xfs.forEach((s, si) => { const d = Math.hypot(c.x - s.x, c.y - s.y); if (d <= s.def.radius) { xpairs.push([d, ci, si]); c.inRange = true; (c.xs || (c.xs = [])).push(si); } });
+    }
+    xpairs.sort(needFirst);
+    for (const [, ci, si] of xpairs) {
+      const c = zc2[ci]; if (c.fac >= 0) continue;
+      const r = routes[si];
+      for (let k = 0; k < r.dests.length; k++) {
+        const t = r.dests[k]; if (fload[t.fi] + c.ws > fcap[t.fi]) continue;
+        c.fac = t.fi; fload[t.fi] += c.ws; fvia[t.fi] += c.ws; t.amt += c.ws;
+        const xi = xinfo.get(xfs[si].i); xi.served++; xi.sent += c.ws; xi.dests[k].amt += c.ws;
+        break;
+      }
+    }
+    let wOut = 0, wFull = 0, wasteOut = 0, xStuck = 0;
     for (const c of zc2) {
       zc++;
       let ok = c.fac >= 0;
       if (!ok && c.l >= 2 && this.trade.waste && this.hwNet[c.i]) { ok = true; wasteOut++; }   // trucked to the neighbouring town's landfill
       this.ts[c.i] = ok ? 1 : 0; this.wasteMap[c.i] = ok ? 3 : c.l >= 2 ? 2 : c.inRange ? 1 : 0;   // red only where it's needed
       if (!ok && c.l >= 2) { wUn++; if (c.inRange) wFull++; else wOut++; }   // level 1 doesn't need collection yet: not counted, no badge
+      if (!ok && c.l >= 2 && c.xs && c.xs.some((si) => routes[si].dests.length)) { xStuck++; for (const si of c.xs) if (routes[si].dests.length) xinfo.get(xfs[si].i).stuck++; }
     }
+    // what each waste building holds and how much of it came through transfer stations (Inspector), and the trucks' routes
+    this.facLoad = new Map(fac.map((f, fi) => [f.i, { load: fload[fi], cap: fcap[fi], via: fvia[fi] }]));
+    this.xferInfo = xinfo;
+    const hauls = [];
+    routes.forEach((r) => { for (const t of r.dests) if (t.amt > 0 && t.path && t.path.length >= 2) hauls.push({ path: t.path, amt: t.amt }); });
+    const hsig = hauls.map((h) => h.path[0] + '>' + h.path[h.path.length - 1]).join(',');
+    if (hsig !== this.haulSig) { this.haulSig = hsig; this.haulVer = (this.haulVer || 0) + 1; }
+    this.hauls = hauls;
+    const xNoRoad = xfs.filter((s, si) => !routes[si].road).length, xNoDest = xfs.filter((s, si) => routes[si].road && !routes[si].dests.length).length;
 
     // Why a utility can fall short while the totals look fine: plants or pumps not touching a line or pipe, power or water
     // split over networks that aren't joined, or buildings out of reach of any line, pipe or landfill. Read by the advisors.
     const diag = { pLoose: plants.filter((a) => a.comp < 0).map((a) => a.def.name), wLoose: sources.filter((a) => a.pcomp < 0).map((a) => a.def.name),
       pNoLine: consumers.filter((c) => c.root < 0).length, wNoPipe: consumers.filter((c) => c.wroot < 0).length, pShort: 0, pSpare: 0, wShort: 0, wSpare: 0,
-      pumpsDark: sources.filter((a) => a.def.use && !this.pw[a.i]).length, wOut, wFull };
+      pumpsDark: sources.filter((a) => a.def.use && !this.pw[a.i]).length, wOut, wFull, xNoRoad, xNoDest, xStuck };
+    { // one example of each problem, for the advisors' "Show on map" (0.8.13)
+      const xy = (a) => (a ? { x: a.x, y: a.y } : null), un = zc2.filter((c) => c.fac < 0 && c.l >= 2 && !this.ts[c.i]);
+      diag.at = { pLoose: xy(plants.find((a) => a.comp < 0)), wLoose: xy(sources.find((a) => a.pcomp < 0)), pNoLine: xy(consumers.find((c) => c.root < 0)), wNoPipe: xy(consumers.find((c) => c.wroot < 0)),
+        pumpsDark: xy(sources.find((a) => a.def.use && !this.pw[a.i])), wOut: xy(un.find((c) => !c.inRange)), wFull: xy(un.find((c) => c.inRange)), xStuck: xy(un.find((c) => c.xs)),
+        xNoRoad: xy(xfs.find((q, si) => !routes[si].road)), xNoDest: xy(xfs.find((q, si) => routes[si].road && !routes[si].dests.length)) };
+    }
     for (const [r, o] of out) { const d = dem.get(r) || 0; if (o >= d) diag.pSpare += o - d; }
     for (const [r, d] of dem) { const o = out.get(r) || 0; if (o < d) diag.pShort += d - o; }
     for (const [r, o] of wout) { const d = wdem.get(r) || 0; if (o >= d) diag.wSpare += o - d; }
@@ -391,7 +477,7 @@ export class Sim {
     const { anchors } = this._an;
     for (const k of COVS) this.cov[k].fill(0);
     this.linkFerries(anchors);
-    this.metroLinked = anchors.filter((a) => a.def.metro && !this.closed(a.def)).length >= 2;
+    const net = buildMetro(this, anchors); this.metroLinked = net.st.some(serving);
     let upkeep = 0, stadiums = 0;
     let uni = false;
     for (const a of anchors) {
@@ -403,8 +489,8 @@ export class Sim {
       if (a.def.key === 'university') uni = true;
       if (!a.def.cov) continue;
       if (a.def.ferry && !this.ferryLinks.get(a.i)) continue;      // a ferry pier only serves once a ferry runs to another pier
-      if (a.def.metro && !this.metroLinked) continue;               // a metro needs at least two stations
-      const eff = (a.def.use === undefined || this.pw[a.i] ? 1 : 0.3) * (0.5 + 0.5 * fk), R = a.def.radius * (0.85 + 0.15 * fk), cx = a.x + a.def.w / 2, cy = a.y + a.def.d / 2;
+      if (a.def.metro && !serving(net.by.get(a.i))) continue;       // a station serves once it is linked to another (0.8.12)
+      const eff = (a.def.use === undefined || this.pw[a.i] ? 1 : 0.3) * (0.5 + 0.5 * fk) * (a.def.shore ? this.shoreClean(a) : 1), R = a.def.radius * (0.85 + 0.15 * fk), cx = a.x + a.def.w / 2, cy = a.y + a.def.d / 2;
       for (const [key, str] of a.def.cov) {
         const arr = this.cov[key];
         for (let y = Math.max(0, Math.floor(cy - R)); y <= Math.min(N - 1, Math.ceil(cy + R)); y++) for (let x = Math.max(0, Math.floor(cx - R)); x <= Math.min(N - 1, Math.ceil(cx + R)); x++) {
@@ -413,6 +499,7 @@ export class Sim {
         }
       }
     }
+    upkeep += net.tiles * TUNNEL_UPKEEP;                            // tunnels
     this.hasUni = uni; this._an.upkeep = upkeep; this._an.stadiums = stadiums;
   }
   // stage 3: road networks, highway link and commutes (only when roads changed or every 6 days)
@@ -444,6 +531,25 @@ export class Sim {
     }
     for (let i = 0; i < n; i++) if (this.jam[i] > 0) poll[i] += this.jam[i] * 6;            // exhaust and noise from jammed roads
     for (const a of anchors) if (a.def.pollute) add(poll, a.x, a.y, a.def.pr || 6, a.def.pollute * scrub, true);
+    // 0.9.0: untreated sewage. In water it spreads through the lake or sea from where it comes out (dirty water, shown on
+    // the map, spoils beaches, piers and marinas and the waterfront); on dry land it fouls the ground around the ditch.
+    {
+      const dw = this.dirtyWater || (this.dirtyWater = new Float32Array(n)); dw.fill(0); const list = [];
+      for (const o of (this.sewage && this.sewage.outs) || []) {
+        const R = Math.min(18, 3 + o.amt / 50), amt = Math.min(45, 6 + o.amt / 12);
+        add(poll, o.x, o.y, Math.min(9, Math.round(R / 2) + 2), amt * (o.water ? 0.5 : 1), true);
+        if (!o.water) continue;
+        const q = [o.y * N + o.x], seen = new Map([[q[0], 0]]);       // spread through connected water, fading with distance
+        for (let h = 0; h < q.length; h++) {
+          const c = q[h], d = seen.get(c), v = (1 - d / R) * Math.min(1, o.amt / 150 + 0.35); if (v > dw[c]) dw[c] = v;
+          if (d + 1 >= R) continue;
+          const x = c % N, y = (c / N) | 0;
+          for (const [dx, dy] of D4) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= N || yy >= N) continue; const r = yy * N + xx; if (seen.has(r) || w.terrain[r] !== TERRAIN.WATER) continue; seen.set(r, d + 1); q.push(r); }
+        }
+      }
+      for (let i = 0; i < n; i++) if (dw[i] > 0.05) { list.push(i); const x = i % N, y = (i / N) | 0; for (const [dx, dy] of D4) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < N && yy < N && w.terrain[yy * N + xx] !== TERRAIN.WATER) poll[yy * N + xx] += dw[i] * 14; } }   // a smelly shore
+      this.dirtyList = list; this.dirtyVer = (this.dirtyVer || 0) + 1;
+    }
     let pv = 0, polSum = 0, crSum = 0, jamSum = 0, noJobW = 0; const covS = {}; for (const k of COVS) covS[k] = 0;
     for (let i = 0; i < n; i++) {
       poll[i] = clamp(poll[i], 0, 100);
@@ -521,6 +627,36 @@ export class Sim {
   checkGoals() { for (const g of GOALS) { if (this.done.has(g.id)) continue; if (g.v(this) >= g.t) { this.done.add(g.id); this.money += g.reward; this.events.push({ type: 'goal', title: g.title, reward: g.reward }); } } }
   landValue(i, z) { return this.lv[i] - (z === T.RES ? Math.min(24, this.indPen[i]) : 0) + (z === T.IND ? Math.min(16, this.poll[i] * 0.28) : 0); }   // factories don't mind smoke (0.8.6)
 
+  // Transfer stations (0.8.10): for each one, the waste buildings it can reach by road, nearest first, with the road path
+  // there for the trucks. A station uses the roads next to its lot; a waste building is reached at any road touching its lot.
+  // One breadth-first search over the roads per station (9,216 tiles at most), run with the daily network analysis.
+  xferRoutes(xfs, fac) {
+    const w = this.w, n = N * N;
+    if (!xfs.length) return [];
+    const edge = (x0, y0, fw, fd) => { const out = []; for (let y = y0 - 1; y <= y0 + fd; y++) for (let x = x0 - 1; x <= x0 + fw; x++) { if ((x === x0 - 1 || x === x0 + fw) === (y === y0 - 1 || y === y0 + fd)) continue; if (w.isRoad(x, y)) out.push(y * N + x); } return out; };
+    const fRoads = fac.map((f) => edge(f.x, f.y, f.def.w, f.def.d));
+    const dist = this._xd || (this._xd = new Int32Array(n)), par = this._xp || (this._xp = new Int32Array(n)), q = this._xq || (this._xq = new Int32Array(n));
+    return xfs.map((s) => {
+      const src = edge(s.x, s.y, s.def.w, s.def.d);
+      if (!src.length) return { road: false, dests: [] };
+      dist.fill(-1); let h = 0, tl = 0;
+      for (const i of src) { dist[i] = 0; par[i] = -1; q[tl++] = i; }
+      while (h < tl) {
+        const c = q[h++], x = c % N, y = (c / N) | 0;
+        for (const [dx, dy] of D4) { const xx = x + dx, yy = y + dy; if (!w.inb(xx, yy)) continue; const r = yy * N + xx; if (dist[r] >= 0 || w.kind[r] !== T.ROAD) continue; dist[r] = dist[c] + 1; par[r] = c; q[tl++] = r; }
+      }
+      const dests = [];
+      fac.forEach((f, fi) => {
+        let best = -1; for (const r of fRoads[fi]) if (dist[r] >= 0 && (best < 0 || dist[r] < dist[best])) best = r;
+        if (best < 0) return;
+        const path = []; for (let c = best; c >= 0; c = par[c]) path.push(c); path.reverse();
+        dests.push({ fi, dist: dist[best], path, amt: 0 });
+      });
+      dests.sort((a, b) => a.dist - b.dist);
+      return { road: true, dests };
+    });
+  }
+
   // ---- roads: highway link, commutes and congestion ----
   analyzeRoads(zones, empties) {
     const w = this.w, n = N * N, rc = this.roadComp;
@@ -574,23 +710,32 @@ export class Sim {
     const jobSrc = [], homeSrc = [];
     for (const z of zones) { if (this.pending.has(z.i)) continue; const rs = roadsNear(z.x, z.y); (z.z === 'r' ? homeSrc : jobSrc).push(...rs); }
     const jobD = dijkstra(jobSrc), homeD = dijkstra(homeSrc);
+    const mc = this.metroCost = metroCommutes(this, zones.filter((z) => !this.pending.has(z.i)), jobD, homeD, roadsNear);   // the commute by metro, where there is one (0.8.12)
     this.hwNet.fill(0); this.jobReach.fill(0); this.workReach.fill(0); this.commute.fill(255);
-    let noJobN = 0, noWorkN = 0, offGrid = 0;
+    let noJobN = 0, noWorkN = 0, offGrid = 0; const md = { car: 0, bus: 0, metro: 0, walk: 0, none: 0 };   // how residents get to work (0.8.13)
     const few = this.cJobs + this.iJobs < 40, fewPeople = this.pop < 40;     // a brand-new town gets a pass
     for (const z of zones.concat(empties)) {
       const k = w.kind[z.i], rs = roadsNear(z.x, z.y);
       let best = 1e9, hw = false;
       const D = k === T.RES ? jobD : homeD;
       for (const q of rs) { if (hwComp.has(rc[q])) hw = true; if (D[q] < best) best = D[q]; }
-      const reach = COMMUTE + 12 * this.cov.transit[z.i] + 22 * this.cov.metro[z.i];   // buses and the metro stretch how far people will go
+      const reach = COMMUTE + 12 * this.cov.transit[z.i];              // buses stretch how far people will go
       if (this.trackLot[z.i] && best < 1e9) best += 2;               // walking or driving the dirt track to the street first
+      let byMetro = false;
+      if (mc[z.i] < best) { best = mc[z.i]; byMetro = true; if (k === T.RES) this.metroRide[z.i] = 1; } else this.metroVia[z.i] = -1;   // quicker by metro: they take it
       this.hwNet[z.i] = hw ? 1 : 0; this.commute[z.i] = Math.min(255, best);
-      const ok = best <= reach;
-      if (k === T.RES) { this.jobReach[z.i] = ok || few ? 1 : 0; if (z.l && !this.jobReach[z.i]) noJobN++; }
+      const ok = best <= reach + (byMetro ? METRO_EXTRA : 0);           // no driving: people put up with a longer ride
+      if (k === T.RES) {
+        this.jobReach[z.i] = ok || few ? 1 : 0; if (z.l && !this.jobReach[z.i]) noJobN++;
+        if (z.l) { const p = POP_CAP[z.l]; if (!this.jobReach[z.i]) md.none += p; else if (byMetro) md.metro += p; else { const bus = Math.min(0.7, 0.4 * this.cov.transit[z.i]); md.bus += p * bus; if (best <= 4) md.walk += p * (1 - bus); else md.car += p * (1 - bus); } }
+      }
       else { this.workReach[z.i] = ok || fewPeople ? 1 : 0; if (z.l && !this.workReach[z.i]) noWorkN++; }
       if (rs.length && !hw) offGrid++;
     }
     Object.assign(this.net, { noJobN, noWorkN, offGrid });
+    { const tot = md.car + md.bus + md.metro + md.walk + md.none; this.modes = tot ? Object.fromEntries(Object.entries(md).map(([k, v]) => [k, Math.round((v / tot) * 100)])) : null; if (!this.modesPrev && this.modes) this.modesPrev = { ...this.modes }; }
+    this.metroArrows = metroNeed(this, DISTRICT, DISTRICTS);
+    if (this.metroNet) { let r = 0; for (const s of this.metroNet.st) { s.board = 0; s.alight = 0; } for (const z of zones) if (this.metroRide[z.i] && this.metroVia[z.i] >= 0) { const v = this.metroVia[z.i], p = POP_CAP[z.l]; const a = this.metroNet.st[(v / 1024) | 0], b = this.metroNet.st[v % 1024]; if (a && b) { a.board += p; b.alight += p; r += p; } } this.metroRiders = r; }
     this.analyzeSea();
   }
   // Which waterfront lots can send ships out to sea. Water reaching the map edge is open sea, and ships can't pass under bridges,
@@ -789,6 +934,7 @@ export class Sim {
   // ---- growth ----
   tick() {
     this.day++;
+    roadDay(this);                                       // roads wear, crews repair them (0.9.0)
     if ((this.needAn && this.day - (this.lastAn ?? -9) >= 2) || this.day - (this.lastAn ?? -9) >= 8) { this.startAnalyze(); this.lastAn = this.day; }   // growth is batched instead of recalculating every day
     const w = this.w, rnd = this.rnd, h = this.happiness;
     for (let n = 0; n < 600; n++) {
@@ -841,6 +987,7 @@ export class Sim {
   skipTutorial() { this.tut = TUTORIAL.length; }
 
   monthly() {
+    if (this.modes) this.modesPrev = { ...this.modes };            // compared with now in City \u2192 Budget (0.8.13)
     const n = this.net, served = 0.5 + 0.5 * (1 - n.unserved);
     const mood = 0.8 + this.happiness / 250;              // happy residents pay willingly (0.8 to 1.2)
     const health = 0.85 + 0.15 * n.health;                 // healthy workers are more productive
@@ -862,7 +1009,8 @@ export class Sim {
     for (const l of this.loans) { loanPay += l.pay; l.left--; }
     this.loans = this.loans.filter((l) => l.left > 0);
     const interest = this.money < 0 ? Math.round(-this.money * OVERDRAFT_RATE) : 0;
-    const exp = this.roads * 0.4 + (this.avenues || 0) * 0.6 + (this.bridges || 0) * 1.6 + this.parks * 1 * ((this.fund.fun ?? 100) / 100) + n.upkeep + wires + pipes + this.ordCost() + this.tradeCost;
+    this.lastRoadSpend = Math.round(this.roadSpend || 0); this.roadSpend = 0;
+    const exp = this.lastRoadSpend + this.roads * 0.4 + (this.avenues || 0) * 0.6 + (this.bridges || 0) * 1.6 + this.parks * 1 * ((this.fund.fun ?? 100) / 100) + n.upkeep + wires + pipes + this.ordCost() + this.tradeCost;
     this.lastIncome = Math.round(inc); this.lastExpense = Math.round(exp); this.lastLoanPay = loanPay; this.lastInterest = interest;
     const net = this.lastIncome - this.lastExpense - loanPay - interest;
     this.money += net;
@@ -973,18 +1121,41 @@ export class Sim {
     else if (n.unserved > 0.08) add('Utilities', 'warn', `${Math.round(n.unserved * 100)}% of buildings have no power. The power view shows the gaps.`, 'power');
     if (n.wDem > n.wSup) add('Utilities', 'bad', `Water demand is ${n.wDem} but supply is ${n.wSup}. Add a water source and pipes.`, 'water', 'Taps run dry in parts of the city');
     { // plenty in total but not reaching buildings: say why (uDiag from anNetworks)
-      const u = this.uDiag || {}, list = (a) => (a.length > 2 ? `${a.slice(0, 2).join(', ')} and ${a.length - 2} more` : a.join(' and '));
-      if (u.pLoose && u.pLoose.length) add('Utilities', 'bad', `${list(u.pLoose)} ${u.pLoose.length > 1 ? 'aren\u2019t' : 'isn\u2019t'} touching a power line, so ${u.pLoose.length > 1 ? 'their' : 'its'} power goes nowhere. Run a line next to it.`, 'power');
+      const u = this.uDiag || {}, at = (k) => (u.at && u.at[k]) || undefined, list = (a) => (a.length > 2 ? `${a.slice(0, 2).join(', ')} and ${a.length - 2} more` : a.join(' and '));
+      if (u.pLoose && u.pLoose.length) add('Utilities', 'bad', `${list(u.pLoose)} ${u.pLoose.length > 1 ? 'aren\u2019t' : 'isn\u2019t'} touching a power line, so ${u.pLoose.length > 1 ? 'their' : 'its'} power goes nowhere. Run a line next to it.`, 'power', undefined, at('pLoose'));
       if (u.pShort > 0 && u.pSpare >= u.pShort * 0.5) add('Utilities', 'warn', `Your power lines form separate networks. One has ${Math.round(u.pSpare)} spare while another is short by ${Math.round(u.pShort)}. Join the lines so power can reach everyone.`, 'power');
-      if (u.pNoLine > 2) add('Utilities', 'warn', `${u.pNoLine} buildings are more than 2 tiles from a power line. The power view shows them in red.`, 'power');
-      if (u.wLoose && u.wLoose.length) add('Utilities', 'bad', `${list(u.wLoose)} ${u.wLoose.length > 1 ? 'aren\u2019t' : 'isn\u2019t'} touching a pipe, so ${u.wLoose.length > 1 ? 'their' : 'its'} water goes nowhere. Lay a pipe next to it.`, 'water');
-      if (u.pumpsDark) add('Utilities', 'warn', `${u.pumpsDark === 1 ? 'A water pump has no power and pumps' : u.pumpsDark + ' water pumps have no power and pump'} only 30%. Put a power line next to ${u.pumpsDark === 1 ? 'it' : 'them'}.`, 'power');
+      if (u.pNoLine > 2) add('Utilities', 'warn', `${u.pNoLine} buildings are more than 2 tiles from a power line. The power view shows them in red.`, 'power', undefined, at('pNoLine'));
+      if (u.wLoose && u.wLoose.length) add('Utilities', 'bad', `${list(u.wLoose)} ${u.wLoose.length > 1 ? 'aren\u2019t' : 'isn\u2019t'} touching a pipe, so ${u.wLoose.length > 1 ? 'their' : 'its'} water goes nowhere. Lay a pipe next to it.`, 'water', undefined, at('wLoose'));
+      if (u.pumpsDark) add('Utilities', 'warn', `${u.pumpsDark === 1 ? 'A water pump has no power and pumps' : u.pumpsDark + ' water pumps have no power and pump'} only 30%. Put a power line next to ${u.pumpsDark === 1 ? 'it' : 'them'}.`, 'power', undefined, at('pumpsDark'));
       if (u.wShort > 0 && u.wSpare >= u.wShort * 0.5) add('Utilities', 'warn', `Your pipes form separate networks. One has ${Math.round(u.wSpare)} water spare while another is short by ${Math.round(u.wShort)}. Join the pipes.`, 'water');
-      if (u.wNoPipe > 2) add('Utilities', 'warn', `${u.wNoPipe} buildings are more than 2 tiles from a water pipe. The water view shows them in red.`, 'water');
-      if (u.wOut > 2) add('Utilities', 'warn', `${u.wOut} buildings are out of reach of every landfill and recycling center. Build one closer to them.`, 'waste');
-      else if (u.wFull > 2) add('Utilities', 'warn', `The landfills and recycling centers near ${u.wFull} buildings are full. Build another one close by.`, 'waste');
+      if (u.wNoPipe > 2) add('Utilities', 'warn', `${u.wNoPipe} buildings are more than 2 tiles from a water pipe. The water view shows them in red.`, 'water', undefined, at('wNoPipe'));
+      if (u.wOut > 2) add('Utilities', 'warn', `${u.wOut} buildings are out of reach of every landfill and recycling center. Build one closer to them, or a transfer station that trucks their garbage to one with room.`, 'waste', undefined, at('wOut'));
+      if (u.xNoRoad) add('Utilities', 'bad', `${u.xNoRoad === 1 ? 'A transfer station isn\u2019t' : u.xNoRoad + ' transfer stations aren\u2019t'} next to a road, so the garbage can\u2019t leave. Build a road beside ${u.xNoRoad === 1 ? 'it' : 'them'}.`, 'waste', undefined, at('xNoRoad'));
+      if (u.xNoDest) add('Utilities', 'bad', `${u.xNoDest === 1 ? 'A transfer station has' : u.xNoDest + ' transfer stations have'} no road to any landfill or recycling center. Join the roads, or put a road next to the waste building.`, 'waste', undefined, at('xNoDest'));
+      if (u.xStuck > 2) add('Utilities', 'warn', `Transfer stations have nowhere to send the garbage of ${u.xStuck} buildings: every waste building they reach by road is full. Build a recycling complex or another landfill on the same roads.`, 'waste', undefined, at('xStuck'));
+      else if (u.wFull > 2) add('Utilities', 'warn', `The landfills and recycling centers near ${u.wFull} buildings are full. Build another one close by, or a transfer station to send the garbage to one with room.`, 'waste', undefined, at('wFull'));
     }
-    if (n.wasteUn > 0.15) add('Utilities', 'warn', `Garbage isn\u2019t collected from ${Math.round(n.wasteUn * 100)}% of buildings. Build a landfill or recycling center in range.`, 'waste', 'Garbage piles up on city streets');
+    if (n.wasteUn > 0.15) add('Utilities', 'warn', `Garbage isn\u2019t collected from ${Math.round(n.wasteUn * 100)}% of buildings. Build a landfill or recycling center in range, or a transfer station.`, 'waste', 'Garbage piles up on city streets');
+    { // sewage (0.9.0)
+      const sw = this.sewage;
+      if (sw && sw.total > 60 && sw.total - sw.treated > Math.max(40, sw.total * 0.15)) {
+        const o = sw.outs.slice().sort((p, q) => q.amt - p.amt)[0], where = o ? compass(48, 48, o.x, o.y) : '';
+        add('Utilities', sw.treated > 0 ? 'warn' : 'bad', `Sewage from ${sw.buildings} buildings goes untreated ${o && o.water ? `into the water${where ? ` in the ${where}` : ''}` : 'into a ditch'}, polluting it${o && o.water ? ' and spoiling beaches nearby' : ''}. Build a Sewage works touching the pipes (it also sends clean water back).`, 'water', 'Sewage spill fouls the waterfront', o ? { x: o.x, y: o.y } : undefined);
+      }
+      const pi = this.plantInfo; if (pi) for (const [i, o] of pi) { const def = BT[this.w.bt[i]]; if (def && def.power && o.out < def.power * 0.5 && def.key !== 'solar' && def.key !== 'wind') { add('Utilities', 'bad', `The ${def.name.toLowerCase()} makes only ${Math.round(o.out)} of ${def.power}: ${o.note.charAt(0).toLowerCase() + o.note.slice(1)}.`, 'power', undefined, { x: i % N, y: (i / N) | 0 }); break; } }
+    }
+    { // metro (0.8.12): separate parts, stations not linked, and where a line would help
+      const net = this.metroNet;
+      if (net && net.st.length) {
+        const lone = net.st.filter((q) => !q.links.length);
+        if (lone.length) add('Transport', 'warn', `${lone.length === 1 ? `${lone[0].name} station isn\u2019t` : `${lone.length} metro stations aren\u2019t`} linked to another station, so no trains run there. Pick Transit \u2192 Tunnel, tap it, then tap another station.`, 'metro', undefined, { x: lone[0].x, y: lone[0].y });
+        const parts = net.compSize.filter((c) => c >= 2).length;
+        if (parts >= 2) { const a2 = net.st.find((q) => q.comp === 0 && q.links.length), b2 = net.st.find((q) => q.comp === 1 && q.links.length); if (a2 && b2) add('Transport', 'tip', `Your metro is in ${parts} separate parts, so people can\u2019t ride from one to the other. Linking ${a2.name} to ${b2.name} would join them.`, 'metro', undefined, { x: a2.x, y: a2.y }); }
+      }
+      const ar = (this.metroArrows || [])[0];
+      if (ar && this.isUnlocked('metro') && ar.n >= 60) add('Transport', 'tip', `About ${ar.n} residents ${compass(48, 48, ar.fx, ar.fy) ? `in the ${compass(48, 48, ar.fx, ar.fy)}` : 'in the middle of the city'} have no jobs within reach. A metro line from there to the jobs ${compass(ar.fx, ar.fy, ar.tx, ar.ty) || 'nearby'} would bring them in reach. Views \u2192 Metro shows where.`, 'metro', undefined, { x: Math.round(ar.fx), y: Math.round(ar.fy) });
+    }
+    { const rs = this.roadStats; if (rs && rs.roads >= 30 && rs.worn > Math.max(4, rs.roads * 0.08)) { const wt = rs.worst >= 0 ? { x: rs.worst % N, y: (rs.worst / N) | 0 } : undefined; add('Transport', rs.worn > rs.roads * 0.2 ? 'bad' : 'warn', `${rs.worn} road tiles are worn out and only ${rs.crews} repair crew${rs.crews > 1 ? 's are' : ' is'} working on them. Worn roads slow traffic and the worst have to close. Raise the Road repairs budget in City \u2192 Services, or tap a road to repair it now.`, 'traffic', 'Potholes everywhere as road crews fall behind', wt); } }
     if (n.jamAvg > 0.2) add('Transport', 'warn', 'Traffic jams are slowing commutes and lowering land value. Add bus stops and a terminal, or build a second route.', 'traffic', 'Rush hour gridlock frustrates commuters');
     { // the worst bottlenecks by name (flow.js finds stretches of jammed road), with a button that goes there
       const necks = (this.flowM.necks || []).filter((b) => b.load > 1.1).slice(0, 2);
@@ -1038,7 +1209,7 @@ export class Sim {
       const fm = this.flowM, ld = fm.load[i], hw = this.roadLinked(i);
       const br = w.terrain[i] === TERRAIN.WATER;
       const av = !br && w.level[i] === 1;
-      const rows = [row('Traffic', `${ld > 1.1 ? 'Jammed' : ld > 0.7 ? 'Busy' : 'Light'}: ${Math.round(fm.flow[i])} of ${fm.capOf(i)} trips`, ld <= 1.1), row('Reaches the highway', yes(hw), hw)];
+      const rows = [row('Traffic', w.fix && w.fix[i] === 2 ? 'None: closed, drivers go round' : `${ld > 1.1 ? 'Jammed' : ld > 0.7 ? 'Busy' : 'Light'}: ${Math.round(fm.flow[i])} of ${Math.round(fm.capOf(i))} trips`, ld <= 1.1), row('Reaches the highway', yes(hw), hw)];
       const jt = junctionType(w, x, y);
       if (jt === SIGNAL) {
         const s = greenShare(w, x, y), G = CYCLE - 3, gv = Math.round(Math.max(3.5, Math.min(G - 3.5, G * s))), gh = G - gv;
@@ -1048,6 +1219,11 @@ export class Sim {
       if (jt) {                                           // choose it by hand: lights, or which road goes first
         const fx = this.jfix[i]; if (fx) rows[rows.length - 1].value += ' (set by you)';
         actions = [['auto', 'Automatic', !fx], ['sig', 'Lights', fx === SIGNAL], ['v', 'Main \u2197\u2199', fx === PRI_V], ['h', 'Main \u2196\u2198', fx === PRI_H]].map(([id, label, on]) => ({ id: 'jn:' + id, label, on }));
+      }
+      if (!w.hw[i] && w.wear) {                           // condition and repairs (0.9.0)
+        const wr = w.wear[i], fx = w.fix[i], rp = this.repairs.get(i);
+        rows.splice(1, 0, row('Condition', fx === 2 ? `Closed for a big repair, ${rp ? rp.left : 1} more day${rp && rp.left > 1 ? 's' : ''}` : fx === 1 ? `One lane closed for repairs, ${rp ? rp.left : 1} more day${rp && rp.left > 1 ? 's' : ''}` : wr >= BIG_AT ? 'Falling apart: it will have to close for repairs' : wr >= REPAIR_AT ? 'Worn out: waiting for a repair crew' : wr >= 60 ? 'Cracked: a little slower' : wr >= 30 ? 'Fair' : 'Good', fx ? null : wr < 60));
+        if (wr >= 30 || fx) actions = (actions || []).concat([{ id: 'rd:now', label: `Repair now (${fmt$(repairNowCost(w, i))})` }]);
       }
       if (hw && !w.hw[i]) {                                                          // where this road's trips come from and go to
         const pr = fm.probeFor(i), pct = (v) => Math.round((v / pr.total) * 100);
@@ -1069,17 +1245,65 @@ export class Sim {
     }
     if (k === T.SVC) {
       const ax = x - (w.bo[i] & 3), ay = y - (w.bo[i] >> 2), a = w.idx(ax, ay), def = BT[w.bt[i]], shut = this.closed(def), building = this.pending.has(a);
-      const rows = [];
+      const rows = []; let actions;
       rows.push(row('Status', building ? 'Under construction' : shut ? 'Closed (city in debt)' : 'Open', !building && !shut));
       if (def.use || def.cov) rows.push(row('Power', def.power ? 'Generates' : yes(this.pw[a]), def.power || !!this.pw[a]));
       rows.push(row('Upkeep', fmt$(def.upkeep * (shut ? 0.2 : 1)) + '/month'));
-      if (def.power) rows.push(row('Power output', def.power));
+      if (def.power || def.store) {
+        const pi = this.plantInfo && this.plantInfo.get(a);
+        if (pi && !building) { rows.push(row(def.store ? 'Adds' : 'Power output', `${Math.round(pi.out)}${pi.peak ? ` (up to ${pi.peak})` : def.store ? ` of ${def.store}` : pi.out < def.power ? ` of ${def.power}` : ''}`, pi.out >= (def.store ? 1 : def.power * 0.95) || (pi.peak && pi.out > 0))); if (pi.note) rows.push(row('Why', pi.note)); }
+        else if (def.power) rows.push(row('Power output', def.power));
+        if (def.key === 'solar' && !building) { const sun = this.sunNow ?? 1; rows.push(row('Right now', sun > 0.05 ? `About ${Math.round((def.peak || def.power) * sun)} in this light` : 'Dark: nothing until morning', sun > 0.05)); }
+      }
       if (def.water) rows.push(row('Water output', def.water + (def.use && !this.pw[a] ? ' (30% without power)' : '')));
-      if (def.waste) rows.push(row('Garbage capacity', def.waste));
+      if (def.waste) {
+        const fl = this.facLoad && this.facLoad.get(a);
+        if (fl && !building) {
+          rows.push(row('Garbage', `${Math.round(fl.load)} of ${Math.round(fl.cap)} in use`, fl.load < fl.cap * 0.97));
+          if (fl.via) rows.push(row('From transfer stations', Math.round(fl.via)));
+          if (fl.cap < def.waste) rows.push(row('Capacity', `${def.waste} (30% without power)`, false));
+        } else rows.push(row('Garbage capacity', def.waste));
+      }
+      if (def.xfer && !building) {
+        const xi = this.xferInfo && this.xferInfo.get(a);
+        if (xi) {
+          rows.push(row('Collects from', `${def.radius} tiles around`));
+          if (!xi.road) rows.push(row('Road', 'None next to it: the garbage can\u2019t leave', false));
+          else if (!xi.dests.length) rows.push(row('Sends garbage to', 'Nothing: no landfill or recycling center on its roads', false));
+          else {
+            const used = xi.dests.filter((t) => t.amt > 0);
+            rows.push(row('Buildings served', xi.served, xi.served > 0 ? true : null));
+            if (used.length) for (const t of used.slice(0, 3)) rows.push(row('Sends to', `${t.name}, ${t.dist} tiles by road (${Math.round(t.amt)})`, true));
+            else rows.push(row('Sends to', `${xi.dests[0].name} when needed, ${xi.dests[0].dist} tiles by road`, null));
+            if (used.length > 3) rows.push(row('And', `${used.length - 3} more`));
+          }
+          if (xi.stuck) rows.push(row('Not collected', `${xi.stuck} building${xi.stuck > 1 ? 's' : ''}: every waste building it reaches is full`, false));
+        }
+      }
       if (def.cov) rows.push(row('Serves', `${def.radius} tiles around`));
+      if (def.sewer && !building) {
+        const si = this.sewInfo && this.sewInfo.get(a);
+        if (si) { if (!si.piped) rows.push(row('Pipes', 'Not touching a pipe: nothing reaches it', false)); else { rows.push(row('Cleans', `${si.load} of ${si.cap} sewage`, si.load < si.cap)); rows.push(row('Returns', `${si.back} clean water to its pipes`, true)); } }
+      }
+      if (def.shore && !building && this.dirtyWater) { const c = this.shoreClean({ x: ax, y: ay, def }); if (c < 0.95) rows.push(row('Water', `Dirty with sewage: ${Math.round((1 - c) * 100)}% fewer visitors`, false)); }
+      if (def.metro && !building) {
+        const ms = this.metroNet && this.metroNet.by.get(a);
+        if (ms) {
+          rows.unshift(row('Station', ms.name));
+          const nm = (i2) => this.stationName(i2);
+          rows.push(row('Tunnels to', ms.links.length ? ms.links.map((l) => `${nm(l.to)} (${Math.round(l.len)})`).join(', ') : 'None yet: pick Transit \u2192 Tunnel, tap this station, then another', ms.links.length > 0));
+          if (ms.links.length) {
+            const size = this.metroNet.compSize[ms.comp];
+            rows.push(row('Network', `${size} station${size > 1 ? 's' : ''}${this.metroNet.compSize.length > 1 ? `, line ${ms.comp + 1} of ${this.metroNet.compSize.length} separate parts` : ''}${ms.links.length >= 3 ? ' \u00b7 interchange' : ''}`, true));
+            rows.push(row('Each morning', `${Math.round(ms.board)} get on here, ${Math.round(ms.alight)} get off`, ms.board + ms.alight > 0 ? true : null));
+          }
+          if (!this.pw[a]) rows.push(row('Trains', 'Not running: the station has no power', false));
+          actions = ms.links.map((l) => ({ id: `mx:${a}:${l.to}`, label: `Remove tunnel to ${nm(l.to)}` }));
+        }
+      }
       if (def.ferry && !building && !shut) { const nf = (this.ferryLinks && this.ferryLinks.get(a)) || 0; rows.push(row('Ferry route', nf ? `Yes, to ${nf} other pier${nf > 1 ? 's' : ''}` : 'No, needs a second ferry pier on the same water', nf > 0)); }
       if (def.pollute) rows.push(row('Pollution', 'Yes', false));
-      return { x: ax, y: ay, w: def.w, d: def.d, title: def.name, sub: shut ? 'Reopens when the city is out of debt' : '', rows, why: shut ? 'Closed to save money while the city owes the bank' : null };
+      return { x: ax, y: ay, w: def.w, d: def.d, title: def.name, sub: shut ? 'Reopens when the city is out of debt' : '', rows, actions, why: shut ? 'Closed to save money while the city owes the bank' : null };
     }
     if (k === T.PARK) return { x, y, w: 1, d: 1, title: 'Park', sub: 'Raises land value and happiness nearby, cleans the air', rows: [row('Land value', lvRaw)] };
     if (k === T.RES || k === T.COM || k === T.IND) {
@@ -1092,6 +1316,7 @@ export class Sim {
         row('Reaches the highway', yes(this.hwNet[i]), !!this.hwNet[i]),
         ...(l ? [row('Access', this.fronts(i) ? 'On a road' : this.trackLot[i] ? `Dirt track, grows to level ${TRACK_MAX}` : `No road next to it, grows to level ${TRACK_MAX}`, this.fronts(i) ? true : l >= TRACK_MAX ? false : null)] : []),
         row(res ? 'Jobs within reach' : 'Workers within reach', reach ? (c < 1 ? 'Yes, right nearby' : c < 255 ? `Yes, ${Math.round(c)} tiles away` : 'Yes') : 'No', !!reach),
+        ...(l && this.metroVia[i] >= 0 && this.metroNet ? [(() => { const v = this.metroVia[i], A = this.metroNet.st[(v / 1024) | 0], B = this.metroNet.st[v % 1024], S = this.metroStops && (res ? this.metroStops.toJob : this.metroStops.toHome), n = S ? S.stops[(v / 1024) | 0] : 0; return row(res ? 'Gets to work by' : 'Workers come by', A && B ? `Metro, ${A.name} to ${B.name}${n ? `, ${n} stop${n > 1 ? 's' : ''}` : ''}` : 'Metro', true); })()] : []),
         row('Land value', l < MAX_LEVEL ? `${lv} / ${LEVEL_LV[Math.max(1, l)]}` : lv, l >= MAX_LEVEL || lv >= LEVEL_LV[Math.max(1, l)]),
         row('Demand', this.zoneDemand(k) > 0.04 ? 'High' : this.zoneDemand(k) > -0.05 ? 'Steady' : 'Low', this.zoneDemand(k) > -0.05),
         row('Crime', Math.round(this.crime[i]), this.crime[i] < 30),
@@ -1118,6 +1343,42 @@ export class Sim {
     const shrO = w.shore[i];
     return { x, y, w: 1, d: 1, title: w.tree[i] ? 'Woods' : 'Open land', sub: shrO ? `Waterfront (${SHORE_NAME[shrO].toLowerCase()}): free to build` : 'Free to build', rows: [row('Land value', lvRaw, lvRaw >= 46), row('Pollution', Math.round(this.poll[i]), this.poll[i] < 25), row('Crime', Math.round(this.crime[i]), this.crime[i] < 30)] };
   }
+  // What a power plant makes now and why (0.9.0). `vari` is the part of sun and wind a battery can make up for.
+  plantOutput(a) {
+    const w = this.w, def = a.def, k = def.key;
+    let nearWater = false, pipe = false, road = false;
+    for (let y = a.y - 2; y < a.y + def.d + 2; y++) for (let x = a.x - 2; x < a.x + def.w + 2; x++) { if (!w.inb(x, y)) continue; const q = y * N + x; if (w.terrain[q] === TERRAIN.WATER && w.kind[q] !== T.ROAD) nearWater = true; }
+    for (let y = a.y - 1; y <= a.y + def.d; y++) for (let x = a.x - 1; x <= a.x + def.w; x++) { if (!w.inb(x, y)) continue; const q = y * N + x; if (w.pipe[q]) pipe = true; if (w.kind[q] === T.ROAD) road = road || !this.hwRoadComp || this.hwRoadComp.has(this.roadComp[q]); }
+    const cool = (need) => { if (nearWater) return { ok: true, note: 'Cooled by the water next to it' }; if (pipe) { const ok = !this.coolOk || this.coolOk.has(a.i); return { ok, pipe: need, note: ok ? `Cooled with ${need} water from the pipes` : `Its pipes can\u2019t spare ${need} water for cooling` }; } return { ok: false, note: 'No cooling water: build it by a lake or the sea, or lay a pipe to it' }; };
+    if (k === 'solar') { const peak = def.peak || def.power, firm = Math.round(peak * 0.5); return { out: firm, peak, vari: peak - firm, note: `${peak} in full sun, nothing at night: ${firm} on average. Batteries on its lines store the rest` }; }
+    if (k === 'wind') { const wk = this.windK ?? 0.6, rated = def.peak || def.power, now = Math.round(rated * wk); return { out: now, peak: rated, vari: rated - now, note: wk > 0.85 ? 'Strong wind' : wk > 0.5 ? 'A steady breeze' : 'Little wind right now' }; }
+    if (k === 'nuclear') { const c = cool(300); return { out: Math.round(def.power * (c.ok ? 1 : 0.25)), coolPipe: c.pipe, note: c.ok ? c.note : `${c.note} (25% without it)` }; }
+    if (k === 'gas') { if (!road) return { out: 0, note: 'No gas: it needs a road linked to the highway, where the gas main runs' }; const c = cool(100); return { out: Math.round(def.power * (c.ok ? 1 : 0.6)), coolPipe: c.pipe, note: c.ok ? `Gas from the highway main. ${c.note}` : `${c.note} (60% without it)` }; }
+    if (k === 'coal') return road ? { out: def.power, note: 'Coal comes in by lorry from the highway' } : { out: 0, note: 'No coal: lorries need a road from the highway to it' };
+    return { out: def.power * (def.use && !this.pw[a.i] ? 0.3 : 1), note: '' };
+  }
+  // Beaches, piers and marinas lose their visitors when the water in front of them is dirty with sewage (0.9.0)
+  shoreClean(a) {
+    const dw = this.dirtyWater; if (!dw) return 1; let m = 0;
+    for (let y = a.y - 3; y < a.y + a.def.d + 3; y++) for (let x = a.x - 3; x < a.x + a.def.w + 3; x++) if (x >= 0 && y >= 0 && x < N && y < N) m = Math.max(m, dw[y * N + x]);
+    return 1 - 0.75 * Math.min(1, m);
+  }
+  repairRoad(x, y) { return repairNow(this, this.w.idx(x, y)); }
+  // ---- metro network (0.8.12) ----
+  canLinkMetro(a, b) { return canLink(this, a, b); }
+  linkMetro(a, b) {
+    const c = canLink(this, a, b); if (!c.ok) return c;
+    if (!this.spend(c.cost)) return { ok: false, why: this.noMoney() };
+    (this.metroLinks || (this.metroLinks = [])).push([a, b]);
+    this.roadsDirty = true; this.analyze(); return { ok: true, cost: c.cost };
+  }
+  unlinkMetro(a, b) {
+    const n = (this.metroLinks || []).length; this.metroLinks = (this.metroLinks || []).filter(([p, q]) => !((p === a && q === b) || (p === b && q === a)));
+    if (this.metroLinks.length === n) return { ok: false };
+    this.roadsDirty = true; this.analyze(); return { ok: true };
+  }
+  stationName(i) { const s = this.metroNet && this.metroNet.by.get(i); return s ? s.name : 'station'; }
+  metroPlanFor(fx, fy, tx, ty, roadTiles) { return metroPlan(this, fx, fy, tx, ty, roadTiles); }
   roadLinked(i) { const c = this.roadComp[i]; return c >= 0 && !!this.hwRoadComp && this.hwRoadComp.has(c); }
 
   // ---- player actions ----
