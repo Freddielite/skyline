@@ -216,6 +216,20 @@ Graphics and sound
 - Manhole covers hint at buried pipes in the normal view; the water view shows live pipes in blue and dead ones in gray
 - Older saves have no pipes: connect your towers to the buildings with pipes (you get 90 days before buildings without water start losing upgrades)
 
+## 0.8.9: every building on its own lot
+
+- The stadium is redrawn to fit its lot: it no longer spreads over the roads around it
+- Palms, trees, treatment basins and a factory tank no longer hang over the next lot or the road
+- Every building picture in the game was checked: none reaches outside its lot now
+
+## 0.8.8: trees, lights and blinking fixes
+
+- Street trees stand on the pavement instead of in the road
+- Street trees, parked cars, benches, give-way signs and power lines no longer disappear around passing traffic
+- Traffic lights stay put: a junction gets lights when both roads stay busy, and keeps them until it has been quiet for a while
+- Traffic lights are kept when you save
+- Want lights at a quiet junction? Tap it (no tool picked) and choose Lights in the Inspector
+
 ## 0.8.7: no more lag in busy views
 
 - Pretty graphics stay smooth when a lot is happening: pictures no longer carry empty margins, so a busy city fits in the graphics chip's memory instead of being reloaded every frame
@@ -253,6 +267,8 @@ Graphics and sound
 - When you're not moving the map, the city is drawn once and reused, and only the moving things (cars, people, ships, traffic lights, flags, building sites, smoke) are drawn each frame. About five times less drawing work in a big city, with every graphics setting still on
 - Trees sway while you move the map and hold still when the view is still
 
+- **0.8.9:** every building now stays on its own lot. The stadium is redrawn to fit its 3×3 lot (it spread over the roads around it), and palms, trees, treatment basins and a factory tank that hung over the edge of their lots are moved in. All 546 building pictures checked. New rule 6 for future art. Details in "Buildings on their lots" above.
+- **0.8.8:** street trees stand on the pavement instead of in the road; street trees, parked cars, benches, give-way signs and power lines no longer blink out around traffic when the view is still; traffic lights no longer come and go when a junction's traffic hovers around the limit, and they're kept in the save. Details in "Street trees, lights and blinking objects" above.
 - **0.8.7:** Pretty no longer lags when a lot is happening. Every picture is trimmed to what is actually drawn (about 70% of a building's picture was empty), so a busy view fits in the graphics chip's memory again instead of reloading about 60 MB of pictures every frame; the "redraw what stands in front of a car" step is clipped on the CPU so the whole frame stays a handful of draw calls instead of up to 200; and a busy city redraws its still layer at most twice a second. Looks the same. Also fixed: cars, people and building sites could show through buildings in front of them with the still view, and tall buildings just below the bottom edge of the screen were missing. Details in "Busy views on Pretty" above.
 - **0.8.6:** people, goods and the region. Buildings in trouble stand empty (dark, boarded-up badge) before they shrink, and fill again once the problem is fixed. Families in the Inspector, rich and poor neighbourhoods, goods from factories to shops, an unemployment chip and plain reasons behind the R C I bars, ages (kids, adults, seniors), mayor approval with a January election, service budgets (50 to 150%), and deals with neighbouring towns (sell power and water, send garbage away). Factories no longer block their own upgrades with their smoke. Details in "People, goods and the region" above.
 - **0.8.5:** growth no longer stalls. Homes wanted 0.85 jobs per resident while shops and industry only offered about 0.7 jobs per resident (0.3 + 0.4), so each zone waited on the others and the city froze with empty lots and no upgrades. Homes now want 0.6 jobs per resident (`rd` in `sim.recount`). The growth pass in `sim.tick` checks 600 random tiles a day instead of 150 (each tile about every 15 days instead of every 61), so lots fill and upgrade in months rather than years.

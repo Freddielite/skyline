@@ -112,6 +112,8 @@ export class Sim {
     this.goods = { made: 0, need: 0, local: 0, imported: 0, exported: 0, importShare: 0 }; this.tradeIncome = 0; this.tradeCost = 0; this.wasteOut = 0;
     this.aband = new Uint8Array(N * N);              // 0 lived in, or why its people left (ABANDON_WHY)
     if (Array.isArray(s.aband)) for (const [i, c] of s.aband) if (i >= 0 && i < N * N) this.aband[i] = c;
+    // traffic lights are kept in the save (0.8.7), so a loaded city doesn't start without them and grow them back
+    if (Array.isArray(s.lights)) { const w = this.w; if (!w.jn || w.jn.length !== N * N) w.jn = new Uint8Array(N * N); if (!w.jhot) w.jhot = new Uint8Array(N * N); for (const i of s.lights) if (i >= 0 && i < N * N && w.kind[i] === T.ROAD) { w.jn[i] = SIGNAL; w.jhot[i] = 2; } }
     this.cut = 0; this.happiness = 60; this.hapParts = []; this.advice = [];
     this.traffic = null;                           // (old) live car count per tile; congestion now comes from trips (flow.js)
     this.flowM = new Flow(world);
@@ -160,7 +162,8 @@ export class Sim {
   dateLabel() { return `${this.dom} ${MONTHS[this.month]} ${this.year}`; }
   state() { return { req: this.req, reqNext: this.reqNext, reqDone: this.reqDone, moods: this.moods, tourBoost: this.tourBoost, money: this.money, day: this.day, tax: this.tax, lastIncome: this.lastIncome, lastExpense: this.lastExpense, ord: this.ord, done: [...this.done], streak: this.streak, disasters: this.disasters, loans: this.loans, lastInterest: this.lastInterest, lastLoanPay: this.lastLoanPay, history: this.history, news: this.news, peakPop: this.peakPop, tut: this.tut, inspected: this.inspected, jfix: this.jfix, sandbox: !!this.sandbox, sbMoney: this.sbMoney == null ? null : this.sbMoney,
     fund: this.fund, trade: this.trade, ages: this.ages, approval: this.approval, taxCap: this.taxCap, lastVote: this.lastVote, prevPop: this.prevPop,
-    aband: (() => { const a = []; for (let i = 0; i < N * N; i++) if (this.aband[i] && this.w.level[i]) a.push([i, this.aband[i]]); return a; })() }; }
+    aband: (() => { const a = []; for (let i = 0; i < N * N; i++) if (this.aband[i] && this.w.level[i]) a.push([i, this.aband[i]]); return a; })(),
+    lights: (() => { const a = [], jn = this.w.jn; if (jn) for (let i = 0; i < N * N; i++) if (jn[i] === SIGNAL) a.push(i); return a; })() }; }
   ordOn(k) { return !!this.ord[k] && this.cut === 0; }          // ordinances are suspended while the city is in debt
   isUnlocked(k) { return this.sandbox || !UNLOCK[k] || this.unlocked.has(k); }
   closed(def) { const g = cutGroup(def); return !!g && this.cut >= CUT_STAGE[g]; }

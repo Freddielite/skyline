@@ -376,6 +376,8 @@ export class Renderer {
         const y = s - x, i = y * N + x, k = w.kind[i];
         let v = k + (w.level[i] << 3) + ((w.variant[i] & 63) << 6) + (w.tree[i] << 12) + (w.bt[i] << 16) + (w.bo[i] << 24);
         if (k >= 2) { v ^= (sim.pw[i] << 28) ^ (sim.wt[i] << 29) ^ (sim.ts[i] << 30) ^ (sim.aband[i] ? 0x13579 : 0); if (mode === 2 && sim.pw[i] && hash(x, y, 17) < lf) v ^= 1 << 27; }
+        if (w.wire[i] || w.pipe[i]) v ^= (w.wire[i] * 0x9e3) ^ (w.pipe[i] * 0x3c5a7);       // 0.8.7: new lines and pipes show at once
+        if (k === T.ROAD && z >= 0.5) v ^= junctionType(w, x, y) * 0x51ed27;                 // and a junction's lights or give-way signs
         if (g.sites.has(i)) v ^= 0x55555;
         if (g.disasters.rubble.has(i)) v ^= 0x2a2a2;
         h = (Math.imul(h, 31) + v) | 0;
@@ -476,10 +478,22 @@ export class Renderer {
         const k = w.kind[i]; e.again = (k === T.EMPTY && w.tree[i] > 0) || k === T.PARK || k === T.SVC || ((k === T.RES || k === T.COM || k === T.IND) && w.level[i] > 0);
       }
     }
-    if (!e.sp || e.x1 <= bb[0] || e.x0 >= bb[2] || e.y1 <= bb[1] || e.y0 >= bb[3]) return;
-    const sp = e.sp;
-    if (e.rng) this.slices(ctx, sp, e.AX, e.AY, z, e.rng);
-    else ctx.drawImage(sp.c, e.x0, e.y0, e.x1 - e.x0, e.y1 - e.y0);
+    if (e.sp && !(e.x1 <= bb[0] || e.x0 >= bb[2] || e.y1 <= bb[1] || e.y0 >= bb[3])) {
+      const sp = e.sp;
+      if (e.rng) this.slices(ctx, sp, e.AX, e.AY, z, e.rng);
+      else ctx.drawImage(sp.c, e.x0, e.y0, e.x1 - e.x0, e.y1 - e.y0);
+    }
+    // 0.8.7: the things standing on the tile besides its picture (street trees, parked cars, benches, give-way signs,
+    // power poles and wires) are redrawn too. Before, the buildings redrawn behind a passing car covered them, so they
+    // blinked out around traffic whenever the view came to rest.
+    if (e.ex === undefined) { const k = w.kind[i]; e.ex = (k === T.ROAD && z >= 0.5) || (w.wire[i] === 1 && z >= 0.45); }
+    if (e.ex && !(X + 48 * z <= bb[0] || X - 48 * z >= bb[2] || Y + 44 * z <= bb[1] || Y - 50 * z >= bb[3])) this.staticExtras(g, w, ctx, x, y, X, Y, z, mode, lvl);
+  }
+  staticExtras(g, w, ctx, x, y, X, Y, z, mode, lvl) {
+    const i = y * N + x, k = w.kind[i];
+    if (z >= 0.5 && k === T.ROAD && !w.hw[i] && w.terrain[i] !== TERRAIN.WATER) this.street(ctx, w, x, y, X, Y, z, mode, lvl);
+    if (z >= 0.5 && k === T.ROAD) { const jt = junctionType(w, x, y); if (jt && jt !== SIGNAL) { const m = w.roadMask(x, y); this.giveWay(ctx, X, Y, z, mode, jt === PRI_V ? m & 10 : m & 5); } }
+    if (z >= 0.45 && w.wire[i] === 1) this.pole(ctx, w, x, y, X, Y, z, mode);
   }
   // A building standing just below the bottom edge of the screen: its base is out of view but a tower can reach up into
   // it. Before 0.8.7 these were skipped, so tall buildings popped in at the bottom edge (and showed only in patches
@@ -866,8 +880,12 @@ export class Renderer {
       const r = hash(x * 4 + s, y, 61), side = (hash(x, y * 4 + s, 62) - 0.5) * 0.5;
       const px = dx * 0.4 + (dy ? side : 0), py = dy * 0.4 + (dx ? side : 0), PX = cxT + (px - py) * 32 * z, PY = cyT + (px + py) * 16 * z;
       if (nk === T.RES && r < 0.55) {
-        const sp = mip(treeSprite([1, 4, 1, 2][Math.floor(r * 40) % 4], mode), lvl);
-        if (sp) { const sc = 0.62; ctx.drawImage(sp.c, PX - sp.ox * z * sc, PY - sp.oy * z * sc, (sp.c.width / sp.S) * z * sc, (sp.c.height / sp.S) * z * sc); }
+        // 0.8.7: the trunk stands on the pavement strip (0.43 of a tile out, the road surface ends at 0.36). Before, the
+        // picture's corner was put there instead of the trunk, so trees on the far side of a road stood in the traffic
+        // lane; and only single-tree pictures are used (the paired ones put the second tree on the road)
+        const sp = mip(treeSprite([1, 3, 1, 3][Math.floor(r * 40) % 4], mode), lvl);
+        if (sp) { const sc = 0.62, TX = cxT + (dx - dy) * 0.43 * 32 * z + ((dy ? side : 0) - (dx ? side : 0)) * 32 * z, TY = cyT + (dx + dy) * 0.43 * 16 * z + ((dy ? side : 0) + (dx ? side : 0)) * 16 * z;
+          ctx.drawImage(sp.c, TX - sp.ox * z * sc, TY - (sp.oy + 16) * z * sc, (sp.c.width / sp.S) * z * sc, (sp.c.height / sp.S) * z * sc); }
       } else if ((nk === T.COM || nk === T.IND) && r < 0.5) {
         const pc = this.parkedSprite(Math.floor(r * 50) % 6, dx !== 0 ? 1 : 0, mode); const qx = dx * 0.34 + (dy ? side : 0), qy = dy * 0.34 + (dx ? side : 0);
         ctx.drawImage(pc, cxT + (qx - qy) * 32 * z - 9 * z, cyT + (qx + qy) * 16 * z - 9 * z, 18 * z, 13 * z);
@@ -1068,19 +1086,30 @@ export class Renderer {
     ctx.globalCompositeOperation = 'lighter'; const g2 = ctx.createRadialGradient(bx, sy, 0, bx, sy, 36 * z); g2.addColorStop(0, 'rgba(140,255,200,.28)'); g2.addColorStop(1, 'rgba(140,255,200,0)'); ctx.fillStyle = g2; ctx.fillRect(bx - 40 * z, sy - 40 * z, 80 * z, 80 * z);
     ctx.restore();
   }
+  // A power pole with its wires to the next poles, as a cached picture (0.8.7). As a picture it can be clipped on the CPU
+  // like everything else the still view redraws in front of a passing car; drawn as lines, the wires near cars were
+  // painted over by the buildings redrawn behind them and blinked out whenever the view came to rest.
   pole(ctx, w, x, y, X, Y, z, mode) {
-    const bx = X, by = Y + 16 * z, H = 26 * z, tx = bx, ty = by - H;
+    const links = (w.inb(x + 1, y) && w.wire[y * N + x + 1] === 1 ? 1 : 0) | (w.inb(x, y + 1) && w.wire[(y + 1) * N + x] === 1 ? 2 : 0);
+    const sp = this.poleSprite(mode, links);
+    ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
+  }
+  poleSprite(mode, links) {
+    const key = mode * 4 + links, C = this.poleC || (this.poleC = {}); if (C[key]) return C[key];
+    const S = 2, ox = 42, oy = 16, c = document.createElement('canvas'); c.width = 84 * S; c.height = 40 * S;
+    const ctx = c.getContext('2d'); ctx.scale(S, S);
+    const bx = ox, by = oy + 16, tx = bx, ty = by - 26;
     ctx.lineCap = 'round';
-    ctx.strokeStyle = mode === 2 ? '#2a2118' : '#6b5844'; ctx.lineWidth = 2.2 * z; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(tx, ty); ctx.stroke();
-    ctx.lineWidth = 1.6 * z; ctx.beginPath(); ctx.moveTo(tx - 6 * z, ty + 2.5 * z); ctx.lineTo(tx + 6 * z, ty - 2.5 * z); ctx.stroke();
-    ctx.fillStyle = mode === 2 ? '#4a4f5a' : '#dfe3e8'; ctx.beginPath(); ctx.arc(tx - 6 * z, ty + 2.5 * z, 1.1 * z, 0, 6.3); ctx.arc(tx + 6 * z, ty - 2.5 * z, 1.1 * z, 0, 6.3); ctx.fill();
-    ctx.strokeStyle = mode === 2 ? '#0e1016' : '#2b2e36'; ctx.lineWidth = 0.9 * z;
-    const link = (nx, ny, dx, dy) => {
-      if (!w.inb(nx, ny) || w.wire[ny * N + nx] !== 1) return;
-      const ex = tx + dx * 32 * z, ey = ty + dy * 16 * z, mx = (tx + ex) / 2, my = (ty + ey) / 2 + 5 * z;
-      for (const o of [-1, 1]) { ctx.beginPath(); ctx.moveTo(tx + o * 5 * z, ty - o * 2 * z); ctx.quadraticCurveTo(mx + o * 5 * z, my - o * 2 * z, ex + o * 5 * z, ey - o * 2 * z); ctx.stroke(); }
+    ctx.strokeStyle = mode === 2 ? '#2a2118' : '#6b5844'; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(tx, ty); ctx.stroke();
+    ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(tx - 6, ty + 2.5); ctx.lineTo(tx + 6, ty - 2.5); ctx.stroke();
+    ctx.fillStyle = mode === 2 ? '#4a4f5a' : '#dfe3e8'; ctx.beginPath(); ctx.arc(tx - 6, ty + 2.5, 1.1, 0, 6.3); ctx.arc(tx + 6, ty - 2.5, 1.1, 0, 6.3); ctx.fill();
+    ctx.strokeStyle = mode === 2 ? '#0e1016' : '#2b2e36'; ctx.lineWidth = 0.9;
+    const link = (dx, dy) => {
+      const ex = tx + dx * 32, ey = ty + dy * 16, mx = (tx + ex) / 2, my = (ty + ey) / 2 + 5;
+      for (const o of [-1, 1]) { ctx.beginPath(); ctx.moveTo(tx + o * 5, ty - o * 2); ctx.quadraticCurveTo(mx + o * 5, my - o * 2, ex + o * 5, ey - o * 2); ctx.stroke(); }
     };
-    link(x + 1, y, 1, 1); link(x, y + 1, -1, 1);
+    if (links & 1) link(1, 1); if (links & 2) link(-1, 1);
+    return (C[key] = { c, ox, oy, S });
   }
   truck(ctx, c, z, cx, cy, mode, now) {
     const P = (x, y, h = 0) => [(x - y) * 32 * z + cx, (x + y) * 16 * z + cy - h * z];

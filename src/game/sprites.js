@@ -126,6 +126,10 @@ function kit(ctx, mode, ox, oy, lit = true, season = 0) {
     ctx.beginPath(); ctx.ellipse(cx, cy - h, r, ry, 0, 0, 6.2832); ctx.fillStyle = C(shade(base, 1.12)); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.2)'; ctx.lineWidth = 0.5; ctx.stroke();
   };
   const tree = (x, y, k, sd) => {
+    if (FOOT) {                     // 0.8.8: a tree on a building's lot keeps its crown over the lot, not over the road beside it
+      const d = x - y, lo = (-32 * FOOT[1] + 14) / 32, hi = (32 * FOOT[0] - 14) / 32;
+      const e = d < lo ? (d - lo) / 2 : d > hi ? (d - hi) / 2 : 0; x -= e; y += e;
+    }
     const p = P(x, y), cx = p[0], cy = p[1], r = 7 + hash(sd, 1, 1) * 4;
     ctx.fillStyle = C('#6b4a2f'); ctx.fillRect(cx - 1.5, cy - 8, 3, 8);
     if (k === 1) {
@@ -429,7 +433,7 @@ function plant(k, v) {
   box(0.08, 0.3, 0.52, 0.62, 46, faces(['#c9ccd2', '#c7c2b2', '#b8c2cc', '#d3d7de'][v % 4]));
   k.wins(0.08, 0.3, 0.52, 0.62, 46, v + 51, { dens: 2.4, rh: 12, wh: 5, base: 12 });
   poly([P(0.12, 0.92, 0), P(0.34, 0.92, 0), P(0.34, 0.92, 15), P(0.12, 0.92, 15)], C('#4a5568'));
-  cyl(0.78, 0.55, 11, 44, '#d3d7de'); cyl(0.78, 0.86, 11, 34, '#c9a06a');
+  cyl(0.78, 0.55, 11, 44, '#d3d7de'); cyl(0.74, 0.8, 10, 34, '#c9a06a');
   line(P(0.78, 0.55, 44), P(0.78, 0.86, 34), C('#6b7280'), 1.6);
   box(0.1, 0.06, 0.22, 0.22, 96, faces('#a2493a')); box(0.08, 0.04, 0.26, 0.26, 5, faces('#3a3a3a'), 92);
   if (v >= 4) { box(0.38, 0.06, 0.16, 0.16, 78, faces(v % 2 ? '#d7d9dc' : '#a2493a')); box(0.37, 0.05, 0.18, 0.18, 4, faces('#3a3a3a'), 76); }   // a second stack
@@ -530,6 +534,7 @@ const BUILD = {
 const HEIGHTS = { [T.RES]: [100, 150, 230, 290], [T.COM]: [110, 170, 250, 330], [T.IND]: [110, 150, 220, 130] };
 const PAD = { [T.RES]: '#a9dc8e', [T.COM]: '#cfd1d4', [T.IND]: '#a9a493' };
 
+let FOOT = null;                                            // the lot a building picture stands on (w, d in tiles), while it's drawn
 function make(w, h, ox, oy, fn, mode, lit = true, season = 0, sc = S) {
   const c = mk(w, h, sc), ctx = c.getContext('2d');
   ctx.scale(sc, sc);
@@ -629,7 +634,7 @@ export function buildingSprite(kind, level, variant, mode, lit = true, shore = 0
     const H = shore ? WF_HEIGHTS[kind][level - 1] : HEIGHTS[kind][level - 1];
     const fn = shore ? waterfrontArt(shore, kind, level) : kind === T.IND && (variant >> 4) ? industryArt(level, variant) : BUILD[kind][level - 1];
     ALT = (variant >> 3) & 1; ALT_HUE = [0, 150, 205, 95][(variant >> 1) & 3] + 40;   // a different turn of the wheel for each shape
-    try { return make(160, H, 80, H - 64, (k) => fn(k, variant & 7), mode, lit, 0, sc); } finally { ALT = 0; SNOW = 0; }
+    try { FOOT = [1, 1]; return make(160, H, 80, H - 64, (k) => fn(k, variant & 7), mode, lit, 0, sc); } finally { ALT = 0; SNOW = 0; FOOT = null; }
   };
   // Winter pictures (snow on roofs) replace the others instead of adding to them, so memory stays the same: while the
   // new one isn't made yet the old one is shown, and once it is, the old one is dropped.
@@ -1030,23 +1035,39 @@ function museum(k) {
   line([c[0], c[1] - 26], [c[0], c[1] - 36], C('#c9b46a'), 1.4);
   poly([P(x + 0.7, y + d, 0), P(x + 1.0, y + d, 0), P(x + 1.0, y + d, 14), P(x + 0.7, y + d, 14)], C(k.store()));
 }
+// Stadium (redrawn in 0.8.8): the bowl is the circle that fits inside the 3x3 lot (radius 1.4 tiles: 63 by 31.5 on
+// screen, the same 2:1 as every ground shape), with a wall, three tiers of seats sloping down to the pitch, and four
+// floodlight masts in the lot's free corners. The old bowl was 90 by 45, wider than the lot, so it spilled over the
+// roads and lots around it.
 function stadium(k) {
   const { P, ell, ctx, line, poly, box, faces, C, circ } = k;
   padRect(k, 3, 3, '#cfd1d4', null);
-  const c = P(1.5, 1.5);
-  for (let z = 0; z <= 24; z += 2) { ctx.beginPath(); ctx.ellipse(c[0], c[1] - z, 90, 45, 0, 0, 6.2832); ctx.fillStyle = C(z < 12 ? '#aab1bc' : '#c3c9d2'); ctx.fill(); }
-  ctx.beginPath(); ctx.ellipse(c[0], c[1] - 24, 90, 45, 0, 0, 6.2832); ctx.fillStyle = C('#e6e9ee'); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 0.8; ctx.stroke();
-  ell([c[0], c[1] - 22], 76, 38, C('#c9372c')); ell([c[0], c[1] - 20], 66, 33, C('#2f5fb0')); ell([c[0], c[1] - 18], 58, 29, C('#d9a441'));
-  ell([c[0], c[1] - 12], 50, 25, C('#4aa05a'));
-  for (let i = -4; i <= 4; i++) { ctx.save(); ctx.beginPath(); ctx.ellipse(c[0], c[1] - 12, 50, 25, 0, 0, 6.2832); ctx.clip(); line([c[0] + i * 11 - 6, c[1] - 40], [c[0] + i * 11 + 6, c[1] + 14], C(i % 2 ? '#43964f' : '#52ad62'), 6); ctx.restore(); }
-  ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.ellipse(c[0], c[1] - 12, 38, 19, 0, 0, 6.2832); ctx.stroke(); line([c[0] - 20, c[1] - 22], [c[0] + 20, c[1] - 2], 'rgba(255,255,255,.85)', 1.2);
-  ctx.beginPath(); ctx.ellipse(c[0], c[1] - 12, 7, 3.5, 0, 0, 6.2832); ctx.stroke();
-  for (const [x, y] of [[0.15, 0.15], [2.85, 0.15], [0.15, 2.85], [2.85, 2.85]]) {
-    box(x - 0.04, y - 0.04, 0.08, 0.08, 70, faces('#8b929c'));
-    const t = P(x, y, 74); poly([[t[0] - 9, t[1]], [t[0] + 9, t[1] + 3], [t[0] + 9, t[1] - 9], [t[0] - 9, t[1] - 12]], C(k.mode === 2 && k.lit ? '#fff2b8' : '#dfe3e8'));
+  const c = P(1.5, 1.5), RX = 63, RY = 31.5, WALL = 22;
+  const oval = (rx, ry, h, fill, stroke) => { ctx.beginPath(); ctx.ellipse(c[0], c[1] - h, rx, ry, 0, 0, 6.2832); ctx.fillStyle = fill; ctx.fill(); if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 0.8; ctx.stroke(); } };
+  // the outer wall: lighter on the left face, darker on the right, like the boxes
+  ctx.save(); ctx.beginPath(); ctx.ellipse(c[0], c[1], RX, RY, 0, 0, Math.PI); ctx.lineTo(c[0] - RX, c[1] - WALL); ctx.ellipse(c[0], c[1] - WALL, RX, RY, 0, Math.PI, 0, true); ctx.closePath(); ctx.clip();
+  const g = ctx.createLinearGradient(c[0] - RX, 0, c[0] + RX, 0); g.addColorStop(0, C('#c7ccd4')); g.addColorStop(0.5, C('#b3b9c3')); g.addColorStop(1, C('#8f96a1'));
+  ctx.fillStyle = g; ctx.fillRect(c[0] - RX - 1, c[1] - WALL - RY - 1, RX * 2 + 2, WALL + RY * 2 + 2);
+  for (let i = 1; i < 12; i++) { const a = Math.PI * i / 12, x = c[0] - Math.cos(a) * RX, y = c[1] + Math.sin(a) * RY; line([x, y], [x, y - WALL], 'rgba(0,0,0,.12)', 0.8); }   // wall ribs
+  line([c[0] - RX, c[1] - 7], [c[0] + RX, c[1] - 7], 'rgba(0,0,0,0)', 0);
+  ctx.restore();
+  ctx.beginPath(); ctx.ellipse(c[0], c[1] - 8, RX + 0.2, RY + 0.1, 0, 0.15, Math.PI - 0.15); ctx.strokeStyle = C('#7c8490'); ctx.lineWidth = 1.4; ctx.stroke();   // a band of windows on the concourse
+  oval(RX, RY, WALL, C('#e6e9ee'), 'rgba(0,0,0,.25)');                  // the rim
+  oval(RX - 4, RY - 2, WALL, C('#c9372c'));                              // upper tier
+  oval(RX - 12, RY - 6, WALL - 4, C('#2f5fb0'));                         // middle tier
+  oval(RX - 19, RY - 9.5, WALL - 8, C('#d9a441'));                       // lower tier
+  oval(RX - 25, RY - 12.5, WALL - 12, C('#4aa05a'));                     // the pitch
+  const PX = RX - 25, PY = RY - 12.5, ph = WALL - 12;
+  for (let i = -3; i <= 3; i++) { ctx.save(); ctx.beginPath(); ctx.ellipse(c[0], c[1] - ph, PX, PY, 0, 0, 6.2832); ctx.clip(); line([c[0] + i * 11 - 5, c[1] - ph - 24], [c[0] + i * 11 + 5, c[1] - ph + 24], C(i % 2 ? '#43964f' : '#52ad62'), 5.5); ctx.restore(); }
+  ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(c[0], c[1] - ph, PX - 7, PY - 3.5, 0, 0, 6.2832); ctx.stroke();
+  line([c[0] - 14, c[1] - ph - 7], [c[0] + 14, c[1] - ph + 7], 'rgba(255,255,255,.85)', 1);
+  ctx.beginPath(); ctx.ellipse(c[0], c[1] - ph, 5, 2.5, 0, 0, 6.2832); ctx.stroke();
+  { const gx = c[0] - 34, gy = c[1] + RY * Math.sqrt(1 - (34 / RX) ** 2); poly([[gx - 8, gy - 2.5], [gx + 8, gy + 1], [gx + 8, gy - 10], [gx - 8, gy - 13.5]], C('#4a5568')); }   // the main gate, on the left of the wall (the front mast would hide it)
+  for (const [x, y] of [[0.14, 0.14], [2.86, 0.14], [0.14, 2.86], [2.86, 2.86]]) {                                         // floodlights in the free corners
+    box(x - 0.03, y - 0.03, 0.06, 0.06, 56, faces('#8b929c'));
+    const t = P(x, y, 59); poly([[t[0] - 7, t[1]], [t[0] + 7, t[1] + 2.5], [t[0] + 7, t[1] - 7], [t[0] - 7, t[1] - 9.5]], C(k.mode === 2 && k.lit ? '#fff2b8' : '#dfe3e8'));
   }
-  poly([P(1.1, 2.62, 0), P(1.9, 2.62, 0), P(1.9, 2.62, 10), P(1.1, 2.62, 10)], C('#4a5568'));
-  for (let i = 0; i < 6; i++) circ(P(0.4 + i * 0.4, 2.9, 2), 2, C(['#e0483f', '#f4c542', '#3a7bd5'][i % 3]));
+  for (let i = 0; i < 5; i++) circ(P(0.55 + i * 0.45, 2.82, 2), 1.8, C(['#e0483f', '#f4c542', '#3a7bd5'][i % 3]));   // flags on the forecourt
 }
 // Landfill: a fenced lot in four terraced cells, like a real one is filled. Back left is finished and grassed over,
 // back right is capped with soil, front left is the active cell with fresh waste and a compactor, front right is the
@@ -1283,7 +1304,7 @@ function treatmentPlant(k) {
     const a = ((k.mode === 0 ? 0.9 : 0.4)), ex = c[0] + Math.cos(a) * (r - 4), ey = c[1] + Math.sin(a) * (r - 4) * 0.5;
     line([c[0], c[1]], [ex, ey], C('#f2f2f2'), 1.6); circ([c[0], c[1]], 2, C('#6b7280'));
   };
-  basin(2.2, 0.7, 36); basin(2.2, 1.55, 36);
+  basin(2.2, 0.7, 33); basin(2.2, 1.55, 33);                     // (33: at 36 the front basin hung over the lot's edge)
   // filter beds
   for (let i = 0; i < 4; i++) { const x0 = 0.3 + i * 0.35, y0 = 1.55;
     box(x0, y0, 0.3, 0.7, 3, { l: '#cfd6de', r: '#aab3bd', t: '#cfd6de' });
@@ -1352,7 +1373,8 @@ export function serviceSprite(id, mode, lit = true, face = 0, hi = false) {
   const fnMake = (sc) => () => {
     const [fn, fw0, fd0, hh] = e, fw = fw0 + 2 * pad, fd = fd0 + 2 * pad;     // shore buildings get a bigger canvas for the part over the water
     const W = (fw + fd) * 32 + 96, ox = fd * 32 + 32, H = hh + (fw + fd) * 16 + 34, oy = H - (fw + fd) * 16 - 34 + pad * 32;
-    return make(W, H, ox, oy, (k) => fn(k, face), mode, lit, 0, (fw0 + fd0) * 32 * sc > 900 ? Math.min(sc, 2.6) : sc);   // the biggest (3x3) stay a little smaller
+    FOOT = pad ? null : [fw0, fd0];
+    try { return make(W, H, ox, oy, (k) => fn(k, face), mode, lit, 0, (fw0 + fd0) * 32 * sc > 900 ? Math.min(sc, 2.6) : sc); } finally { FOOT = null; }   // the biggest (3x3) stay a little smaller
   };
   return (hi ? hiRes(key, fnMake(HI)) || memoLater(key, fnMake(S)) : memoLater(key, fnMake(S))) || otherLight(mode, (m) => cache.get(`s${id}${m}1${pad ? 'f' + face : ''}`) || cache.get(`s${id}${m}0${pad ? 'f' + face : ''}`));
 }

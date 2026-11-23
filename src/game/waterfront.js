@@ -63,7 +63,12 @@ function umbrella(k, x, y, col, z = 0, r = 6) {
 function table(k, x, y, z = 0) { const { P, ell, C, line } = k; const p = P(x, y, z); line(p, [p[0], p[1] - 3], C('#555'), 0.8); ell([p[0], p[1] - 3], 2.6, 1.2, C('#f2f2ee')); }
 function palm(k, x, y, sd) {
   const { P, C, ctx, ell, mode } = k;
-  const p = P(x, y), lean = (hash(sd, 2, 3) - 0.5) * 8, tx = p[0] + lean, ty = p[1] - 28;
+  const lean = (hash(sd, 2, 3) - 0.5) * 8;
+  { // 0.8.8: keep the fronds over the lot (palms right at a side corner spread over the next lot or the road)
+    const d = x - y, lim = (32 - 13 - Math.abs(lean)) / 32;
+    if (Math.abs(d) > lim) { const e = (d - Math.sign(d) * lim) / 2; x -= e; y += e; }
+  }
+  const p = P(x, y), tx = p[0] + lean, ty = p[1] - 28;
   ctx.strokeStyle = C('#8a6a44'); ctx.lineWidth = 2.2; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.quadraticCurveTo(p[0] - lean * 0.2, p[1] - 15, tx, ty); ctx.stroke();
   for (let i = 0; i < 7; i++) {

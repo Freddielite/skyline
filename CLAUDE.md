@@ -2,7 +2,7 @@
 
 Isometric city builder for Android. React + Vite + canvas, packaged with Capacitor.
 Project folder on Freddie's machine: `/home/freddielite/Downloads/skyline`
-App ID: `com.wyntek.skyline` · Current version: **0.8.7**
+App ID: `com.wyntek.skyline` · Current version: **0.8.9**
 
 This file is the handover: what has been built, how to push it to the phone, and the rules for future changes.
 Anyone (person or AI assistant) working on this project should read it first.
@@ -16,7 +16,8 @@ Anyone (person or AI assistant) working on this project should read it first.
 3. **Deliver the whole project as `skyline.zip`**, with the files at the top level of the zip (no `skyline/` folder inside), and without `node_modules/`, `dist/` or `android/`.
 4. **Add a short entry to the change history** at the bottom of this file and to `README.md`.
 5. **Check performance on a slow phone.** The test phone is an Infinix HOT. Do heavy work once and cache it in sprites. The main view is drawn on the GPU (see "Drawing engine" below): `ctx.filter` (blur) does nothing there, and additive glow (`'lighter'`) is free.
-6. **Changing a cached picture after it has been drawn?** Call `touched(canvas)` (or `touched(canvas, x0, y0, x1, y1)` for a part) from `gl2d.js`, or the GPU keeps showing the old one.
+6. **Every building stays on its own lot.** Seen from the camera, a building's picture may rise as high as it likes, but nothing may reach left or right of its lot's side corners or below its lot's two front edges (onto the road or the next lot). Only shore buildings (pier, beach, marina, ferry) reach out over the water on purpose. Ground shapes use the 2:1 shape of the tiles: a circle on the ground of r tiles is an ellipse of 45·r by 22.6·r units, so the biggest circle on a 3×3 lot is 68 by 34. Trees drawn with `kit.tree` on a lot are kept inside it automatically (`FOOT`).
+7. **Changing a cached picture after it has been drawn?** Call `touched(canvas)` (or `touched(canvas, x0, y0, x1, y1)` for a part) from `gl2d.js`, or the GPU keeps showing the old one.
 
 ---
 
@@ -45,7 +46,7 @@ The `&&` means each step only runs if the one before succeeded. If one fails, th
 
 ## Troubleshooting
 
-**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.8.7 · built (date) UTC`.
+**Check which version is on the phone:** Menu → the line at the bottom says `Skyline 0.8.9 · built (date) UTC`.
 
 **Check the project folder has the new code:**
 ```bash
@@ -351,6 +352,24 @@ All in `sim.js` unless noted.
 - **Bottlenecks** (`Flow.bottlenecks()`, `necks`): joined stretches of road above 0.95 load (not the highway), worst first by trips over capacity, with their type (street, avenue, bridge) and what they run past. `sim.makeAdvice` names the worst two (load above 1.1), with a direction from the population centre (`compass()`, north = top of the screen) and a fix; advice items can carry `tile`, and Show on map calls `game.showAt(x, y, view)`.
 - **Utilities fix** (`sim.anNetworks`): a building in reach of two or more power networks (or pipe networks) now takes the one with the most to spare instead of the first one found, which left buildings dark next to live lines. Waste: each building goes to the nearest landfill or recycling center in range that still has room (nearest pairs first), instead of only the nearest one. Since 0.7.3 garbage only counts for level 2 and up (level 1 shows "Not needed yet" in the Inspector), they are served first, and only they count in `wasteUn`, `wOut`, `wFull` and the Waste view's red. `sim.uDiag` records why supply doesn't reach buildings (plants or pumps not touching a line or pipe, split networks, buildings out of reach, pumps without power, full or distant landfills); the advisors say it, the top chip shows "N out" in amber, and Budget shows buildings without power and water. In the power view a building on an underground cable keeps its red or green (`sim.lineLive` holds the lines' state).
 
+## Buildings on their lots (fixed in 0.8.9)
+
+Freddie (screenshot): the stadium looked out of place, spilling over the road; every building should keep to the same design rules (rule 6 above).
+- **Checked all 546 pictures** (every service building, every level and look of homes, shops and industry, the three waterfront styles, parks) for pixels outside their lot's column: 66 spilled over.
+- **Stadium** (`stadium()` in `sprites.js`) redrawn: its bowl was 90 by 45 units, wider than the 3×3 lot, so it covered the roads and lots around it. Now the bowl is the circle that fits the lot (63 by 31.5), with a ribbed wall shaded like the boxes (light left, dark right), three tiers of seats stepping down to the pitch, the gate on the left of the wall, flags on the forecourt and four slimmer floodlight masts (56 high instead of 70) in the lot's free corners.
+- **Palms** on sea-front lots (`palm()` in `waterfront.js`) and **trees on lots** (`kit.tree`, using `FOOT`, set by `buildingSprite` and `serviceSprite` while a picture is made) are moved in so their crowns stay over the lot.
+- **Water treatment** basins 36 → 33 and the **heavy plant**'s front tank moved in a little; both hung a few units over the lot's front edge.
+- After the fixes: 0 of 546 pictures reach outside their lot.
+
+## Street trees, lights and blinking objects (fixed in 0.8.8)
+
+Freddie (screenshot): trees standing on the road, few traffic lights, lights and other objects appearing and disappearing.
+- **Trees on the road** (`renderer.street()`): the street tree picture's corner was put on the pavement spot instead of its trunk, so the trunk landed 0.31 of a tile further toward the viewer: on the far side of a road that is the traffic lane. The trunk now stands at 0.43 of a tile out (the asphalt ends at 0.36, `roadSprite`), and only single-tree pictures are used (`treeSprite` 1 and 3; the even ones add a second tree that also fell on the road).
+- **Objects blinking out around traffic (bug since 0.8.3):** with the still view, `occluders()` redrew only the building and tree pictures of the tiles in front of each car, which covered the street trees, parked cars, benches, give-way signs and power lines standing on those tiles, inside the car's box. They vanished around traffic whenever the view came to rest and came back when it moved. `staticObj()` now also redraws them (`staticExtras()`). Power poles and wires are now a cached picture (`poleSprite(mode, links)`, links bit 1 right, bit 2 down) so the CPU clip (`clipBox`) applies to them; vector lines can't be clipped that way. `viewSig` now includes lines, pipes and each junction's type, so placing a power line or a junction changing shows at once instead of when the map next moves.
+- **Lights coming and going** (`Flow.junctions()`): a junction whose roads' load hovered around the threshold switched between lights and give-way from one traffic pass to the next. Now a junction gets lights after two passes in a row with both roads at load 0.4+ and keeps them until both have been below 0.15 for four passes (`w.jhot`); the main road of a give-way junction changes only after two passes with the other road 1.5 times busier (`w.jflip`). In the test city: lights switching on or off after the first passes went from 13 to 2 over 57 passes.
+- **Lights are saved** (`sim.state().lights`, restored in the `Sim` constructor), so a loaded city has its lights at once instead of growing them back.
+- **Few lights is by design** (0.7.2): automatic lights only where two busy roads meet. Any junction can get lights by hand: tap it with no tool picked, Inspector → Lights.
+
 ## Busy views on Pretty (fixed in 0.8.7)
 
 Freddie: the game lagged when a lot was happening, on Pretty (which stays: it's how he wants it). Measured in a dense test city at night (about 140,000 residents, a few hundred cars and people in view):
@@ -439,6 +458,8 @@ src/App.jsx              all interface panels: top pills, category rail and tool
 
 ## Change history
 
+- **0.8.9:** every building now stays on its own lot. The stadium is redrawn to fit its 3×3 lot (it spread over the roads around it), and palms, trees, treatment basins and a factory tank that hung over the edge of their lots are moved in. All 546 building pictures checked. New rule 6 for future art. Details in "Buildings on their lots" above.
+- **0.8.8:** street trees stand on the pavement instead of in the road; street trees, parked cars, benches, give-way signs and power lines no longer blink out around traffic when the view is still; traffic lights no longer come and go when a junction's traffic hovers around the limit, and they're kept in the save. Details in "Street trees, lights and blinking objects" above.
 - **0.8.7:** Pretty no longer lags when a lot is happening. Every picture is trimmed to what is actually drawn (about 70% of a building's picture was empty), so a busy view fits in the graphics chip's memory again instead of reloading about 60 MB of pictures every frame; the "redraw what stands in front of a car" step is clipped on the CPU so the whole frame stays a handful of draw calls instead of up to 200; and a busy city redraws its still layer at most twice a second. Looks the same. Also fixed: cars, people and building sites could show through buildings in front of them with the still view, and tall buildings just below the bottom edge of the screen were missing. Details in "Busy views on Pretty" above.
 - **0.8.6:** people, goods and the region. Buildings in trouble stand empty (dark, boarded-up badge) before they shrink, and fill again once the problem is fixed. Families in the Inspector, rich and poor neighbourhoods, goods from factories to shops, an unemployment chip and plain reasons behind the R C I bars, ages (kids, adults, seniors), mayor approval with a January election, service budgets (50 to 150%), and deals with neighbouring towns (sell power and water, send garbage away). Factories no longer block their own upgrades with their smoke. Details in "People, goods and the region" above.
 - **0.8.5:** growth no longer stalls. Homes wanted 0.85 jobs per resident while shops and industry only offered about 0.7 jobs per resident (0.3 + 0.4), so each zone waited on the others and the city froze with empty lots and no upgrades. Homes now want 0.6 jobs per resident (`rd` in `sim.recount`). The growth pass in `sim.tick` checks 600 random tiles a day instead of 150 (each tile about every 15 days instead of every 61), so lots fill and upgrade in months rather than years.

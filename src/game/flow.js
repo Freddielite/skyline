@@ -167,11 +167,15 @@ export class Flow {
     if (this.passes < 3) this.dirty = true;     // the first few passes follow each other quickly so routes settle
   }
   // Junction control from the real trips: lights only where two busy roads meet; everywhere else the busier road has
-  // priority and the side roads give way. A little hysteresis so junctions don't flip back and forth between passes.
+  // priority and the side roads give way. Since 0.8.7 the choice is sticky, like real lights and signs: a junction gets
+  // lights after two passes in a row with both roads busy (load 0.4+) and keeps them until both roads have been quiet
+  // (below 0.15) for four passes; the main road changes after two passes with the other road 1.5 times busier.
+  // (Before, a load around the threshold made lights appear and vanish from one pass to the next.) w.jhot counts passes.
   // The busier road also gets the longer green (w.jsplit: the vertical road's share).
   junctions() {
     const w = this.w, f = this.flow, n = N * N;
     const jn = w.jn && w.jn.length === n ? w.jn : (w.jn = new Uint8Array(n)), sp = w.jsplit && w.jsplit.length === n ? w.jsplit : (w.jsplit = new Float32Array(n));
+    const hot = w.jhot && w.jhot.length === n ? w.jhot : (w.jhot = new Uint8Array(n));
     let signals = 0, pri = 0;
     for (let i = 0; i < n; i++) {
       if (w.kind[i] !== T.ROAD) { jn[i] = 0; if (w.jfix && w.jfix[i]) delete w.jfix[i]; continue; }
@@ -188,11 +192,19 @@ export class Flow {
       let t;
       const fx = w.jfix && w.jfix[i];
       if (fx) t = fx;                                         // set by hand in the Inspector
-      else if (both >= 0.4 || (was === SIGNAL && both >= 0.28)) t = SIGNAL;
-      else if (fV + fH < 1) t = defaultJunction(w, x, y);
-      else if (was === PRI_V) t = fH > fV * 1.3 ? PRI_H : PRI_V;
-      else if (was === PRI_H) t = fV > fH * 1.3 ? PRI_V : PRI_H;
-      else t = fV >= fH ? PRI_V : PRI_H;
+      else if (was === SIGNAL) {                              // lights stay until the junction has been quiet a while
+        hot[i] = both < 0.15 ? Math.min(250, hot[i] + 1) : 0;
+        if (hot[i] >= 4) { hot[i] = 0; t = fV + fH < 1 ? defaultJunction(w, x, y) : fV >= fH ? PRI_V : PRI_H; } else t = SIGNAL;
+      } else if (both >= 0.4 && (hot[i] = Math.min(250, hot[i] + 1)) >= 2) { hot[i] = 0; t = SIGNAL; }
+      else {
+        if (both < 0.4) hot[i] = 0;
+        const want = fV + fH < 1 ? defaultJunction(w, x, y) : fV >= fH ? PRI_V : PRI_H;
+        if (!was || fV + fH < 1) t = want;
+        else if (want !== was && (was === PRI_V ? fH > fV * 1.5 : fV > fH * 1.5)) t = (w.jflip && w.jflip[i]) ? want : was;
+        else t = was;
+        const fl = w.jflip && w.jflip.length === n ? w.jflip : (w.jflip = new Uint8Array(n));
+        fl[i] = want !== was && t === was && (was === PRI_V ? fH > fV * 1.5 : fV > fH * 1.5) ? 1 : 0;   // a second pass in a row switches it
+      }
       jn[i] = t; sp[i] = fV + fH > 0 ? fV / (fV + fH) : 0.5;
       if (t === SIGNAL) signals++; else pri++;
     }
