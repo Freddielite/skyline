@@ -29,6 +29,10 @@ export const BT = {
   25: { id: 25, key: 'marina', name: 'Marina', w: 2, d: 2, cost: 3000, upkeep: 60, radius: 12, use: 3, cov: [['fun', 1.1]], cat: 'fun', shore: 'lake', reach: 2, dock: true },
   26: { id: 26, key: 'ferry', name: 'Ferry pier', w: 1, d: 1, cost: 1500, upkeep: 40, radius: 11, use: 2, cov: [['transit', 1]], cat: 'transit', shore: 'lake', reach: 1, dock: true, road: true, ferry: true },
   27: { id: 27, key: 'metro', name: 'Metro station', w: 1, d: 1, cost: 5000, upkeep: 120, radius: 14, use: 4, cov: [['metro', 1]], road: true, metro: true, cat: 'transit' },
+  // bigger power for a growing city: gas, solar and nuclear (nuclear is a 4x4)
+  28: { id: 28, key: 'gas', name: 'Gas power plant', w: 3, d: 3, cost: 9000, upkeep: 260, power: 520, pollute: 14, pr: 9, cat: 'util' },
+  29: { id: 29, key: 'solar', name: 'Solar farm', w: 3, d: 3, cost: 7000, upkeep: 60, power: 200, cat: 'util' },
+  30: { id: 30, key: 'nuclear', name: 'Nuclear power plant', w: 4, d: 4, cost: 32000, upkeep: 900, power: 2400, pollute: 3, pr: 6, cat: 'util' },
   18: { id: 18, key: 'wte', name: 'Waste-to-energy', w: 2, d: 2, cost: 5200, upkeep: 140, waste: 200, radius: 14, power: 40, pollute: 8, pr: 6, cat: 'waste' },
 };
 // Shore buildings face the water on one side: face 0 = +x, 1 = +y, 2 = -x, 3 = -y (stored in world.variant).

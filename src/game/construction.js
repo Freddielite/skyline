@@ -16,12 +16,12 @@ export const STYLES = {
   earth: { excavator: true, piles: true, wipe: true, workers: 2 },
 };
 export const REAL_H = { [T.RES]: [30, 54, 94, 196], [T.COM]: [32, 66, 140, 240], [T.IND]: [30, 46, 104, 48], [T.PARK]: [22, 22, 22] };
-export const SVC_H = { busstop: 30, busterm: 46, pump: 52, treat: 80, coal: 120, wind: 78, water: 66, police: 34, fire: 54, clinic: 48, school: 66, police2: 58, fire2: 92, hospital: 82, university: 104, plaza: 12, library: 40, museum: 60, stadium: 80, dump: 22, recycle: 40, wte: 112 };
+export const SVC_H = { busstop: 30, busterm: 46, pump: 52, treat: 80, coal: 120, gas: 126, solar: 18, nuclear: 92, wind: 78, water: 66, police: 34, fire: 54, clinic: 48, school: 66, police2: 58, fire2: 92, hospital: 82, university: 104, plaza: 12, library: 40, museum: 60, stadium: 80, dump: 22, recycle: 40, wte: 112 };
 
 export function siteInfo(ev) {
   if (ev.bt) {
     const def = BT[ev.bt], k = def.key;
-    const style = k === 'wind' ? 'turbine' : (k === 'dump' || k === 'plaza') ? 'earth' : (k === 'coal' || k === 'wte' || k === 'recycle') ? 'heavy' : (k === 'stadium' || k === 'hospital' || k === 'university' || k === 'treat') ? 'crane' : (k === 'water') ? 'frame' : 'civic';
+    const style = k === 'wind' ? 'turbine' : (k === 'dump' || k === 'plaza' || k === 'solar') ? 'earth' : (k === 'coal' || k === 'wte' || k === 'recycle' || k === 'gas' || k === 'nuclear') ? 'heavy' : (k === 'stadium' || k === 'hospital' || k === 'university' || k === 'treat') ? 'crane' : (k === 'water') ? 'frame' : 'civic';
     return { style, fw: def.w, fd: def.d, hb: SVC_H[k] || 50, dur: k === 'wind' ? 7 : Math.min(24, 8 + def.cost / 600) };
   }
   if (ev.kind === T.PARK) return { style: 'earth', fw: 1, fd: 1, hb: 22, dur: 4.5 };
@@ -30,6 +30,13 @@ export function siteInfo(ev) {
   return { style, fw: 1, fd: 1, hb: REAL_H[ev.kind][L], dur: [5, 8.5, 13, 20][L] * (ev.kind === T.COM ? 1.1 : 1) };
 }
 
+// The screen box a building site can draw into (scaffolding, cranes, fences, piles), for the still view's live pass
+// (renderer.liveLayer). Since pictures are trimmed to what they show (0.8.7), the building picture's box no longer
+// covers a crane reaching out beside it, so the site's own reach is used.
+export function siteBox(s, AX, AY, z) {
+  const fw = s.fw || 1, fd = s.fd || 1, hb = s.hb || 50;
+  return [AX - ((fd + 0.7) * 32 + 14) * z, AY - (hb + 80) * z, AX + ((fw + 0.7) * 32 + 14) * z, AY + ((fw + fd) * 16 + 30) * z];
+}
 export function drawConstruction(ctx, s, AX, AY, z, mode, now, spNew, spOld) {
   const st = STYLES[s.style], p = c01(s.t / s.dur), fw = s.fw, fd = s.fd, hb = s.hb, d = mode === 2 ? 0.5 : mode === 1 ? 0.86 : 1;
   const P = (x, y, h = 0) => [AX + (x - y) * 32 * z, AY + (x + y) * 16 * z - h * z];
@@ -150,7 +157,6 @@ export function drawConstruction(ctx, s, AX, AY, z, mode, now, spNew, spOld) {
     for (let i = 0; i < st.workers; i++) {
       const ph = i * 2.1 + hsh(s.i, i) * 6, rx = 0.18 + 0.12 * (i % 2), q = P(fw * 0.5 + Math.cos(now * 0.6 + ph) * (fw * 0.5 + 0.12) * 0.8, fd * 0.5 + Math.sin(now * 0.6 + ph) * (fd * 0.5 + 0.12) * 0.8);
       const bob = Math.abs(Math.sin(now * 6 + ph)) * 0.8 * z; ctx.globalAlpha = fadeOut;
-      ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.beginPath(); ctx.ellipse(q[0] + 2 * z, q[1] + 0.4 * z, 2.6 * z, 1.1 * z, 0, 0, 6.3); ctx.fill();
       ctx.fillStyle = col('#2f3340'); ctx.fillRect(q[0] - 1.1 * z, q[1] - 1.6 * z - bob, 0.9 * z, 1.8 * z); ctx.fillRect(q[0] + 0.2 * z, q[1] - 1.6 * z - bob, 0.9 * z, 1.8 * z);
       ctx.fillStyle = col(shirts[i % 4]); ctx.fillRect(q[0] - 1.3 * z, q[1] - 6 * z - bob, 2.6 * z, 4.6 * z);
       ctx.fillStyle = col('#e0b48c'); ctx.beginPath(); ctx.arc(q[0], q[1] - 7.4 * z - bob, 1.6 * z, 0, 6.3); ctx.fill();

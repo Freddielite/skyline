@@ -164,9 +164,9 @@ export class Agents {
     if (a.hold && !a.ped) dist = 0;                                   // queueing behind another vehicle
     while (dist > 0 && a.pts) {
       const A = p[a.seg], B = p[a.seg + 1], len = Math.hypot(B[0] - A[0], B[1] - A[1]) || 0.001, left = (1 - a.t) * len;
-      if (!a.ped && a.seg + 1 < p.length - 1 && a.t < 0.46 && (1 - a.t) * len > 0) {      // stop line before a red signal
+      if (!a.ped && a.seg + 1 < p.length - 1 && a.t <= 0.46 && (1 - a.t) * len > 0) {      // stop line before a red signal
         const ux = Math.sign(B[0] - A[0]), uy = Math.sign(B[1] - A[1]);
-        if (mustStop(this.w, Math.floor(B[0]), Math.floor(B[1]), ux, uy, this.sigT) && a.t + dist / len > 0.46) { dist = Math.max(0, (0.46 - a.t) * len); a.t = Math.min(0.46, a.t + dist / len); dist = 0; break; }
+        if (a.t + dist / len > 0.46 && mustStop(this.w, Math.floor(B[0]), Math.floor(B[1]), ux, uy, this.sigT, a)) { dist = Math.max(0, (0.46 - a.t) * len); a.t = Math.min(0.46, a.t + dist / len); dist = 0; break; }
       }
       if (dist < left) { a.t += dist / len; dist = 0; }
       else { dist -= left; a.seg++; a.t = 0; if (a.seg >= p.length - 1) { this.arrive(a, abs); return; } }

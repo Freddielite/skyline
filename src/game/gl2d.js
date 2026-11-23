@@ -12,6 +12,7 @@ const PAGE = 2048, PAD = 2, MAX_PAGES = 5, SOLO_UNIT = 6, SOLO_MAX = 1024;
 const STRIDE = 6;                                   // x, y, u, v, texture slot, packed color
 const MAX_VERTS = 60000;
 const TAU = Math.PI * 2;
+const ID = [1, 0, 0, 1, 0, 0];
 
 // ---------- colors ----------
 const colorCache = new Map();
@@ -211,14 +212,16 @@ export class GLContext2D {
     const gl = this.gl;
     gl.activeTexture(gl.TEXTURE0 + page.unit); gl.bindTexture(gl.TEXTURE_2D, page.tex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, PAGE, PAGE, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    page.gen++; page.shelves = []; page.y = 0; this.whiten(page); this.stat.recycles++;
+    page.gen++; page.hits = 0; page.shelves = []; page.y = 0; this.whiten(page); this.stat.recycles++;
   }
   alloc(w, h) {
     const W = w + PAD * 2, H = h + PAD * 2;
     for (const page of this.pages) { const r = this.place(page, W, H); if (r) return r; }
     if (this.pages.length < MAX_PAGES) return this.place(this.newPage(), W, H);
-    let old = this.pages[0];                                   // least recently drawn page (never page 0's white texel twice in a row if avoidable)
-    for (const p of this.pages) if (p.used < old.used) old = p;
+    // least recently drawn page; if every page is in use this frame, the one with the fewest pictures drawn from it this
+    // frame, so a full memory costs a few re-uploads instead of wiping pages the rest of the frame still needs (0.8.7)
+    let old = this.pages[0];
+    for (const p of this.pages) if (p.used < old.used || (p.used === old.used && (p.hits | 0) < (old.hits | 0))) old = p;
     this.recycle(old);
     return this.place(old, W, H);
   }
@@ -235,13 +238,13 @@ export class GLContext2D {
     const v = img._v | 0;
     if (e && e.gen === e.page.gen && e.w === w && e.h === h) {
       if (e.v !== v) { this.upload(e.page, e.x, e.y, img); e.v = v; }
-      e.page.used = this.frame; return e;
+      const pg = e.page; if (pg.used !== this.frame) { pg.used = this.frame; pg.hits = 0; } pg.hits++; return e;
     }
     const r = this.alloc(w, h);
     if (!r) return this.soloEntry(img);
     this.upload(r.page, r.x, r.y, img);
     e = { page: r.page, gen: r.page.gen, x: r.x, y: r.y, w, h, v, slot: r.page.unit, u0: r.x / PAGE, v0: r.y / PAGE, su: 1 / PAGE, sv: 1 / PAGE };
-    r.page.used = this.frame; this.entries.set(img, e);
+    if (r.page.used !== this.frame) { r.page.used = this.frame; r.page.hits = 0; } r.page.hits++; this.entries.set(img, e);
     return e;
   }
   upload(page, x, y, img) {
@@ -303,6 +306,55 @@ export class GLContext2D {
     this.vert(p0[0], p0[1], u0, v1, slot, ct); this.vert(p1[0], p1[1], u1, v1, slot, ct); this.vert(p2[0], p2[1], u1, v0, slot, cb);
     this.vert(p0[0], p0[1], u0, v1, slot, ct); this.vert(p2[0], p2[1], u1, v0, slot, cb); this.vert(p3[0], p3[1], u0, v0, slot, cb);
   }
+  // ---------- the still-view layer (0.8.3) ----------
+  // Everything that doesn't move is drawn once into a texture the size of the screen and then shown with one quad per
+  // frame, until the view or the city changes (see renderer.js). layerBegin/layerEnd redirect drawing into it.
+  layerBegin() {
+    if (this.lost) return false;
+    this.flush(); const gl = this.gl, W = this.canvas.width, H = this.canvas.height;
+    if (!this.lay || this.lay.w !== W || this.lay.h !== H) {
+      if (this.lay) { gl.deleteTexture(this.lay.tex); gl.deleteFramebuffer(this.lay.fb); gl.deleteRenderbuffer(this.lay.rb); }
+      const tex = gl.createTexture(); gl.activeTexture(gl.TEXTURE0 + SOLO_UNIT); gl.bindTexture(gl.TEXTURE_2D, tex); this.soloBound = tex;
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.NEAREST], [gl.TEXTURE_MAG_FILTER, gl.NEAREST], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+      const fb = gl.createFramebuffer(), rb = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, rb); gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, W, H);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, rb);
+      const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      this.lay = { tex, fb, rb, w: W, h: H, ok };
+    }
+    if (!this.lay.ok) return false;
+    if (this.solo === this.lay.tex) this.solo = null;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.lay.fb); gl.viewport(0, 0, W, H);
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+    this.inLayer = true; return true;
+  }
+  layerEnd() {
+    if (!this.inLayer) return; this.flush(); const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, this.canvas.width, this.canvas.height); this.inLayer = false;
+  }
+  // draw the layer over the whole canvas (it is upside down in the texture, so v runs from 1 to 0)
+  drawLayer() {
+    if (this.lost || !this.lay || !this.lay.ok) return;
+    if (this.solo !== this.lay.tex) { this.flush(); this.solo = this.lay.tex; }
+    const gl = this.gl; if (this.soloBound !== this.lay.tex) { gl.activeTexture(gl.TEXTURE0 + SOLO_UNIT); gl.bindTexture(gl.TEXTURE_2D, this.lay.tex); this.soloBound = this.lay.tex; }
+    const m = this.m.slice(); this.m = [1, 0, 0, 1, 0, 0];
+    this.quad(0, 0, this.canvas.width, this.canvas.height, 0, 1, 1, 0, SOLO_UNIT, pack(255, 255, 255, 1));
+    this.m = m;
+  }
+  // Limit drawing to a box (canvas units, current transform without rotation); returns false if nothing was set.
+  scissor(x0, y0, x1, y1) {
+    if (this.lost) return false;
+    this.flush(); const gl = this.gl, m = this.m, W = this.canvas.width, H = this.canvas.height;
+    const ax = m[0] * x0 + m[4], bx = m[0] * x1 + m[4], ay = m[3] * y0 + m[5], by = m[3] * y1 + m[5];
+    const X0 = Math.max(0, Math.floor(Math.min(ax, bx))), X1 = Math.min(W, Math.ceil(Math.max(ax, bx)));
+    const Y0 = Math.max(0, Math.floor(Math.min(ay, by))), Y1 = Math.min(H, Math.ceil(Math.max(ay, by)));
+    gl.enable(gl.SCISSOR_TEST); gl.scissor(X0, H - Y1, Math.max(0, X1 - X0), Math.max(0, Y1 - Y0));   // GL counts y from the bottom
+    return true;
+  }
+  noScissor() { if (this.lost) return; this.flush(); this.gl.disable(this.gl.SCISSOR_TEST); }
   canWarm() { return this.pages.length < MAX_PAGES; }     // only fill free pages ahead of time, never push out pictures in use
   flushIfSolo(tex) { if (this.solo === tex && this.n) this.flush(); }
 
@@ -311,7 +363,7 @@ export class GLContext2D {
     const gl = this.gl; this.frame++;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.useProgram(this.prog); gl.uniform2f(this.uRes, this.canvas.width, this.canvas.height);
-    gl.disable(gl.STENCIL_TEST); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.disable(gl.STENCIL_TEST); gl.disable(gl.SCISSOR_TEST); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     this.reset(); this.n = 0;
   }
   end() { this.flush(); }
@@ -536,8 +588,30 @@ export class GLContext2D {
     const al = this.globalAlpha; if (al <= 0 || dw === 0 || dh === 0) return;
     const en = this.entry(img), col = pack(255, 255, 255, al), slot = en.slot + this.add + this.fx;
     const u0 = en.u0 + sx * en.su, v0 = en.v0 + sy * en.sv, u1 = en.u0 + (sx + sw) * en.su, v1 = en.v0 + (sy + sh) * en.sv;
+    const cb = this.cb, m = this.m;
+    if (cb && m[1] === 0 && m[2] === 0) {                   // clipped on the CPU: cut the rectangle and its picture coordinates
+      let X0 = m[0] * dx + m[4], X1 = m[0] * (dx + dw) + m[4], Y0 = m[3] * dy + m[5], Y1 = m[3] * (dy + dh) + m[5];
+      let a0 = u0, a1 = u1, b0 = v0, b1 = v1;
+      if (X1 < X0) { let q = X0; X0 = X1; X1 = q; q = a0; a0 = a1; a1 = q; }
+      if (Y1 < Y0) { let q = Y0; Y0 = Y1; Y1 = q; q = b0; b0 = b1; b1 = q; }
+      const cx0 = Math.max(X0, cb[0]), cx1 = Math.min(X1, cb[2]), cy0 = Math.max(Y0, cb[1]), cy1 = Math.min(Y1, cb[3]);
+      if (cx1 <= cx0 || cy1 <= cy0) return;
+      const fx = (a1 - a0) / (X1 - X0), fy = (b1 - b0) / (Y1 - Y0);
+      const save = this.m; this.m = ID;
+      this.quad(cx0, cy0, cx1 - cx0, cy1 - cy0, a0 + (cx0 - X0) * fx, b0 + (cy0 - Y0) * fy, a0 + (cx1 - X0) * fx, b0 + (cy1 - Y0) * fy, slot, col);
+      this.m = save; return;
+    }
     this.quad(dx, dy, dw, dh, u0, v0, u1, v1, slot, col);
   }
+  // A clip box for pictures only, done on the CPU (0.8.7): unlike scissor() it doesn't end the batch, so the live pass
+  // can redraw what stands in front of hundreds of cars and people without hundreds of separate draw calls.
+  // Canvas units with the current transform (no rotation); pictures drawn under a rotation ignore it.
+  clipBox(x0, y0, x1, y1) {
+    const m = this.m, ax = m[0] * x0 + m[4], bx = m[0] * x1 + m[4], ay = m[3] * y0 + m[5], by = m[3] * y1 + m[5];
+    this.cb = [Math.floor(Math.min(ax, bx)), Math.floor(Math.min(ay, by)), Math.ceil(Math.max(ax, bx)), Math.ceil(Math.max(ay, by))];
+    return true;
+  }
+  noClipBox() { this.cb = null; }
   // one rectangle (in user space) as two triangles, without making any garbage
   quad(dx, dy, dw, dh, u0, v0, u1, v1, slot, col) {
     const m = this.m, a = m[0], b = m[1], c = m[2], d = m[3], e = m[4], f = m[5], x1 = dx + dw, y1 = dy + dh;

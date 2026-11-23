@@ -30,6 +30,6 @@ export class Ambient {
     else { wt.timer -= dt; if (wt.timer <= 0) { wt.target = wt.target > 0 ? 0 : (this.rnd() < 0.45 ? 1 : 0); wt.timer = wt.target ? rr(this.rnd, 40, 90) : rr(this.rnd, 90, 220); } }
     wt.k += Math.sign(wt.target - wt.k) * Math.min(Math.abs(wt.target - wt.k), dt * 0.16);
     wt.flash = Math.max(0, wt.flash - dt * 3);
-    if (wt.k > 0.7) { wt.nextFlash -= dt; if (wt.nextFlash <= 0) { wt.flash = 1; wt.nextFlash = rr(this.rnd, 7, 18); } }
+    if (wt.k > 0.7 && !this.snow) { wt.nextFlash -= dt; if (wt.nextFlash <= 0) { wt.flash = 1; wt.nextFlash = rr(this.rnd, 7, 18); } }
   }
 }

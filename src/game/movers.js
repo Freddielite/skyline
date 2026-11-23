@@ -74,7 +74,7 @@ export class Movers {
       const v = this.list[i], last = v.pts.length - 1;
       let nt = v.t + (v.hold ? 0 : dt * v.speed);
       const nx = v.pts[Math.min(last, v.k + 1)];
-      if (nt > 0.8 && v.t <= 0.8 && v.k + 1 <= last && w.inb(nx[0], nx[1]) && mustStop(w, nx[0], nx[1], v.dx, v.dy, sigT)) nt = 0.8;   // wait at red lights
+      if (nt > 0.8 && v.t <= 0.8 && v.k + 1 <= last && w.inb(nx[0], nx[1]) && mustStop(w, nx[0], nx[1], v.dx, v.dy, sigT, v)) nt = 0.8;   // wait at red lights
       v.t = nt;
       let gone = false;
       while (v.t >= 1) {

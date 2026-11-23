@@ -45,7 +45,7 @@ class Mover {
       if (!this.w.isRoad(c.tx, c.ty)) { this.list.splice(i, 1); continue; }
       let nt = c.t + (c.hold ? 0 : dt * c.speed);
       const nx = c.tx + DIRS[c.d][0], ny = c.ty + DIRS[c.d][1];
-      if (nt > 0.8 && c.t <= 0.8 && mustStop(this.w, nx, ny, DIRS[c.d][0], DIRS[c.d][1], this.sigT || 0)) nt = 0.8;   // wait at the stop line
+      if (nt > 0.8 && c.t <= 0.8 && mustStop(this.w, nx, ny, DIRS[c.d][0], DIRS[c.d][1], this.sigT || 0, c)) nt = 0.8;   // wait at the stop line
       c.t = nt;
       while (c.t >= 1) {
         c.t -= 1;

@@ -3,10 +3,11 @@ import { T, TERRAIN } from './world.js';
 import { waterfrontArt, WF_HEIGHTS } from './waterfront.js';
 
 const S = 2;               // supersampling for crisp zoom
-const CAST = false;        // baked cast shadows off: buildings' shadows are drawn by the renderer, across roads and neighbours
 const cache = new Map();
 // Bit 3 of a building's variant picks the second colour family (walls and roofs turned around the colour wheel), so each of the 8 shapes has 2 palettes = 16 looks.
 let ALT = 0, ALT_HUE = 0;
+let SNOW = 0;
+function mixHex(a, b, t) { if (!/^#[0-9a-f]{6}$/i.test(a)) return a; const p = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)], A = p(a), B = p(b); return '#' + A.map((v, i) => Math.round(v + (B[i] - v) * t).toString(16).padStart(2, '0')).join(''); }                 // set while a winter picture is drawn: roofs and tops of boxes are snow-covered, yards frosted
 const mk = (w, h, sc = S) => { const c = document.createElement('canvas'); c.width = Math.ceil(w * sc); c.height = Math.ceil(h * sc); return c; };
 const HI = 3.2;             // sharper copies for close zoom (see hiRes): drawn on demand, only for what's on screen
 
@@ -41,7 +42,8 @@ function kit(ctx, mode, ox, oy, lit = true, season = 0) {
     const t = z0 + h;
     poly([P(x, y + d, z0), P(x + w, y + d, z0), P(x + w, y + d, t), P(x, y + d, t)], C(col.l), true);
     poly([P(x + w, y, z0), P(x + w, y + d, z0), P(x + w, y + d, t), P(x + w, y, t)], C(col.r), true);
-    poly([P(x, y, t), P(x + w, y, t), P(x + w, y + d, t), P(x, y + d, t)], C(col.t));
+    poly([P(x, y, t), P(x + w, y, t), P(x + w, y + d, t), P(x, y + d, t)], C(SNOW ? '#eef2f6' : col.t));
+    if (SNOW && h > 3) line(P(x, y + d, t), P(x + w, y + d, t), C('#f8fbfd'), 1.4);      // snow lip along the front edge
     if (h > 3) {
       line(P(x, y + d, t), P(x + w, y + d, t), 'rgba(255,255,255,.35)', 0.6);                       // sunlit parapet edge
       line(P(x + w, y, t), P(x + w, y + d, t), 'rgba(255,255,255,.18)', 0.6);
@@ -53,22 +55,9 @@ function kit(ctx, mode, ox, oy, lit = true, season = 0) {
       }
     }
   };
-  // Soft, blurred shadows: a dark contact shadow hugging the footprint, then a longer cast shadow away from the sun.
-  // Sprites are cached, so the blur costs nothing per frame.
-  const sh = (x, y, w, d, h) => {
-    ctx.save(); ctx.filter = 'blur(2.2px)';
-    ctx.fillStyle = `rgba(0,0,0,${mode === 2 ? 0.3 : 0.24})`;
-    path([P(x - 0.06, y - 0.06), P(x + w + 0.08, y - 0.06), P(x + w + 0.08, y + d + 0.08), P(x - 0.06, y + d + 0.08)]); ctx.fill();
-    if (mode !== 2 && CAST) {                  // the long cast shadow is now drawn live by renderer.shadowLayer (it follows the sun)
-      const s = Math.min(1.9, (h / 62) * (mode === 1 ? 1.8 : 1)), o = mode === 1 ? 0.22 : 0.17;
-      ctx.filter = `blur(${1.6 + s * 1.4}px)`;
-      ctx.fillStyle = `rgba(16,28,52,${o})`;
-      path([P(x + w, y), P(x + w + s, y + s * 0.22), P(x + w + s, y + d + s * 0.22), P(x + w, y + d)]); ctx.fill();
-      ctx.fillStyle = `rgba(16,28,52,${o * 0.7})`;
-      path([P(x + w, y), P(x + w + s * 0.45, y + s * 0.1), P(x + w + s * 0.45, y + d + s * 0.1), P(x + w, y + d)]); ctx.fill();
-    }
-    ctx.restore();
-  };
+  // Shadows are switched off (0.6.2): buildings no longer draw a contact or cast shadow. Kept as a no-op so the
+  // building code that calls it stays unchanged.
+  const sh = () => {};
   const win = (a, r, side, gl) => {
     const top = Math.min(a[0][1], a[1][1], a[2][1], a[3][1]), bot = Math.max(a[0][1], a[1][1], a[2][1], a[3][1]);
     path(a);
@@ -138,7 +127,6 @@ function kit(ctx, mode, ox, oy, lit = true, season = 0) {
   };
   const tree = (x, y, k, sd) => {
     const p = P(x, y), cx = p[0], cy = p[1], r = 7 + hash(sd, 1, 1) * 4;
-    if (mode !== 2) ell([cx + r * 0.8, cy + 1], r * 0.95, r * 0.45, 'rgba(0,0,0,.2)');
     ctx.fillStyle = C('#6b4a2f'); ctx.fillRect(cx - 1.5, cy - 8, 3, 8);
     if (k === 1) {
       for (let i = 0; i < 3; i++) {
@@ -157,7 +145,9 @@ function kit(ctx, mode, ox, oy, lit = true, season = 0) {
         return;
       }
       const AUT = [['#c26a22', '#e08a2e', '#f2b04a'], ['#b8442c', '#d8603a', '#ee8a4e'], ['#c99a2a', '#e2b83c', '#f4d35e'], ['#8f8a2c', '#b5ac3c', '#d6c95a']];
-      const pal = season === 1 ? (k === 2 ? AUT[1] : AUT[Math.floor(hash(sd, 9, 9) * 4)]) : k === 2 ? ['#c26a22', '#e08a2e', '#f2b04a'] : k === 3 ? ['#4d9a45', '#6cba58', '#92d878'] : ['#3b8636', '#56a845', '#79c85f'];
+      // spring (season 3): fresh light green, and about half the leafy trees in pink or white blossom
+      const bloom = season === 3 && k !== 2 && hash(sd, 11, 3) < 0.5 ? (hash(sd, 12, 3) < 0.6 ? ['#e88aa8', '#f4a9c0', '#fcd3e0'] : ['#e9e4ea', '#f6f2f6', '#ffffff']) : null;
+      const pal = bloom || (season === 1 ? (k === 2 ? AUT[1] : AUT[Math.floor(hash(sd, 9, 9) * 4)]) : season === 3 ? (k === 2 ? ['#d07a32', '#e89a46', '#f6be62'] : ['#58ab45', '#7cc85e', '#a6e283']) : k === 2 ? ['#c26a22', '#e08a2e', '#f2b04a'] : k === 3 ? ['#4d9a45', '#6cba58', '#92d878'] : ['#3b8636', '#56a845', '#79c85f']);
       const hue = 0.92 + hash(sd, 4, 4) * 0.16;                       // every tree a slightly different green
       const blob = (bx, by, br, base) => {
         const gr = ctx.createRadialGradient(bx - br * 0.35, by - br * 0.4, br * 0.1, bx, by, br * 1.05);
@@ -173,6 +163,7 @@ function kit(ctx, mode, ox, oy, lit = true, season = 0) {
     }
   };
   const pad = (col, speck) => {
+    if (SNOW) { col = mixHex(col, '#eef1ee', 0.62); speck = speck && speck.map((c2) => mixHex(c2, '#ffffff', 0.5)); }
     poly([P(0, 0), P(1, 0), P(1, 1), P(0, 1)], C(col), null, true);
     if (speck) for (let i = 0; i < 9; i++) { const p = P(hash(i, 1, 4) * 0.9 + 0.05, hash(i, 2, 5) * 0.9 + 0.05); line(p, [p[0] + 1.8, p[1] - 1.4], C(speck[i % speck.length]), 0.9); }
   };
@@ -242,7 +233,7 @@ function yard(k, v) {
 function house(k, v) {
   const { P, poly, box, win, faces, sh, C, circ, line, ctx } = k;
   const x = 0.16, y = 0.1, w = 0.62 + (v % 2) * 0.04, d = 0.54, h = 22, rh = 14, ym = y + d / 2;
-  const wall = WALL[v % 5], roof = ALT ? hueShift(ROOF[(v * 2 + 1) % 5], ALT_HUE) : ROOF[(v * 2 + 1) % 5], f = faces(wall);
+  const wall = WALL[v % 5], roof0 = ALT ? hueShift(ROOF[(v * 2 + 1) % 5], ALT_HUE) : ROOF[(v * 2 + 1) % 5], roof = SNOW ? '#e8eef4' : roof0, f = faces(wall);
   const pos = (u, t) => P(x + w * u, lerp(y + d, ym, t), h + rh * t);
   k.pad('#a9dc8e', ['#4d8f3c', '#8fd070', '#3f7f34']);
   poly([P(0.48, 0.64), P(0.7, 0.64), P(0.7, 1), P(0.48, 1)], C('#b4b7bd'), null, true);
@@ -258,9 +249,10 @@ function house(k, v) {
   poly([P(x + w, y, h), P(x + w, y + d, h), P(x + w, ym, h + rh)], C(f.r), 'v');
   box(x + w * 0.7, y + 0.05, 0.1, 0.1, 18, faces('#9c5a46'), h - 1);
   poly([pos(0, 0), pos(1, 0), pos(1, 1), pos(0, 1)], C(roof), 'v');
-  for (let i = 1; i < 7; i++) { const t = i / 7; line(pos(0, t), pos(1, t), 'rgba(0,0,0,.2)', 0.6); line(pos(0, t - 0.02), pos(1, t - 0.02), 'rgba(255,255,255,.12)', 0.4); }
-  for (let i = 0; i < 7; i++) for (let j = 0; j < 9; j++) { const u = (j + (i % 2 ? 0.5 : 0)) / 9, t0 = i / 7; if (u > 0.98) continue; line(pos(u, t0), pos(u, t0 + 1 / 7), 'rgba(0,0,0,.09)', 0.4); }   // shingles
-  if (hash(v, 4, 4) > 0.5) { poly([pos(0.12, 0.2), pos(0.55, 0.2), pos(0.55, 0.82), pos(0.12, 0.82)], C('#1f3a5f')); line(pos(0.335, 0.2), pos(0.335, 0.82), '#9db6d6', 0.5); line(pos(0.12, 0.5), pos(0.55, 0.5), '#9db6d6', 0.5); }
+  if (SNOW) line(pos(0, 0), pos(1, 0), C(shade(roof0, 0.85)), 1.1);          // the roof's edge shows under the snow
+  else for (let i = 1; i < 7; i++) { const t = i / 7; line(pos(0, t), pos(1, t), 'rgba(0,0,0,.2)', 0.6); line(pos(0, t - 0.02), pos(1, t - 0.02), 'rgba(255,255,255,.12)', 0.4); }
+  if (!SNOW) for (let i = 0; i < 7; i++) for (let j = 0; j < 9; j++) { const u = (j + (i % 2 ? 0.5 : 0)) / 9, t0 = i / 7; if (u > 0.98) continue; line(pos(u, t0), pos(u, t0 + 1 / 7), 'rgba(0,0,0,.09)', 0.4); }   // shingles
+  if (hash(v, 4, 4) > 0.5 && !SNOW) { poly([pos(0.12, 0.2), pos(0.55, 0.2), pos(0.55, 0.82), pos(0.12, 0.82)], C('#1f3a5f')); line(pos(0.335, 0.2), pos(0.335, 0.82), '#9db6d6', 0.5); line(pos(0.12, 0.5), pos(0.55, 0.5), '#9db6d6', 0.5); }
   circ(P(0.14, 0.8), 4.4, C('#3f8f3a')); circ(P(0.9, 0.86), 3.8, C('#4a9a42')); circ(P(0.32, 0.86), 1.7, C('#e86f9b'));
   for (let i = 0; i < 5; i++) circ(P(0.82 + (i % 2) * 0.05, 0.12 + i * 0.1), 1.3, C(['#e86f9b', '#f4c542', '#ffffff', '#c86fe8', '#e04848'][(i + v) % 5]));   // flowerbed along the side
   for (let i = 0; i < 4; i++) k.ell(P(0.33, 0.7 + i * 0.075), 2.2, 1.1, C('#cfc7b4'));   // stepping stones to the door
@@ -281,6 +273,21 @@ function apartment(k, v) {
   box(x + 0.1, y + 0.1, 0.22, 0.2, 5, faces('#9aa0a8'), h); box(x + 0.4, y + 0.3, 0.2, 0.18, 4, faces('#b0b5bc'), h);
   cyl(x + w * 0.7, y + d * 0.28, 5, 11, '#9c7a55', h);
 }
+// Tops for tall buildings (0.8.0): which one a building gets comes from its look number, so streets of towers vary.
+// 0 antenna, 1 water tank on a stepped crown, 2 helipad, 3 pyramid roof, 4 slanted glass top, 5 twin masts, 6 dome, 7 lantern crown
+function crown(k, type, x, y, w, d, h, f) {
+  const { P, poly, box, faces, C, line, circ, cyl } = k, cx = x + w / 2, cy = y + d / 2, sn = SNOW;
+  const mast = (u, v, z, len) => { const p = P(u, v, z); line(p, [p[0], p[1] - len], C('#c9d3de'), 1.2); circ([p[0], p[1] - len - 1], 1.8, '#ff3b30'); };
+  if (type === 0) { box(x + 0.12, y + 0.12, w - 0.24, d - 0.24, 12, f, h); mast(cx, cy, h + 12, 22); }
+  else if (type === 1) { box(x + 0.08, y + 0.08, w - 0.16, d - 0.16, 8, f, h); box(x + 0.18, y + 0.18, w - 0.36, d - 0.36, 8, f, h + 8); cyl(cx + 0.06, cy - 0.04, 6, 12, sn ? '#dfe6ec' : '#8a6a4a', h + 16); }
+  else if (type === 2) { box(x + 0.06, y + 0.06, w - 0.12, d - 0.12, 4, faces('#7d858f'), h); const p = P(cx, cy, h + 4); k.ell(p, 13, 6.5, C(sn ? '#e8edf2' : '#4a525c')); k.ell(p, 10, 5, C(sn ? '#f2f5f8' : '#5a636e')); if (!sn) { line([p[0] - 3, p[1] - 2.4], [p[0] - 3, p[1] + 2.4], '#f4f4f4', 1.1); line([p[0] + 3, p[1] - 2.4], [p[0] + 3, p[1] + 2.4], '#f4f4f4', 1.1); line([p[0] - 3, p[1]], [p[0] + 3, p[1]], '#f4f4f4', 1.1); } }
+  else if (type === 3) { const top = P(cx, cy, h + 30), rf = sn ? '#e9eef3' : '#4f7f6e'; poly([P(x, y + d, h), P(x + w, y + d, h), top], C(shade(rf, 1))); poly([P(x + w, y, h), P(x + w, y + d, h), top], C(shade(rf, 0.8))); line(top, [top[0], top[1] - 10], C('#c9d3de'), 1); }
+  else if (type === 4) { poly([P(x, y + d, h), P(x + w, y + d, h), P(x + w, y + d, h + 26), P(x, y + d, h + 6)], C(shade(f.l, 1.05)), 'glass'); poly([P(x + w, y, h), P(x + w, y + d, h), P(x + w, y + d, h + 26), P(x + w, y, h + 26)], C(f.r), 'glass'); poly([P(x, y, h + 6), P(x + w, y, h + 26), P(x + w, y + d, h + 26), P(x, y + d, h + 6)], C(sn ? '#eef2f6' : f.t)); }
+  else if (type === 5) { box(x + 0.1, y + 0.1, w - 0.2, d - 0.2, 6, f, h); mast(x + w * 0.3, y + d * 0.3, h + 6, 30); mast(x + w * 0.7, y + d * 0.7, h + 6, 22); }
+  else if (type === 6) { box(x + 0.1, y + 0.1, w - 0.2, d - 0.2, 6, f, h); const p = P(cx, cy, h + 6), r = (w - 0.2) * 28; ctx2(k, (c) => { c.beginPath(); c.ellipse(p[0], p[1], r, r * 0.5, 0, Math.PI, 0); c.ellipse(p[0], p[1], r, r * 0.95, 0, 0, Math.PI, true); c.closePath(); c.fillStyle = C(sn ? '#eef2f6' : '#c9a24e'); c.fill(); c.strokeStyle = 'rgba(0,0,0,.2)'; c.lineWidth = 0.6; c.stroke(); }); mast(cx, cy, h + 6 + r * 0.95 / 1, 8); }
+  else { box(x + 0.14, y + 0.14, w - 0.28, d - 0.28, 16, faces(shade(f.l, 1.1)), h); for (let i = 0; i < 3; i++) poly([P(x + 0.18 + i * (w - 0.36) / 3 + 0.03, y + d - 0.14, h + 4), P(x + 0.18 + (i + 1) * (w - 0.36) / 3 - 0.03, y + d - 0.14, h + 4), P(x + 0.18 + (i + 1) * (w - 0.36) / 3 - 0.03, y + d - 0.14, h + 13), P(x + 0.18 + i * (w - 0.36) / 3 + 0.03, y + d - 0.14, h + 13)], k.store()); box(x + 0.22, y + 0.22, w - 0.44, d - 0.44, 6, f, h + 16); mast(cx, cy, h + 22, 14); }
+}
+const ctx2 = (k, fn) => fn(k.ctx);
 function tower(k, v) {
   const { P, line, circ, box, faces, sh, poly, C } = k;
   const x = 0.17, y = 0.17, w = 0.66, d = 0.66, h = 88, f = faces(COOL[v % 4]);
@@ -290,9 +297,7 @@ function tower(k, v) {
   k.mat(x, y, w, d, h, 'panel', v + 11);
   k.wins(x, y, w, d, h, v + 11, { dens: 4.2, rh: 8.5, wh: 4.5, base: 14 });
   poly([P(x + 0.08, y + d, 1), P(x + w - 0.08, y + d, 1), P(x + w - 0.08, y + d, 11), P(x + 0.08, y + d, 11)], k.store());
-  box(x + 0.12, y + 0.12, w - 0.24, d - 0.24, 14, f, h);
-  const p = P(x + w / 2, y + d / 2, h + 14);
-  line(p, [p[0], p[1] - 22], C('#c9d3de'), 1.2); circ([p[0], p[1] - 23], 1.8, '#ff3b30');
+  crown(k, [0, 1, 2, 3, 5, 6, 7, 1][v], x, y, w, d, h, f);
 }
 function shop(k, v) {
   const { P, poly, box, faces, sh, C, line } = k;
@@ -339,10 +344,8 @@ function glassTower(k, v) {
   poly([P(x + w, y, 0), P(x + w, y + d, 0), P(x + w, y + d, h), P(x + w, y, h)], 'rgba(0,0,0,0)', 'glass', true);
   k.wins(x, y, w, d, h, v + 31, { dens: 4.6, rh: 7.5, wh: 4.2, base: 14, glass: 1 });
   poly([P(x + 0.07, y + d, 1), P(x + w - 0.07, y + d, 1), P(x + w - 0.07, y + d, 11), P(x + 0.07, y + d, 11)], k.store());
-  box(x + 0.14, y + 0.14, w - 0.28, d - 0.28, 16, f, h);
-  box(x + 0.26, y + 0.26, w - 0.52, d - 0.52, 10, f, h + 16);
-  const p = P(x + w / 2, y + d / 2, h + 26);
-  line(p, [p[0], p[1] - 26], C('#c9d3de'), 1.2); circ([p[0], p[1] - 27], 2, '#ff3b30');
+  if (v === 0 || v === 6) { box(x + 0.14, y + 0.14, w - 0.28, d - 0.28, 16, f, h); box(x + 0.26, y + 0.26, w - 0.52, d - 0.52, 10, f, h + 16); const p = P(x + w / 2, y + d / 2, h + 26); line(p, [p[0], p[1] - 26], C('#c9d3de'), 1.2); circ([p[0], p[1] - 27], 2, '#ff3b30'); }
+  else crown(k, [0, 4, 2, 5, 4, 7, 0, 2][v], x, y, w, d, h, f);
 }
 function warehouse(k, v) {
   const { P, poly, box, faces, sh, C, line } = k;
@@ -377,9 +380,12 @@ function factory(k, v) {
 // ---- specialised industry: farms, forestry and tech (bits 4-5 of the variant) ----
 function farm(k, v, l) {
   const { P, poly, box, faces, sh, C, line, cyl, circ } = k;
-  const crops = [['#d9c25a', '#c9ad3f'], ['#8fc85a', '#6fae44'], ['#b98a4a', '#9c7038'], ['#c9d86a', '#a9bf4a']][v % 4];
+  // the fields follow the seasons: young green rows in spring, ripe crops in summer, stubble in autumn, bare in winter
+  const summer = [['#d9c25a', '#c9ad3f'], ['#8fc85a', '#6fae44'], ['#b98a4a', '#9c7038'], ['#c9d86a', '#a9bf4a']][v % 4];
+  const crops = SEASON === 3 ? ['#8a6a44', '#7cc85a'] : SEASON === 1 ? ['#c9b27a', '#a98d58'] : SEASON === 2 ? ['#9a8266', '#7d6850'] : summer;
   k.pad(crops[0], null);
-  for (let i = 0; i < 9; i++) line(P(0.05, 0.08 + i * 0.1), P(0.95, 0.08 + i * 0.1), C(crops[1]), 1.6);   // furrows
+  for (let i = 0; i < 9; i++) line(P(0.05, 0.08 + i * 0.1), P(0.95, 0.08 + i * 0.1), C(crops[1]), SEASON === 3 ? 1.2 : 1.6);   // furrows (young rows in spring)
+  if (SEASON === 1) for (let i = 0; i < 4; i++) { const p = P(0.62 + (i % 2) * 0.16, 0.5 + (i >> 1) * 0.2); k.ell([p[0], p[1] - 1], 3.6, 1.8, C('#e2cf88')); }   // autumn: harvested, bales on the stubble
   const bw = l >= 3 ? 0.42 : 0.34, bh = l >= 2 ? 18 : 14;
   sh(0.08, 0.08, bw, 0.3, bh + 6); box(0.08, 0.08, bw, 0.3, bh, faces('#b5463a')); k.mat(0.08, 0.08, bw, 0.3, bh, 'siding', v);
   poly([P(0.08, 0.08, bh), P(0.08 + bw, 0.08, bh), P(0.08 + bw, 0.23, bh + 8), P(0.08, 0.23, bh + 8)], C('#6b6f78'));
@@ -426,7 +432,8 @@ function plant(k, v) {
   cyl(0.78, 0.55, 11, 44, '#d3d7de'); cyl(0.78, 0.86, 11, 34, '#c9a06a');
   line(P(0.78, 0.55, 44), P(0.78, 0.86, 34), C('#6b7280'), 1.6);
   box(0.1, 0.06, 0.22, 0.22, 96, faces('#a2493a')); box(0.08, 0.04, 0.26, 0.26, 5, faces('#3a3a3a'), 92);
-  sh(0.1, 0.06, 0.22, 0.22, 96);
+  if (v >= 4) { box(0.38, 0.06, 0.16, 0.16, 78, faces(v % 2 ? '#d7d9dc' : '#a2493a')); box(0.37, 0.05, 0.18, 0.18, 4, faces('#3a3a3a'), 76); }   // a second stack
+  if (v % 4 === 3) { cyl(0.56, 0.12, 8, 22, '#9fb4c4'); }
   k.smoke(P(0.21, 0.17, 102), 4);
 }
 function park(k, v) {
@@ -462,15 +469,17 @@ function skyscraper(k, v) {
     poly([P(x + w, y, z), P(x + w, y + d, z), P(x + w + 0.05, y + d, z - 1.5), P(x + w + 0.05, y, z - 1.5)], C(shade(base, 0.9)));
   }
   poly([P(x + w * 0.42, y + d, 14), P(x + w * 0.58, y + d, 14), P(x + w * 0.58, y + d, h + 14), P(x + w * 0.42, y + d, h + 14)], C(accent));
-  box(x + 0.06, y + 0.06, w - 0.12, d - 0.12, 4, faces('#7fb069'), h + 14);           // rooftop garden
-  for (let i = 0; i < 4; i++) circ(P(x + 0.15 + (i % 2) * 0.3, y + 0.15 + (i >> 1) * 0.3, h + 22), 3.2, C(['#3f8f3a', '#56a845'][i % 2]));
-  box(x + w * 0.62, y + 0.1, 0.14, 0.14, 12, faces('#9aa0a8'), h + 18);
-  const p = P(x + w * 0.69, y + 0.17, h + 30); line(p, [p[0], p[1] - 16], C('#c9d3de'), 1.1); circ([p[0], p[1] - 17], 1.8, '#ff3b30');
+  if (v < 3) {
+    box(x + 0.06, y + 0.06, w - 0.12, d - 0.12, 4, faces(SNOW ? '#eef2f6' : '#7fb069'), h + 14);           // rooftop garden
+    for (let i = 0; i < 4; i++) circ(P(x + 0.15 + (i % 2) * 0.3, y + 0.15 + (i >> 1) * 0.3, h + 22), 3.2, C(['#3f8f3a', '#56a845'][i % 2]));
+    box(x + w * 0.62, y + 0.1, 0.14, 0.14, 12, faces('#9aa0a8'), h + 18);
+    const p = P(x + w * 0.69, y + 0.17, h + 30); line(p, [p[0], p[1] - 16], C('#c9d3de'), 1.1); circ([p[0], p[1] - 17], 1.8, '#ff3b30');
+  } else crown(k, [7, 6, 3, 1, 2][v - 3], x, y, w, d, h + 14, f);
 }
 function megatower(k, v) {
   const { P, poly, box, faces, sh, C, line, circ } = k;
   const g = ['#5aa3d8', '#4f8fc9', '#5fb5b8', '#7a95c6'][v % 4], f = faces(g);
-  const tiers = [[0.08, 70], [0.15, 60], [0.22, 46], [0.29, 26]];
+  const tiers = v >= 4 ? [[0.1, 92], [0.2, 74], [0.3, 46]] : [[0.08, 70], [0.15, 60], [0.22, 46], [0.29, 26]];   // half the looks are slimmer, with three tiers
   k.pad('#c8cace', null);
   sh(0.08, 0.08, 0.84, 0.84, 220);
   let z = 0;
@@ -482,12 +491,13 @@ function megatower(k, v) {
     k.wins(x, y, w, d, h, v + 71 + z, { dens: 4.8, rh: 7, wh: 3.8, base: z === 0 ? 14 : 4, glass: 1 });
     for (let u = 1; u < 5; u++) { const q = x + (w * u) / 5; line(P(q, y + d, z), P(q, y + d, z + h), 'rgba(255,255,255,.35)', 0.6); }
     z += h;
-    if (o < 0.29) box(x + 0.02, y + 0.02, w - 0.04, d - 0.04, 3, faces('#d7dde4'), z);
+    if (o < tiers[tiers.length - 1][0]) box(x + 0.02, y + 0.02, w - 0.04, d - 0.04, 3, faces('#d7dde4'), z);
     z += 3;
   }
   poly([P(0.15, 0.92, 1), P(0.85, 0.92, 1), P(0.85, 0.92, 12), P(0.15, 0.92, 12)], k.store());
-  const top = P(0.5, 0.5, z); poly([[top[0] - 6, top[1]], [top[0] + 6, top[1]], [top[0], top[1] - 30]], C('#dfe6ee'));
-  line([top[0], top[1] - 30], [top[0], top[1] - 48], C('#c9d3de'), 1.2); circ([top[0], top[1] - 49], 2.2, '#ff3b30');
+  if (v % 2) { const lo = tiers[tiers.length - 1][0]; crown(k, v % 4 === 1 ? 4 : 2, lo, lo, 1 - 2 * lo, 1 - 2 * lo, z, f); }
+  else { const top = P(0.5, 0.5, z); poly([[top[0] - 6, top[1]], [top[0] + 6, top[1]], [top[0], top[1] - 30]], C('#dfe6ee'));
+    line([top[0], top[1] - 30], [top[0], top[1] - 48], C('#c9d3de'), 1.2); circ([top[0], top[1] - 49], 2.2, '#ff3b30'); }
 }
 function campus(k, v) {
   const { P, poly, box, faces, sh, C, line, circ, tree } = k;
@@ -505,7 +515,8 @@ function campus(k, v) {
   }
   sh(0.64, 0.12, 0.3, 0.42, 26);
   box(0.64, 0.12, 0.3, 0.42, 26, faces(shade(wall, 0.95)));
-  box(0.66, 0.14, 0.26, 0.38, 3, faces('#7fb069'), 26);                                     // green roof
+  if (v >= 4) { for (let i = 0; i < 2; i++) poly([P(0.68, 0.16 + i * 0.18, 27), P(0.9, 0.16 + i * 0.18, 27), P(0.9, 0.3 + i * 0.18, 31), P(0.68, 0.3 + i * 0.18, 31)], C('#2c4a7a')); }   // more solar on half the looks
+  else box(0.66, 0.14, 0.26, 0.38, 3, faces(SNOW ? '#eef2f6' : '#7fb069'), 26);                                     // green roof
   k.wins(0.64, 0.12, 0.3, 0.42, 26, v + 91, { dens: 3, rh: 9, wh: 5, base: 6, glass: 1 });
   const p = P(0.79, 0.3, 30); line(p, [p[0], p[1] - 14], C('#c9d3de'), 1); circ([p[0], p[1] - 15], 3, C('#e6ecf2'));
   tree(0.14, 0.86, 3, v + 5); tree(0.86, 0.86, 0, v + 6);
@@ -522,9 +533,60 @@ const PAD = { [T.RES]: '#a9dc8e', [T.COM]: '#cfd1d4', [T.IND]: '#a9a493' };
 function make(w, h, ox, oy, fn, mode, lit = true, season = 0, sc = S) {
   const c = mk(w, h, sc), ctx = c.getContext('2d');
   ctx.scale(sc, sc);
+  const box = watch(ctx);
   const k = kit(ctx, mode, ox, oy, lit, season);
   fn(k);
-  return { c, ox, oy, S: sc };
+  return trim({ c, ox, oy, S: sc }, box);
+}
+// Pictures are drawn on generous canvases, and on average about 70% of a building's canvas stayed transparent. That
+// empty space still filled the GPU's texture pages (which overflowed and thrashed in busy views on Pretty) and still
+// cost the graphics chip blending work. Since 0.8.7 make() notes where every shape lands while the picture is drawn
+// (watch) and keeps only that box (trim). Reading the pixels back to find the edges would have cost a few ms per
+// picture; noting the shapes costs next to nothing.
+const EDGE = 3;                                            // room for line widths and soft edges, in picture units
+function watch(ctx) {
+  const b = [1e9, 1e9, -1e9, -1e9];
+  let m = [1, 0, 0, 1, 0, 0];                              // our own copy of the transform, in picture units
+  const stack = []; let clipAt = -1;                       // inside a clip, shapes can't reach past the clip's own path
+  const pt = (x, y, r = 0) => {
+    if (clipAt >= 0) return;
+    const X = m[0] * x + m[2] * y + m[4], Y = m[1] * x + m[3] * y + m[5], R = r * Math.max(Math.hypot(m[0], m[1]), Math.hypot(m[2], m[3]));
+    if (X - R < b[0]) b[0] = X - R; if (Y - R < b[1]) b[1] = Y - R; if (X + R > b[2]) b[2] = X + R; if (Y + R > b[3]) b[3] = Y + R;
+  };
+  const rect = (x, y, w, h) => { pt(x, y); pt(x + w, y); pt(x, y + h); pt(x + w, y + h); };
+  const wrap = (name, f) => { const o = ctx[name]; ctx[name] = function (p0, p1, p2, p3, p4, p5, p6, p7, p8) { f(p0, p1, p2, p3, p4, p5, p6, p7, p8); return o.apply(ctx, arguments); }; };
+  wrap('moveTo', (x, y) => pt(x, y)); wrap('lineTo', (x, y) => pt(x, y));
+  wrap('quadraticCurveTo', (a, b2, x, y) => { pt(a, b2); pt(x, y); });
+  wrap('bezierCurveTo', (a, b2, c2, d, x, y) => { pt(a, b2); pt(c2, d); pt(x, y); });
+  wrap('arc', (x, y, r) => pt(x, y, r)); wrap('arcTo', (a, b2, x, y, r) => { pt(a, b2, r); pt(x, y, r); });
+  wrap('ellipse', (x, y, rx, ry) => pt(x, y, Math.max(rx, ry)));
+  wrap('rect', rect); wrap('fillRect', rect); wrap('strokeRect', rect);
+  wrap('fillText', (t, x, y) => pt(x, y, 4 + String(t).length * 6)); wrap('strokeText', (t, x, y) => pt(x, y, 4 + String(t).length * 6));
+  wrap('drawImage', (img, a1, a2, a3, a4, a5, a6, a7, a8) => { if (a5 === undefined) rect(a1, a2, a3 === undefined ? img.width : a3, a4 === undefined ? img.height : a4); else rect(a5, a6, a7, a8); });
+  wrap('putImageData', () => { b[0] = -1e9; b[1] = -1e9; b[2] = 1e9; b[3] = 1e9; });   // can't tell: keep the whole canvas
+  const mul = (a, n) => [a[0] * n[0] + a[2] * n[1], a[1] * n[0] + a[3] * n[1], a[0] * n[2] + a[2] * n[3], a[1] * n[2] + a[3] * n[3], a[0] * n[4] + a[2] * n[5] + a[4], a[1] * n[4] + a[3] * n[5] + a[5]];
+  wrap('translate', (x, y) => { m = mul(m, [1, 0, 0, 1, x, y]); });
+  wrap('scale', (x, y) => { m = mul(m, [x, 0, 0, y, 0, 0]); });
+  wrap('rotate', (r) => { const c = Math.cos(r), s2 = Math.sin(r); m = mul(m, [c, s2, -s2, c, 0, 0]); });
+  wrap('transform', (a, b2, c2, d, e, f) => { m = mul(m, [a, b2, c2, d, e, f]); });
+  wrap('setTransform', () => { b[0] = -1e9; b[1] = -1e9; b[2] = 1e9; b[3] = 1e9; });   // never used by pictures; if it is, keep everything
+  wrap('resetTransform', () => { b[0] = -1e9; b[1] = -1e9; b[2] = 1e9; b[3] = 1e9; });
+  wrap('save', () => { stack.push(m); });
+  wrap('restore', () => { if (stack.length) m = stack.pop(); if (clipAt > stack.length) clipAt = -1; });
+  wrap('clip', () => { if (clipAt < 0) clipAt = stack.length; });
+  return b;
+}
+function trim(sp, b) {
+  const c = sp.c, W = c.width, H = c.height, k = sp.S;
+  if (!(b[2] >= b[0])) return sp;                          // nothing drawn
+  const a = (v) => Math.floor(v / 4) * 4;                 // a 4-pixel grid, so the half and quarter copies (mip) line up exactly
+  const X0 = Math.max(0, a((b[0] - EDGE) * k)), Y0 = Math.max(0, a((b[1] - EDGE) * k));
+  const X1 = Math.min(W, a((b[2] + EDGE) * k) + 4), Y1 = Math.min(H, a((b[3] + EDGE) * k) + 4);
+  const nw = X1 - X0, nh = Y1 - Y0;
+  if (nw <= 0 || nh <= 0 || nw * nh > W * H * 0.85) return sp;   // hardly any margin: not worth a copy
+  const t = document.createElement('canvas'); t.width = nw; t.height = nh;
+  t.getContext('2d').drawImage(c, X0, Y0, nw, nh, 0, 0, nw, nh);
+  return { c: t, ox: sp.ox - X0 / k, oy: sp.oy - Y0 / k, S: k };
 }
 function memo(key, fn) { let v = cache.get(key); if (!v) { const t0 = performance.now(); v = fn(); cache.set(key, v); spriteBudget.made++; spriteBudget.left -= performance.now() - t0; } return v; }
 // Drawing a building picture for the first time takes a few milliseconds on a slow phone. While the map is being
@@ -537,8 +599,12 @@ let SEASON = 0;
 export function setSeason(s) { if (s === SEASON) return false; SEASON = s; return true; }
 export function getSeason() { return SEASON; }
 // A seasonal picture: while this season's copy isn't made yet (frame budget), keep showing another season's copy.
-function seasonal(key, fn) { const v = memoLater(key + 's' + SEASON, fn); if (v) return v; for (let q = 0; q < 3; q++) { const o = cache.get(key + 's' + q); if (o) return o; } return null; }
-const SEASON_TINT = [null, ['#c8b26a', 0.28], ['#e4e9e6', 0.58]];
+// When the light changes (day, dusk, night) every picture has to be made again for the new light, a few per frame.
+// Until a building's new picture is ready, the one from the light before is shown, so nothing blinks out.
+// (Before 0.8.2 those buildings simply weren't drawn for a moment.)
+function otherLight(mode, f) { for (const m of [1, 0, 2]) { if (m === mode) continue; const v = f(m); if (v) return v; } return null; }
+function seasonal(key, fn) { const v = memoLater(key + 's' + SEASON, fn); if (v) return v; for (let q = 0; q < 4; q++) { const o = cache.get(key + 's' + q); if (o) return o; } return null; }
+const SEASON_TINT = [null, ['#c8b26a', 0.28], ['#e4e9e6', 0.58], ['#b6e48a', 0.12]];   // 3 = spring: a fresher green
 const gtint = (c) => (SEASON_TINT[SEASON] ? mix(c, SEASON_TINT[SEASON][0], SEASON_TINT[SEASON][1]) : c);
 // Close-zoom copies are big, so only the most recently used few are kept (the rest are dropped and remade if needed).
 const hiKeys = [];
@@ -557,18 +623,24 @@ export function buildingSprite(kind, level, variant, mode, lit = true, shore = 0
   lit = mode === 2 ? !!lit : true;
   const pool = !shore && (variant & 8) && POOL.get(kind + '.' + level);       // content packs add pictures as extra looks (the second-palette half of the 16)
   if (pool) return extSprite(pool[(variant & 7) % pool.length], mode, lit);
-  const key = `b${kind}${level}${variant}${mode}${lit ? 1 : 0}w${shore}`;
+  const isFarm = kind === T.IND && ((variant >> 4) & 3) === 1, snow = SEASON === 2, base = `b${kind}${level}${variant}${mode}${lit ? 1 : 0}w${shore}${isFarm ? 'f' + SEASON : ''}`, key = snow ? base + 'S' : base, other = snow ? base : base + 'S';
   const fnMake = (sc) => () => {
+    SNOW = snow ? 1 : 0;
     const H = shore ? WF_HEIGHTS[kind][level - 1] : HEIGHTS[kind][level - 1];
     const fn = shore ? waterfrontArt(shore, kind, level) : kind === T.IND && (variant >> 4) ? industryArt(level, variant) : BUILD[kind][level - 1];
     ALT = (variant >> 3) & 1; ALT_HUE = [0, 150, 205, 95][(variant >> 1) & 3] + 40;   // a different turn of the wheel for each shape
-    try { return make(160, H, 80, H - 64, (k) => fn(k, variant & 7), mode, lit, 0, sc); } finally { ALT = 0; }
+    try { return make(160, H, 80, H - 64, (k) => fn(k, variant & 7), mode, lit, 0, sc); } finally { ALT = 0; SNOW = 0; }
   };
-  return hi ? hiRes(key, fnMake(HI)) || memoLater(key, fnMake(S)) : memoLater(key, fnMake(S));
+  // Winter pictures (snow on roofs) replace the others instead of adding to them, so memory stays the same: while the
+  // new one isn't made yet the old one is shown, and once it is, the old one is dropped.
+  const v = hi ? hiRes(key, fnMake(HI)) || memoLater(key, fnMake(S)) : memoLater(key, fnMake(S));
+  if (v) { if (cache.has(other)) cache.delete(other); return v; }
+  const lk = (m, l) => `b${kind}${level}${variant}${m}${l}w${shore}${isFarm ? 'f' + SEASON : ''}`;
+  return cache.get(other) || otherLight(mode, (m) => { for (const l of [lit ? 1 : 0, lit ? 0 : 1]) { const b2 = lk(m, l), o = cache.get(b2 + (snow ? 'S' : '')) || cache.get(b2 + (snow ? '' : 'S')); if (o) return o; } return null; }) || null;
 }
 export function parkSprite(variant, mode) {
   const se = SEASON;
-  return seasonal(`p${variant}${mode}`, () => make(96, 90, 48, 50, (k) => park(k, variant), mode, true, se));
+  return seasonal(`p${variant}${mode}`, () => make(96, 90, 48, 50, (k) => park(k, variant), mode, true, se)) || otherLight(mode, (m) => cache.get(`p${variant}${m}s${SEASON}`));
 }
 export function zoneSprite(kind, mode) {
   return memo(`z${kind}${mode}`, () => make(64, 32, 32, 0, (k) => {
@@ -605,7 +677,7 @@ export function terrainSprite(type, variant, mode, tone = 2) {
       }
       if (tone <= 1 && variant % 2) for (let i = 0; i < 3; i++) { const p = P(0.2 + hash(i, variant, 6) * 0.6, 0.2 + hash(i, variant, 7) * 0.6); k.ell(p, 2.2, 1, C('#c4ad6a')); }
       if (SEASON === 2) for (let i = 0; i < 7; i++) k.circ(P(hash(i, variant, 21) * 0.9 + 0.05, hash(i, variant, 22) * 0.9 + 0.05), 0.8 + hash(i, variant, 23) * 0.9, 'rgba(255,255,255,.7)');   // frost and patches of snow
-      if (tone >= 3 && variant === 3 && SEASON === 0) for (let i = 0; i < 4; i++) k.circ(P(0.2 + hash(i, tone, 8) * 0.6, 0.2 + hash(i, tone, 9) * 0.6), 0.7, C(['#ffffff', '#f4d35e', '#f2a7c3'][i % 3]));
+      if (tone >= 3 && variant === 3 && (SEASON === 0 || SEASON === 3)) for (let i = 0; i < 4; i++) k.circ(P(0.2 + hash(i, tone, 8) * 0.6, 0.2 + hash(i, tone, 9) * 0.6), 0.7, C(['#ffffff', '#f4d35e', '#f2a7c3'][i % 3]));
     }
   }, mode));
 }
@@ -615,7 +687,7 @@ export function treeSprite(variant, mode) {
     const v = variant;
     k.tree(0.5, 0.5, v === 2 ? 1 : v === 3 ? 2 : v === 4 ? 3 : 0, v + 7);
     if (v % 2 === 0) k.tree(0.22, 0.7, 0, v + 9);
-  }, mode, true, se));
+  }, mode, true, se)) || otherLight(mode, (m) => cache.get(`tr${variant}${m}s${SEASON}`));
 }
 export function roadSprite(mask, mode, avenue = false) {
   return memo(`r${mask}${mode}${avenue ? 'a' : ''}`, () => make(64, 32, 32, 0, (k) => {
@@ -693,6 +765,67 @@ function coalPlant(k) {
   // fence
   for (let i = 0; i <= 8; i++) { const u = i / 4; line(P(u, 1.97), P(u, 1.97, 6), C('#6b7280'), 0.7); line(P(1.97, u), P(1.97, u, 6), C('#6b7280'), 0.7); }
   line(P(0, 1.97, 6), P(2, 1.97, 6), C('#6b7280'), 0.8); line(P(1.97, 0, 6), P(1.97, 2, 6), C('#6b7280'), 0.8);
+}
+
+// ---- bigger power: gas (3x3), solar farm (3x3), nuclear (4x4) ----
+function gasPlant(k) {
+  const { P, poly, box, faces, sh, C, line, cyl, ell } = k;
+  padRect(k, 3, 3, '#a9a493', ['#8a8574', '#bdb8a6']);
+  sh(0.2, 1.95, 2.5, 0.85, 36);
+  box(0.2, 1.95, 2.5, 0.85, 36, faces('#c9cfd6'));                                  // turbine hall
+  k.wins(0.2, 1.95, 2.5, 0.85, 36, 71, { dens: 3.4, rh: 12, wh: 5, base: 12 });
+  poly([P(0.5, 2.8, 0), P(0.95, 2.8, 0), P(0.95, 2.8, 16), P(0.5, 2.8, 16)], C('#4a5568'));
+  for (const bx of [0.3, 1.35]) {                                                  // two heat-recovery boilers, each with a stack
+    sh(bx, 0.3, 0.8, 1.3, 52);
+    box(bx, 0.3, 0.8, 1.3, 52, faces('#d8dce2'));
+    for (let z = 10; z < 52; z += 10) line(P(bx, 1.6, z), P(bx + 0.8, 1.6, z), 'rgba(0,0,0,.16)', 0.6);
+    box(bx + 0.1, 0.4, 0.6, 0.15, 6, faces('#8f98a5'), 52);
+    cyl(bx + 0.4, 0.55, 7, 72, '#ececec', 52);
+    for (let z = 66; z < 124; z += 24) cyl(bx + 0.4, 0.55, 7.2, 8, '#c9372c', z);
+  }
+  line(P(1.1, 1.0, 14), P(1.35, 1.0, 14), C('#7b8491'), 2); line(P(1.1, 1.3, 20), P(1.35, 1.3, 20), C('#7b8491'), 2);
+  for (const [tx, ty] of [[2.4, 0.6], [2.4, 1.3]]) { sh(tx - 0.3, ty - 0.3, 0.6, 0.6, 30); cyl(tx, ty, 16, 18, '#e9ecef'); ell(P(tx, ty, 18), 16, 8, C('#f6f8fa')); }   // fuel tanks
+  box(2.45, 2.1, 0.3, 0.3, 10, faces('#8f98a5'), 36);
+  for (let i = 0; i <= 12; i++) { const u = i / 4; line(P(u, 2.97), P(u, 2.97, 6), C('#6b7280'), 0.7); line(P(2.97, u), P(2.97, u, 6), C('#6b7280'), 0.7); }
+  line(P(0, 2.97, 6), P(3, 2.97, 6), C('#6b7280'), 0.8); line(P(2.97, 0, 6), P(2.97, 3, 6), C('#6b7280'), 0.8);
+}
+function solarFarm(k) {
+  const { P, poly, box, faces, sh, C, line } = k;
+  padRect(k, 3, 3, '#b8b49e', ['#a39e88', '#cbc7b2']);
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 6; c++) {                            // rows of tilted panels, back to front
+    const x = 0.1 + c * 0.47, y = 0.15 + r * 0.5, w = 0.4, d = 0.32;
+    line(P(x + w * 0.25, y + d, 0), P(x + w * 0.25, y + d, 3), C('#6b7280'), 0.8); line(P(x + w * 0.75, y + d, 0), P(x + w * 0.75, y + d, 3), C('#6b7280'), 0.8);
+    poly([P(x, y, 12), P(x + w, y, 12), P(x + w, y + d, 3), P(x, y + d, 3)], C('#27498a'), 'v');
+    for (let i = 1; i < 4; i++) line(P(x + w * i / 4, y, 12), P(x + w * i / 4, y + d, 3), 'rgba(190,215,255,.45)', 0.5);
+    line(P(x, y + d * 0.5, 7.5), P(x + w, y + d * 0.5, 7.5), 'rgba(190,215,255,.45)', 0.5);
+    line(P(x, y, 12), P(x + w, y, 12), 'rgba(255,255,255,.5)', 0.6);
+  }
+  sh(2.45, 2.4, 0.45, 0.45, 16); box(2.45, 2.4, 0.45, 0.45, 16, faces('#d9dde2')); box(2.5, 2.45, 0.35, 0.35, 3, faces('#7b8491'), 16);
+  for (let i = 0; i <= 12; i++) { const u = i / 4; line(P(u, 2.97), P(u, 2.97, 5), C('#6b7280'), 0.6); line(P(2.97, u), P(2.97, u, 5), C('#6b7280'), 0.6); }
+}
+function nuclearPlant(k) {
+  const { P, poly, box, faces, sh, C, line, cyl, ell, ctx } = k;
+  padRect(k, 4, 4, '#a9ab9c', ['#8d907f', '#c2c4b4']);
+  for (const [tx, ty] of [[0.95, 0.95], [2.45, 0.95]]) {                             // two cooling towers
+    sh(tx - 0.45, ty - 0.45, 0.9, 0.9, 84);
+    cyl(tx, ty, 28, 30, '#dfe2e6'); cyl(tx, ty, 23, 30, '#dfe2e6', 30); cyl(tx, ty, 26, 26, '#dfe2e6', 60);
+    cyl(tx, ty, 26.4, 3, '#9aa0a8', 83);
+  }
+  sh(0.25, 1.8, 3.4, 0.75, 34);
+  box(0.25, 1.8, 3.4, 0.75, 34, faces('#c4cad2'));                                   // turbine hall
+  k.wins(0.25, 1.8, 3.4, 0.75, 34, 83, { dens: 3.2, rh: 12, wh: 5, base: 12 });
+  for (const [dx, dy] of [[1.0, 3.15], [2.5, 3.15]]) {                               // two containment domes
+    sh(dx - 0.45, dy - 0.45, 0.9, 0.9, 60);
+    cyl(dx, dy, 27, 46, '#d3d7dd');
+    const p = P(dx, dy, 46), g = ctx.createRadialGradient(p[0] - 8, p[1] - 14, 4, p[0], p[1] - 6, 30);
+    g.addColorStop(0, C('#f3f5f7')); g.addColorStop(1, C('#b6bcc5'));
+    ctx.beginPath(); ctx.ellipse(p[0], p[1], 27, 13.5, 0, 0, Math.PI * 2); ctx.fillStyle = C('#cfd4da'); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(p[0], p[1], 27, 24, 0, Math.PI, 0); ctx.closePath(); ctx.fillStyle = g; ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 0.5; ctx.stroke();
+  }
+  box(1.6, 2.9, 0.5, 0.45, 20, faces('#bfc5cc'));
+  for (let i = 0; i < 3; i++) { box(3.35, 0.3 + i * 0.4, 0.3, 0.3, 12, faces('#8f98a5')); line(P(3.5, 0.45 + i * 0.4, 12), P(3.5, 0.45 + i * 0.4, 22), C('#555b66'), 1); }
+  for (let i = 0; i <= 16; i++) { const u = i / 4; line(P(u, 3.97), P(u, 3.97, 6), C('#6b7280'), 0.7); line(P(3.97, u), P(3.97, u, 6), C('#6b7280'), 0.7); }
+  line(P(0, 3.97, 6), P(4, 3.97, 6), C('#6b7280'), 0.8); line(P(3.97, 0, 6), P(3.97, 4, 6), C('#6b7280'), 0.8);
 }
 function wind(k) {
   const { P, circ, cyl, box, faces, sh, C, ell } = k;
@@ -901,7 +1034,6 @@ function stadium(k) {
   const { P, ell, ctx, line, poly, box, faces, C, circ } = k;
   padRect(k, 3, 3, '#cfd1d4', null);
   const c = P(1.5, 1.5);
-  ctx.fillStyle = k.mode === 2 ? 'rgba(0,0,0,.22)' : 'rgba(10,20,40,.16)'; ctx.beginPath(); ctx.ellipse(c[0] + 14, c[1] + 4, 94, 47, 0, 0, 6.2832); ctx.fill();
   for (let z = 0; z <= 24; z += 2) { ctx.beginPath(); ctx.ellipse(c[0], c[1] - z, 90, 45, 0, 0, 6.2832); ctx.fillStyle = C(z < 12 ? '#aab1bc' : '#c3c9d2'); ctx.fill(); }
   ctx.beginPath(); ctx.ellipse(c[0], c[1] - 24, 90, 45, 0, 0, 6.2832); ctx.fillStyle = C('#e6e9ee'); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 0.8; ctx.stroke();
   ell([c[0], c[1] - 22], 76, 38, C('#c9372c')); ell([c[0], c[1] - 20], 66, 33, C('#2f5fb0')); ell([c[0], c[1] - 18], 58, 29, C('#d9a441'));
@@ -1018,7 +1150,6 @@ function beach(k, face) {
     const uc = [['#d9534a', '#ffffff'], ['#3d8bd9', '#ffffff'], ['#f4c542', '#e8823a'], ['#5fbf8a', '#ffffff']];
     for (let i = 0; i < 4; i++) {
       const u = -1.45 + (i % 2) * 0.75, v = 0.55 + Math.floor(i / 2) * 0.9, base = S.L(u, v), top = [base[0], base[1] - 17];
-      ell([base[0] + 4, base[1] + 1], 9, 4, 'rgba(0,0,0,.16)');
       line(base, top, C('#6b6b6b'), 1);
       for (let j = 0; j < 8; j++) { k.ctx.beginPath(); k.ctx.moveTo(top[0], top[1] - 2); k.ctx.arc(top[0], top[1] + 1, 9, Math.PI + j * Math.PI / 8, Math.PI + (j + 1) * Math.PI / 8); k.ctx.closePath(); k.ctx.fillStyle = C(uc[i][j % 2]); k.ctx.fill(); }
     }
@@ -1213,6 +1344,7 @@ function metro(k) {
 }
 const SVC_SPR_SHORE = { 23: [pier, 1, 1, 70, 2], 24: [beach, 2, 2, 60, 1], 25: [marina, 2, 2, 80, 2], 26: [ferryPier, 1, 1, 70, 1] };   // last number: tiles the picture reaches beyond its lot
 const SVC_SPR = { ...SVC_SPR_SHORE, 1: [coalPlant, 2, 2, 190], 2: [wind, 1, 1, 130], 3: [waterTower, 1, 1, 130], 4: [police, 1, 1, 100], 5: [fireStation, 1, 1, 130], 6: [clinic, 1, 1, 110], 7: [school, 1, 1, 130], ...SVC_SPR_X };
+SVC_SPR[28] = [gasPlant, 3, 3, 150]; SVC_SPR[29] = [solarFarm, 3, 3, 60]; SVC_SPR[30] = [nuclearPlant, 4, 4, 130];
 export function serviceSprite(id, mode, lit = true, face = 0, hi = false) {
   lit = mode === 2 ? !!lit : true;
   const ex = EXT.get('s' + id); if (ex) return extSprite(ex, mode, lit);     // a picture from a content pack replaces (or supplies) the drawn one
@@ -1222,7 +1354,7 @@ export function serviceSprite(id, mode, lit = true, face = 0, hi = false) {
     const W = (fw + fd) * 32 + 96, ox = fd * 32 + 32, H = hh + (fw + fd) * 16 + 34, oy = H - (fw + fd) * 16 - 34 + pad * 32;
     return make(W, H, ox, oy, (k) => fn(k, face), mode, lit, 0, (fw0 + fd0) * 32 * sc > 900 ? Math.min(sc, 2.6) : sc);   // the biggest (3x3) stay a little smaller
   };
-  return hi ? hiRes(key, fnMake(HI)) || memoLater(key, fnMake(S)) : memoLater(key, fnMake(S));
+  return (hi ? hiRes(key, fnMake(HI)) || memoLater(key, fnMake(S)) : memoLater(key, fnMake(S))) || otherLight(mode, (m) => cache.get(`s${id}${m}1${pad ? 'f' + face : ''}`) || cache.get(`s${id}${m}0${pad ? 'f' + face : ''}`));
 }
 
 // Smaller copies of a sprite for zoomed-out drawing (level 1 = half size, 2 = quarter size).
@@ -1256,7 +1388,6 @@ export function bridgeUnder(axis, pillar, endN, mode) {
     const { P, poly, C } = k;
     const side = axis === 0 ? (a, b, h) => P(a, 1 + b, h) : (a, b, h) => P(1 + b, a, h);   // along the near side
     const end = axis === 0 ? (a, b, h) => P(1 + b, a, h) : (a, b, h) => P(a, 1 + b, h);    // across the near end
-    poly([side(0, 0, -DECK), side(1, 0, -DECK), side(1, 0.42, -DECK), side(0, 0.42, -DECK)], 'rgba(8,36,64,.2)', null, true);   // shadow on the water
     if (pillar) {
       const px = (h) => [side(0.38, 0, h), side(0.62, 0, h)];
       const [a0, b0] = px(-DECK), [a1, b1] = px(-DECK - 11);

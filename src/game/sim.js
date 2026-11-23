@@ -1,7 +1,8 @@
 import { T, N, TERRAIN, SHORE_NAME } from './world.js';
 import { WF_NAME } from './waterfront.js';
 import { clamp, mulberry32, hash } from './util.js';
-import { Flow } from './flow.js';
+import { Flow, DISTRICT, DISTRICTS } from './flow.js';
+import { junctionType, greenShare, defaultJunction, SIGNAL, PRI_V, PRI_H, CYCLE } from './traffic.js';
 import { BT, BY_KEY, ELEC, WATER, WASTE, CUT_STAGE, cutGroup, frontTiles, berthTile } from './buildings.js';
 import { ORD, GOALS, UNLOCK, UNLOCK_NAME, LOANS, OVERDRAFT_RATE, TUTORIAL } from './rules.js';
 
@@ -11,9 +12,17 @@ export const POP_CAP = [0, 8, 24, 70, 160];
 export const COM_CAP = [0, 5, 14, 40, 95];
 export const IND_CAP = [0, 8, 18, 42, 70];
 export const MAX_LEVEL = 4;
+export const TRACK_MAX = 2;                        // lots reached only by a dirt track grow to this level (0.7.4)
 export const LEVEL_LV = [0, 46, 62, 78];           // land value a building needs to grow from level n to n + 1
 const IND_POLL = [0, 7, 14, 21, 8];
 const WF_LV = [0, 4, 6, 8];                          // land value bonus near a pond, a lake, the sea                 // hi-tech campuses pollute far less than heavy plants
+// Which way on the screen (north = up) a point lies from another, in tiles of the map. '' when it is close by.
+function compass(x0, y0, x1, y1) {
+  const dx = x1 - x0, dy = y1 - y0, SX = (dx - dy) * 2, SY = dx + dy;               // screen offsets (tiles are twice as wide as tall)
+  if (Math.hypot(dx, dy) < 3) return '';
+  const a = Math.atan2(SY, SX), k = ((Math.round(a / (Math.PI / 4)) % 8) + 8) % 8;
+  return ['east', 'south-east', 'south', 'south-west', 'west', 'north-west', 'north', 'north-east'][k];
+}
 export const LEVEL_NAME = {
   [T.RES]: ['Empty lot', 'House', 'Apartments', 'Residential tower', 'Skyscraper'],
   [T.COM]: ['Empty lot', 'Shop', 'Offices', 'Glass tower', 'Office megatower'],
@@ -27,12 +36,26 @@ export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', '
 const D4 = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 const ZK = { [T.RES]: 'r', [T.COM]: 'c', [T.IND]: 'i' };
 const COVS = ['police', 'fire', 'health', 'edu', 'fun', 'transit', 'metro'];
+// ---- 0.8.6: people, goods, service budgets, elections and the region ----
+export const FUND_GROUPS = ['police', 'fire', 'health', 'edu', 'transit', 'fun'];
+export const FUND_NAME = { police: 'Police', fire: 'Fire', health: 'Health care', edu: 'Schools', transit: 'Transit', fun: 'Parks & fun' };
+// which budget a service building is paid from: its first kind of coverage (the metro counts as transit)
+export function fundGroup(def) { if (!def || !def.cov) return null; const k = def.cov[0][0]; return k === 'metro' ? 'transit' : k; }
+export const WORK_SHARE = 0.6;                     // working residents per resident (matches the job demand in recount)
+export const ABANDON_WHY = ['', 'no power', 'cut off from the highway', 'no jobs or workers within reach', 'unhappy residents', 'low demand'];
+export const WEALTH_NAME = ['Working class', 'Middle class', 'Well-off'];
+const WEALTH_TAX = [0.8, 1, 1.4];
+export const wealthOf = (lv) => (lv < 50 ? 0 : lv < 68 ? 1 : 2);
+export const TRADE = { power: 0.25, water: 0.04, waste: 3 };   // $ a month: per unit of spare power or water sold, per building's garbage sent away
+const SURNAMES = ['Okafor', 'Bello', 'Garcia', 'Nguyen', 'Smith', 'Haddad', 'Kowalski', 'Mensah', 'Rossi', 'Tanaka', 'Silva', 'Ibrahim', 'Novak', 'Patel', 'Adeyemi', 'Murphy', 'Chen', 'Yusuf', 'Larsen', 'Moreau', 'Abubakar', 'Kim', 'Okonkwo', 'Fischer', 'Diallo', 'Costa', 'Ahmed', 'Brown', 'Eze', 'Santos'];
+const WISH = { police: 'a police station nearby', fire: 'a fire station nearby', health: 'a clinic nearby', edu: 'a school for the kids', fun: 'a park or something fun to do', transit: 'a bus stop', poll: 'cleaner air', crime: 'safer streets', jam: 'less traffic', commute: 'a job closer to home' };
 // Seasons in the simulation (Menu → Seasons → Always summer turns them off): 0 spring, 1 summer, 2 autumn, 3 winter, by month.
 export const SIM_SEASON = [3, 3, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3];
 export const SEASON_NAME = ['Spring', 'Summer', 'Autumn', 'Winter'];
 // Specialised industry (stored in bits 4-5 of world.variant): 0 general, 1 farm, 2 forestry, 3 tech.
 export const SPEC_NAME = ['', 'Farm', 'Forestry', 'Tech'];
 export const SPEC_TITLE = [null, ['', 'Farm', 'Farmstead', 'Large farm', 'Agri-tech farm'], ['', 'Sawmill', 'Timber yard', 'Wood mill', 'Mass timber works'], ['', 'Tech workshop', 'Software studio', 'Tech park', 'Hi-tech campus']];
+const GOODS_PER_JOB = [1, 0.8, 1, 0.3];             // goods made per industry job: general, farm (food), forestry, tech (mostly software)
 const SPEC_JOBS = [1, 0.6, 0.8, 1.25], SPEC_POLL = [1, 0.25, 0.6, 0.2], SPEC_TAX = [1, 0.85, 1, 1.4];
 export const specOf = (w, i) => (w.kind[i] === T.IND ? (w.variant[i] >> 4) & 3 : 0);
 // Requests from residents and businesses: a goal with a deadline, or a choice. One at a time, every few months.
@@ -81,7 +104,14 @@ export class Sim {
     this.seasonsOn = true; this.tourists = 0; this.attraction = 0; this.beds = 0; this.tourIncome = 0; this.avenues = 0; this.metroLinked = false;
     this.peakPop = s.peakPop ?? 0;
     this.tut = s.tut ?? (s.day ? TUTORIAL.length : 0);   // older cities skip the guide
-    this.inspected = !!s.inspected;
+    this.inspected = !!s.inspected; this.jfix = s.jfix && typeof s.jfix === 'object' ? s.jfix : {}; world.jfix = this.jfix; this.sandbox = !!s.sandbox; this.sbMoney = s.sbMoney == null ? null : s.sbMoney;
+    this.fund = { ...Object.fromEntries(FUND_GROUPS.map((k) => [k, 100])), ...(s.fund || {}) };   // service budgets, 50 to 150%
+    this.trade = { power: false, water: false, waste: false, ...(s.trade || {}) };                 // deals with the neighbouring towns
+    this.ages = s.ages ?? { kids: 0.26, adults: 0.6, seniors: 0.14 };                              // the city's age mix
+    this.approval = s.approval ?? 60; this.taxCap = s.taxCap ?? null; this.lastVote = s.lastVote ?? null; this.prevPop = s.prevPop ?? 0;
+    this.goods = { made: 0, need: 0, local: 0, imported: 0, exported: 0, importShare: 0 }; this.tradeIncome = 0; this.tradeCost = 0; this.wasteOut = 0;
+    this.aband = new Uint8Array(N * N);              // 0 lived in, or why its people left (ABANDON_WHY)
+    if (Array.isArray(s.aband)) for (const [i, c] of s.aband) if (i >= 0 && i < N * N) this.aband[i] = c;
     this.cut = 0; this.happiness = 60; this.hapParts = []; this.advice = [];
     this.traffic = null;                           // (old) live car count per tile; congestion now comes from trips (flow.js)
     this.flowM = new Flow(world);
@@ -98,6 +128,7 @@ export class Sim {
     this.hwNet = new Uint8Array(n); this.jobReach = new Uint8Array(n); this.workReach = new Uint8Array(n);
     this.seaLink = new Uint8Array(n);              // land tiles: 1 = ships from here reach the open sea, 2 = a bridge blocks the way, 0 = inland water or none
     this.ports = 0; this.portsBlocked = 0;
+    this.trackX = new Uint8Array((N + 1) * (N + 1)); this.trackY = new Uint8Array((N + 1) * (N + 1)); this.trackLot = new Uint8Array(n); this.trackVer = 0;
     this.commute = new Float32Array(n); this.jam = new Float32Array(n); this.roadComp = new Int32Array(n);
     this.hwRoads = 0; this.hasUni = false; this.plants = 0; this.zoned = { r: 0, c: 0, i: 0 };
     this.pending = new Map();          // tile -> { from } while a building is still under construction
@@ -127,40 +158,51 @@ export class Sim {
   get dom() { return (this.day % 30) + 1; }
   get SEASON_NOW() { return this.seasonsOn ? SIM_SEASON[this.month] : 1; }
   dateLabel() { return `${this.dom} ${MONTHS[this.month]} ${this.year}`; }
-  state() { return { req: this.req, reqNext: this.reqNext, reqDone: this.reqDone, moods: this.moods, tourBoost: this.tourBoost, money: this.money, day: this.day, tax: this.tax, lastIncome: this.lastIncome, lastExpense: this.lastExpense, ord: this.ord, done: [...this.done], streak: this.streak, disasters: this.disasters, loans: this.loans, lastInterest: this.lastInterest, lastLoanPay: this.lastLoanPay, history: this.history, news: this.news, peakPop: this.peakPop, tut: this.tut, inspected: this.inspected }; }
+  state() { return { req: this.req, reqNext: this.reqNext, reqDone: this.reqDone, moods: this.moods, tourBoost: this.tourBoost, money: this.money, day: this.day, tax: this.tax, lastIncome: this.lastIncome, lastExpense: this.lastExpense, ord: this.ord, done: [...this.done], streak: this.streak, disasters: this.disasters, loans: this.loans, lastInterest: this.lastInterest, lastLoanPay: this.lastLoanPay, history: this.history, news: this.news, peakPop: this.peakPop, tut: this.tut, inspected: this.inspected, jfix: this.jfix, sandbox: !!this.sandbox, sbMoney: this.sbMoney == null ? null : this.sbMoney,
+    fund: this.fund, trade: this.trade, ages: this.ages, approval: this.approval, taxCap: this.taxCap, lastVote: this.lastVote, prevPop: this.prevPop,
+    aband: (() => { const a = []; for (let i = 0; i < N * N; i++) if (this.aband[i] && this.w.level[i]) a.push([i, this.aband[i]]); return a; })() }; }
   ordOn(k) { return !!this.ord[k] && this.cut === 0; }          // ordinances are suspended while the city is in debt
-  isUnlocked(k) { return !UNLOCK[k] || this.unlocked.has(k); }
+  isUnlocked(k) { return this.sandbox || !UNLOCK[k] || this.unlocked.has(k); }
   closed(def) { const g = cutGroup(def); return !!g && this.cut >= CUT_STAGE[g]; }
   isClosedAt(i) { return this.w.kind[i] === T.SVC && this.closed(BT[this.w.bt[i]]); }
   pushNews(text) { this.news.unshift({ date: this.dateLabel(), text }); if (this.news.length > 30) this.news.length = 30; this.events.push({ type: 'news', text }); }
 
   recount() {
     const w = this.w;
+    let emptyB = 0, made = 0; const wealth = [0, 0, 0];
     let iTax = 0, avenues = 0, ports = 0, blocked = 0, bridges = 0, pop = 0, cj = 0, ij = 0, roads = 0, parks = 0, rb = 0, cb = 0, ib = 0, top = 0, zr = 0, zc = 0, zi = 0, plants = 0;
     for (let i = 0; i < N * N; i++) {
       const k = w.kind[i], l = this.lvl(i);
+      if (!l && this.aband[i]) this.aband[i] = 0;
+      const empty = l && this.aband[i];
       if (k === T.ROAD) { roads++; if (w.terrain[i] === TERRAIN.WATER) bridges++; else if (w.level[i] === 1) avenues++; }
       else if (k === T.PARK) { if (!this.pending.has(i)) parks++; }
-      else if (k === T.RES) { zr++; if (l) { pop += POP_CAP[l]; rb++; } }
-      else if (k === T.COM) { zc++; if (l) { cj += COM_CAP[l]; cb++; } }
-      else if (k === T.IND) { zi++; if (l) { const sp = (w.variant[i] >> 4) & 3, jobs = Math.round(IND_CAP[l] * SPEC_JOBS[sp]); ij += jobs; iTax += jobs * SPEC_TAX[sp] * (sp === 1 && this.SEASON_NOW === 2 ? 1.5 : 1); ib++; if (w.shore[i] >= 2) { if (this.seaLink[i] === 1) ports++; else if (this.seaLink[i] === 2) blocked++; } } }
+      else if (k === T.RES) { zr++; if (l) { rb++; if (empty) emptyB++; else { pop += POP_CAP[l]; const wt = wealthOf(this.landValue(i, k)); wealth[wt] += POP_CAP[l]; } } }
+      else if (k === T.COM) { zc++; if (l) { cb++; if (empty) emptyB++; else cj += COM_CAP[l]; } }
+      else if (k === T.IND) { zi++; if (l) { ib++; } if (l && empty) emptyB++; if (l && !empty) { const sp = (w.variant[i] >> 4) & 3, jobs = Math.round(IND_CAP[l] * SPEC_JOBS[sp]); ij += jobs; made += jobs * GOODS_PER_JOB[sp]; iTax += jobs * SPEC_TAX[sp] * (sp === 1 && this.SEASON_NOW === 2 ? 1.5 : 1); if (w.shore[i] >= 2) { if (this.seaLink[i] === 1) ports++; else if (this.seaLink[i] === 2) blocked++; } } }
       else if (k === T.SVC && w.bo[i] === 0 && BT[w.bt[i]].power) plants++;
       if (l === 4 && k >= T.RES && k <= T.IND) top++;
     }
     this.ports = ports; this.portsBlocked = blocked; this.iTax = iTax; this.avenues = avenues;
     this.pop = pop; this.cJobs = cj; this.iJobs = ij; this.roads = roads; this.bridges = bridges; this.parks = parks; this.plants = plants;
-    this.bld = { r: rb, c: cb, i: ib, top }; this.zoned = { r: zr, c: zc, i: zi };
+    this.bld = { r: rb, c: cb, i: ib, top, empty: emptyB }; this.zoned = { r: zr, c: zc, i: zi }; this.wealth = wealth;
+    this.taxBase = wealth[0] * WEALTH_TAX[0] + wealth[1] * WEALTH_TAX[1] + wealth[2] * WEALTH_TAX[2];
+    // goods: shops sell what local industry makes; what's missing is bought from the region, what's left over is sold to it
+    const need = cj * 1.3, local = Math.min(made, need), imp = need - local;
+    this.goods = { made: Math.round(made), need: Math.round(need), local: Math.round(local), imported: Math.round(imp), exported: Math.round(made - local), importShare: need > 0 ? imp / need : 0 };
+    this.workforce = Math.round(pop * WORK_SHARE * (this.ages ? this.ages.adults / 0.6 : 1));
     const jobs = cj + ij;
     const tm = (t) => -(t - 9) * 0.04 + 0.14;
     const stad = Math.min(3, this.net.stadiums) * 0.06 + (this.ordOn('tourism') ? 0.08 : 0);
     const mood = ((this.happiness ?? 60) - 55) / 100 * 0.6;       // a happy city attracts people, an unhappy one drives them off
     const linked = this.hwRoads > 0;
-    this.rd = clamp((jobs - pop * 0.85 + 18) / (40 + jobs * 0.25) + tm(this.tax.r) + mood, -1, 1);
+    this.rd = clamp((jobs - pop * 0.6 + 18) / (40 + jobs * 0.25) + tm(this.tax.r) + mood, -1, 1);
     const sn = this.SEASON_NOW, seasonK = sn === 3 ? -0.06 : sn === 0 ? 0.03 : 0;            // winter slows building, spring speeds it up
     this.rd += seasonK;
-    this.cd = clamp((pop * 0.3 - cj + 4) / (30 + cj * 0.2) + tm(this.tax.c) + stad + (linked ? 0 : -0.15) + seasonK + Math.min(0.25, this.tourists / (cj * 4 + 120)), -1, 1);   // visitors shop too
+    const gs = this.goods, short = clamp((gs.need - gs.made) / (40 + gs.made * 0.2), -1, 1);   // shops short of goods want factories nearby
+    this.cd = clamp((pop * 0.3 - cj + 4) / (30 + cj * 0.2) + tm(this.tax.c) + stad + (linked ? 0 : -0.15) + seasonK + Math.min(0.25, this.tourists / (cj * 4 + 120)) + 0.05 * (1 - gs.importShare) - 0.03, -1, 1);   // visitors shop too; local goods are cheaper
     const port = ports > 0 ? 0.08 : 0;                         // a working sea port draws a little more industry
-    this.id = clamp((pop * 0.4 - ij + 6) / (30 + ij * 0.2) + tm(this.tax.i) + (linked || ports ? 0 : -0.3) + port, -1, 1);   // goods leave by the highway or by sea
+    this.id = clamp((pop * 0.4 - ij + 6) / (30 + ij * 0.2) + tm(this.tax.i) + (linked || ports ? 0 : -0.3) + port + clamp(short * 0.5, -0.08, 0.12), -1, 1);   // goods leave by the highway or by sea
     this.updateHappiness();
   }
   updateHappiness() {
@@ -169,9 +211,10 @@ export class Sim {
     const parts = []; let h = 58;
     const add = (label, v) => { h += v; if (Math.abs(v) >= 0.5) parts.push([label, Math.round(v)]); };
     add('Taxes', -(avgTax - 9) * 3.2); add('Parks', parkBonus); add('Too few jobs', -Math.max(0, -this.rd) * 12);
-    add('Police', n.police * 7); add('Health care', n.health * 7); add('Schools', n.edu * 6); add('Fire safety', n.fire * 3); add('Amenities', n.fun * 8); add('Buses', n.transit * 4); add('Metro', (n.metro || 0) * 5);
+    const ag = this.ages || { kids: 0.26, seniors: 0.14 };
+    add('Police', n.police * 7); add('Health care', n.health * 7 * (0.6 + 0.4 * ag.seniors / 0.14)); add('Schools', n.edu * 6 * (0.5 + 0.5 * ag.kids / 0.26)); add('Fire safety', n.fire * 3); add('Amenities', n.fun * 8); add('Buses', n.transit * 4); add('Metro', (n.metro || 0) * 5);
     add('Crime', -n.crimeAvg * 0.18); add('Pollution', -n.pollAvg * 0.16); add('Power cuts', -n.unserved * 30); add('Garbage', -n.wasteUn * 18);
-    add('Traffic', -n.jamAvg * 12); add('Long commutes', -n.noJob * 14); add('Budget cuts', -[0, 3, 7, 12][this.cut]);
+    add('Empty buildings', -Math.min(4, ((this.bld && this.bld.empty) || 0) * 0.15)); add('Traffic', -n.jamAvg * 12); add('Long commutes', -n.noJob * 14); add('Budget cuts', -[0, 3, 7, 12][this.cut]);
     const sn = this.SEASON_NOW; add(sn === 3 ? 'Winter' : sn === 1 ? 'Summer' : 'Season', sn === 3 ? -2 + n.health * 1.5 : sn === 1 ? 1 + Math.min(2, n.fun * 3) : 0);
     add('Requests', this.moods.reduce((a, m) => a + (m.until > this.day ? m.v : 0), 0));
     this.hapParts = parts.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
@@ -226,13 +269,22 @@ export class Sim {
     for (const a of plants) { pSup += a.def.power; if (a.comp >= 0) { const r = find(a.comp); out.set(r, (out.get(r) || 0) + a.def.power); } }
     const consumers = [];
     const heat = this.SEASON_NOW === 3 ? 1.25 : 1;                 // homes use more power for heating in winter
-    for (const z of zones) consumers.push({ i: z.i, x: z.x, y: z.y, fw: 1, fd: 1, p: Math.ceil(ELEC[z.z][z.l] * (this.ordOn('energy') ? 0.85 : 1) * (z.z === 'r' ? heat : 1)), wa: Math.ceil(WATER[z.z][z.l] * (this.ordOn('water') ? 0.8 : 1)), ws: Math.ceil(WASTE[z.z][z.l] * (this.ordOn('recycle') ? 0.75 : 1)), zone: true });
+    for (const z of zones) consumers.push({ i: z.i, x: z.x, y: z.y, l: z.l, fw: 1, fd: 1, p: Math.ceil(ELEC[z.z][z.l] * (this.ordOn('energy') ? 0.85 : 1) * (z.z === 'r' ? heat : 1)), wa: Math.ceil(WATER[z.z][z.l] * (this.ordOn('water') ? 0.8 : 1)), ws: Math.ceil(WASTE[z.z][z.l] * (this.ordOn('recycle') ? 0.75 : 1)), zone: true });
     for (const a of anchors) if (!a.def.power && a.def.use && !this.closed(a.def)) consumers.push({ i: a.i, x: a.x, y: a.y, fw: a.def.w, fd: a.def.d, p: a.def.use, wa: a.def.water ? 0 : 2, ws: 0 });
+    // A building takes power from a line within 2 tiles. In reach of more than one network it takes the one with the most
+    // power to spare. (Before 0.7.2 it took whichever network it found first, so a dead stub or a short network next to a
+    // live line left buildings dark even when the city made plenty of power.)
+    const pick = (cands, outM, demM, need) => {
+      if (!cands.length) return -1; if (cands.length === 1) return cands[0];
+      let best = cands[0], bv = -1e9; for (const r of cands) { const v = (outM.get(r) || 0) - (demM.get(r) || 0); if (v > bv) { bv = v; best = r; } }
+      demM.set(best, (demM.get(best) || 0) + need); return best;
+    };
     for (const c of consumers) {
-      let root = -1; ring(c.x, c.y, c.fw, c.fd, 2, (cc) => { if (root < 0 && cc >= 0) root = find(cc); });
-      c.root = root; pDem += c.p;
-      if (root >= 0) dem.set(root, (dem.get(root) || 0) + c.p);
+      const cs = []; ring(c.x, c.y, c.fw, c.fd, 2, (cc) => { if (cc >= 0) { const r = find(cc); if (!cs.includes(r)) cs.push(r); } });
+      c.pc = cs; pDem += c.p;
+      if (cs.length === 1) { c.root = cs[0]; dem.set(cs[0], (dem.get(cs[0]) || 0) + c.p); } else c.root = -1;
     }
+    for (const c of consumers) if (c.pc.length > 1) c.root = pick(c.pc, out, dem, c.p);
     this.pw.fill(0); this.powerMap.fill(0);
     let unpowered = 0;
     for (const c of consumers) {
@@ -246,7 +298,11 @@ export class Sim {
       const o = root >= 0 ? out.get(root) || 0 : 0, d = dem.get(root) || 0;
       this.pw[e.i] = o > 0 && o >= d * 0.95 ? 1 : 0;
     }
-    for (let i = 0; i < n; i++) if (comp[i] >= 0) this.powerMap[i] = (out.get(find(comp[i])) || 0) > 0 ? 3 : 4;
+    const ll = this.lineLive && this.lineLive.length === n ? this.lineLive : (this.lineLive = new Uint8Array(n));
+    for (let i = 0; i < n; i++) {                   // lines: live or dead. A building on a cable keeps its own red or green in the power view
+      ll[i] = comp[i] >= 0 ? ((out.get(find(comp[i])) || 0) > 0 ? 1 : 2) : 0;
+      if (ll[i] && this.powerMap[i] === 0) this.powerMap[i] = ll[i] === 1 ? 3 : 4;
+    }
     for (let i = 0; i < n; i++) if (w.kind[i] === T.ROAD && !w.wire[i]) {   // street lamps work near live lines
       const x = i % N, y = (i / N) | 0; let live = false;
       ring(x, y, 1, 1, 2, (c) => { if (!live && c >= 0 && (out.get(find(c)) || 0) > 0) live = true; });
@@ -271,10 +327,11 @@ export class Sim {
     for (const a of sources) { let first = -1; pring(a.x, a.y, a.def.w, a.def.d, 1, (c) => { if (c >= 0) { if (first < 0) first = c; else punion(first, c); } }); a.pcomp = first; }
     const wout = new Map(), wdem = new Map(); let wSup = 0, wDem = 0;
     for (const a of sources) { wSup += a.def.water; if (a.pcomp >= 0) { const r = pfind(a.pcomp); wout.set(r, (wout.get(r) || 0) + a.def.water * (a.def.use && !this.pw[a.i] ? 0.3 : 1)); } }
-    for (const c of consumers) {
-      wDem += c.wa; let root = -1; pring(c.x, c.y, c.fw, c.fd, 2, (cc) => { if (root < 0 && cc >= 0) root = pfind(cc); });
-      c.wroot = root; if (root >= 0) wdem.set(root, (wdem.get(root) || 0) + c.wa);
+    for (const c of consumers) {                     // like power: a building in reach of two pipe networks takes the better one
+      wDem += c.wa; const cs = []; pring(c.x, c.y, c.fw, c.fd, 2, (cc) => { if (cc >= 0) { const r = pfind(cc); if (!cs.includes(r)) cs.push(r); } });
+      c.wc = cs; if (cs.length === 1) { c.wroot = cs[0]; wdem.set(cs[0], (wdem.get(cs[0]) || 0) + c.wa); } else c.wroot = -1;
     }
+    for (const c of consumers) if (c.wc.length > 1) c.wroot = pick(c.wc, wout, wdem, c.wa);
     this.wt.fill(0); this.waterMap.fill(0);
     for (const c of consumers) {
       const o = c.wroot >= 0 ? wout.get(c.wroot) || 0 : 0, d = wdem.get(c.wroot) || 1, ratio = Math.min(1, o / d);
@@ -293,20 +350,37 @@ export class Sim {
       }
     }
     let tDem = 0, tSup = 0, wUn = 0, zc = 0; for (const f of fac) tSup += f.def.waste;
-    const zc2 = consumers.filter((c) => c.zone);
-    for (const c of zc2) {
-      tDem += c.ws; let best = -1, bd = 1e9;
-      fac.forEach((f, fi) => { const d = Math.hypot(c.x + 0.5 - (f.x + f.def.w / 2), c.y + 0.5 - (f.y + f.def.d / 2)); if (d <= f.def.radius && d < bd) { bd = d; best = fi; } });
-      c.fac = best; if (best >= 0) fload[best] += c.ws;
+    // Every building is served by the nearest landfill or recycling center in range that still has room. (Before 0.7.2 it
+    // only tried the nearest one, so a full landfill left its street uncollected while another one nearby sat half empty.)
+    const zc2 = consumers.filter((c) => c.zone), pairs = [];
+    for (let ci = 0; ci < zc2.length; ci++) {
+      const c = zc2[ci]; tDem += c.ws; c.fac = -1; c.inRange = false;
+      fac.forEach((f, fi) => { const d = Math.hypot(c.x + 0.5 - (f.x + f.def.w / 2), c.y + 0.5 - (f.y + f.def.d / 2)); if (d <= f.def.radius) { pairs.push([d, ci, fi]); c.inRange = true; } });
     }
+    // buildings that need collection (level 2 and up) are served first; houses at level 1 only take what is left
+    pairs.sort((a, b) => (zc2[a[1]].l >= 2 ? 0 : 1) - (zc2[b[1]].l >= 2 ? 0 : 1) || a[0] - b[0]);
+    for (const [, ci, fi] of pairs) { const c = zc2[ci]; if (c.fac >= 0 || fload[fi] + c.ws > fcap[fi]) continue; c.fac = fi; fload[fi] += c.ws; }
+    let wOut = 0, wFull = 0, wasteOut = 0;
     for (const c of zc2) {
       zc++;
-      if (c.fac < 0) { this.wasteMap[c.i] = 2; wUn++; continue; }
-      const ratio = Math.min(1, fcap[c.fac] / Math.max(1, fload[c.fac]));
-      const ok = hash(c.x, c.y, 3) < ratio + 1e-6;
-      this.ts[c.i] = ok ? 1 : 0; this.wasteMap[c.i] = ok ? 3 : 2; if (!ok) wUn++;
+      let ok = c.fac >= 0;
+      if (!ok && c.l >= 2 && this.trade.waste && this.hwNet[c.i]) { ok = true; wasteOut++; }   // trucked to the neighbouring town's landfill
+      this.ts[c.i] = ok ? 1 : 0; this.wasteMap[c.i] = ok ? 3 : c.l >= 2 ? 2 : c.inRange ? 1 : 0;   // red only where it's needed
+      if (!ok && c.l >= 2) { wUn++; if (c.inRange) wFull++; else wOut++; }   // level 1 doesn't need collection yet: not counted, no badge
     }
 
+    // Why a utility can fall short while the totals look fine: plants or pumps not touching a line or pipe, power or water
+    // split over networks that aren't joined, or buildings out of reach of any line, pipe or landfill. Read by the advisors.
+    const diag = { pLoose: plants.filter((a) => a.comp < 0).map((a) => a.def.name), wLoose: sources.filter((a) => a.pcomp < 0).map((a) => a.def.name),
+      pNoLine: consumers.filter((c) => c.root < 0).length, wNoPipe: consumers.filter((c) => c.wroot < 0).length, pShort: 0, pSpare: 0, wShort: 0, wSpare: 0,
+      pumpsDark: sources.filter((a) => a.def.use && !this.pw[a.i]).length, wOut, wFull };
+    for (const [r, o] of out) { const d = dem.get(r) || 0; if (o >= d) diag.pSpare += o - d; }
+    for (const [r, d] of dem) { const o = out.get(r) || 0; if (o < d) diag.pShort += d - o; }
+    for (const [r, o] of wout) { const d = wdem.get(r) || 0; if (o >= d) diag.wSpare += o - d; }
+    for (const [r, d] of wdem) { const o = wout.get(r) || 0; if (o < d) diag.wShort += d - o; }
+    diag.unwatered = consumers.filter((c) => !this.wt[c.i]).length; diag.unpowered = unpowered;
+    this.uDiag = diag; this.wasteOut = wasteOut;
+    this.tracks();
     this._an = { anchors, zones, empties, consumers, unpowered, pSup, pDem, wSup, wDem, tDem, tSup, wUn, zc };
   }
   // stage 2: service and amenity coverage
@@ -319,14 +393,15 @@ export class Sim {
     let uni = false;
     for (const a of anchors) {
       const shut = this.closed(a.def);
-      upkeep += a.def.upkeep * (shut ? 0.2 : 1);       // a closed building only costs basic maintenance
+      const fg = fundGroup(a.def), fk = fg ? (this.fund[fg] ?? 100) / 100 : 1;   // service budget: 50% to 150%
+      upkeep += a.def.upkeep * (shut ? 0.2 : fk);       // a closed building only costs basic maintenance
       if (shut) continue;
       if (a.def.key === 'stadium') stadiums++;
       if (a.def.key === 'university') uni = true;
       if (!a.def.cov) continue;
       if (a.def.ferry && !this.ferryLinks.get(a.i)) continue;      // a ferry pier only serves once a ferry runs to another pier
       if (a.def.metro && !this.metroLinked) continue;               // a metro needs at least two stations
-      const eff = a.def.use === undefined || this.pw[a.i] ? 1 : 0.3, R = a.def.radius, cx = a.x + a.def.w / 2, cy = a.y + a.def.d / 2;
+      const eff = (a.def.use === undefined || this.pw[a.i] ? 1 : 0.3) * (0.5 + 0.5 * fk), R = a.def.radius * (0.85 + 0.15 * fk), cx = a.x + a.def.w / 2, cy = a.y + a.def.d / 2;
       for (const [key, str] of a.def.cov) {
         const arr = this.cov[key];
         for (let y = Math.max(0, Math.floor(cy - R)); y <= Math.min(N - 1, Math.ceil(cy + R)); y++) for (let x = Math.max(0, Math.floor(cx - R)); x <= Math.min(N - 1, Math.ceil(cx + R)); x++) {
@@ -362,7 +437,7 @@ export class Sim {
       if (k === T.IND && l) { add(poll, x, y, 4, IND_POLL[l] * scrub * SPEC_POLL[(w.variant[i] >> 4) & 3], true); add(ind, x, y, 4, l === 4 ? 2 : 6, false); }
       else if (k === T.PARK && !this.pending.has(i)) { add(parkAcc, x, y, 5, 8, false); add(poll, x, y, 3, -8, true); }
       else if ((k === T.RES || k === T.COM) && l) add(dens, x, y, 3, (k === T.RES ? POP_CAP[l] : COM_CAP[l] * 0.5) * 0.25, true);
-      if (ZK[k] && l && !this.ts[i]) add(poll, x, y, 2, l * 3, true);   // uncollected garbage
+      if (ZK[k] && l >= 2 && !this.ts[i]) add(poll, x, y, 2, l * 3, true);   // uncollected garbage (level 1 doesn't need collection yet)
     }
     for (let i = 0; i < n; i++) if (this.jam[i] > 0) poll[i] += this.jam[i] * 6;            // exhaust and noise from jammed roads
     for (const a of anchors) if (a.def.pollute) add(poll, a.x, a.y, a.def.pr || 6, a.def.pollute * scrub, true);
@@ -441,7 +516,7 @@ export class Sim {
   countBuilt(key) { const id = BY_KEY[key].id, w = this.w; let n = 0; for (let i = 0; i < N * N; i++) if (w.kind[i] === T.SVC && w.bt[i] === id && w.bo[i] === 0 && !this.pending.has(i)) n++; return n; }
   goalStatus() { return GOALS.map((g) => { const v = g.v(this); return { id: g.id, title: g.title, desc: g.desc, reward: g.reward, done: this.done.has(g.id), progress: Math.min(1, v / g.t), label: g.fmt ? g.fmt(v) : Math.min(v, g.t) + ' / ' + g.t }; }); }
   checkGoals() { for (const g of GOALS) { if (this.done.has(g.id)) continue; if (g.v(this) >= g.t) { this.done.add(g.id); this.money += g.reward; this.events.push({ type: 'goal', title: g.title, reward: g.reward }); } } }
-  landValue(i, z) { return this.lv[i] - (z === T.RES ? Math.min(24, this.indPen[i]) : 0); }
+  landValue(i, z) { return this.lv[i] - (z === T.RES ? Math.min(24, this.indPen[i]) : 0) + (z === T.IND ? Math.min(16, this.poll[i] * 0.28) : 0); }   // factories don't mind smoke (0.8.6)
 
   // ---- roads: highway link, commutes and congestion ----
   analyzeRoads(zones, empties) {
@@ -505,6 +580,7 @@ export class Sim {
       const D = k === T.RES ? jobD : homeD;
       for (const q of rs) { if (hwComp.has(rc[q])) hw = true; if (D[q] < best) best = D[q]; }
       const reach = COMMUTE + 12 * this.cov.transit[z.i] + 22 * this.cov.metro[z.i];   // buses and the metro stretch how far people will go
+      if (this.trackLot[z.i] && best < 1e9) best += 2;               // walking or driving the dirt track to the street first
       this.hwNet[z.i] = hw ? 1 : 0; this.commute[z.i] = Math.min(255, best);
       const ok = best <= reach;
       if (k === T.RES) { this.jobReach[z.i] = ok || few ? 1 : 0; if (z.l && !this.jobReach[z.i]) noJobN++; }
@@ -585,6 +661,67 @@ export class Sim {
     if (town === 0) return 1;
     return 0;
   }
+  // A junction set by hand (Inspector): 'auto', 'sig' (lights), 'v' or 'h' (priority to the road along y or x).
+  setJunction(x, y, v) {
+    const w = this.w; if (!w.inb(x, y)) return; const i = y * N + x;
+    if (v === 'auto') delete this.jfix[i]; else this.jfix[i] = { sig: SIGNAL, v: PRI_V, h: PRI_H }[v];
+    if (w.jn) w.jn[i] = this.jfix[i] || defaultJunction(w, x, y);
+    this.flowM.dirty = true;
+  }
+  // ---- dirt tracks (0.7.4) ----
+  // A road tile next to it (not just diagonally or 2 tiles away) is a lot's frontage.
+  fronts(i) { const w = this.w, x = i % N, y = (i / N) | 0; return w.isRoad(x, y - 1) || w.isRoad(x + 1, y) || w.isRoad(x, y + 1) || w.isRoad(x - 1, y); }
+  // Built lots without frontage get a dirt track to the nearest road. Tracks run along tile sides (in the gap between
+  // lots, never under a building), from a corner of the lot to a corner that touches a road. One search from every
+  // road corner outwards gives a distance to the road for each corner; each lot then walks downhill from its nearest
+  // corner, joining tracks already laid where it can, so a back row shares one lane.
+  // trackX[c] marks the side from corner c = (cx, cy) to (cx + 1, cy); trackY[c] the side from c to (cx, cy + 1).
+  tracks() {
+    const w = this.w, M = N + 1, nc = M * M, tx = this.trackX, ty = this.trackY, lot = this.trackLot;
+    const dist = this._tkD || (this._tkD = new Int16Array(nc)), q = this._tkQ || (this._tkQ = new Int32Array(nc));
+    const before = this._tkSig || 0; let sig = 0;
+    tx.fill(0); ty.fill(0); lot.fill(0); dist.fill(-1);
+    const land = (x, y) => { if (x < 0 || y < 0 || x >= N || y >= N) return false; const i = y * N + x, k = w.kind[i]; return w.terrain[i] !== TERRAIN.WATER && (k === T.EMPTY || k === T.PARK || k === T.RES || k === T.COM || k === T.IND); };
+    const road = (x, y) => x >= 0 && y >= 0 && x < N && y < N && w.kind[y * N + x] === T.ROAD && w.terrain[y * N + x] !== TERRAIN.WATER;
+    let h = 0, t = 0;
+    for (let cy = 0; cy < M; cy++) for (let cx = 0; cx < M; cx++) if (road(cx - 1, cy - 1) || road(cx, cy - 1) || road(cx - 1, cy) || road(cx, cy)) { const c = cy * M + cx; dist[c] = 0; q[t++] = c; }
+    const MAXD = 6;
+    // the sides a track may use: both tiles beside it are open land, lots or parks
+    const sideX = (cx, cy) => land(cx, cy - 1) && land(cx, cy);           // side from (cx, cy) to (cx + 1, cy)
+    const sideY = (cx, cy) => land(cx - 1, cy) && land(cx, cy);           // side from (cx, cy) to (cx, cy + 1)
+    const nbrs = (c, fn) => {
+      const cx = c % M, cy = (c / M) | 0;
+      if (cx + 1 < M && sideX(cx, cy)) fn(c + 1, 'x', c);
+      if (cx > 0 && sideX(cx - 1, cy)) fn(c - 1, 'x', c - 1);
+      if (cy + 1 < M && sideY(cx, cy)) fn(c + M, 'y', c);
+      if (cy > 0 && sideY(cx, cy - 1)) fn(c - M, 'y', c - M);
+    };
+    while (h < t) { const c = q[h++], d = dist[c]; if (d >= MAXD) continue; nbrs(c, (o) => { if (dist[o] < 0) { dist[o] = d + 1; q[t++] = o; } }); }
+    // the lots that need a track, nearest first, so later ones can join the earlier ones
+    const need = [];
+    for (let i = 0; i < N * N; i++) {
+      const k = w.kind[i]; if ((k !== T.RES && k !== T.COM && k !== T.IND) || !w.level[i] || this.fronts(i)) continue;
+      const x = i % N, y = (i / N) | 0; let best = -1, bd = 99;
+      for (const c of [(y + 1) * M + x + 1, (y + 1) * M + x, y * M + x + 1, y * M + x]) if (dist[c] >= 0 && dist[c] < bd) { bd = dist[c]; best = c; }   // front corners first
+      if (best >= 0) need.push([bd, i, best]);
+    }
+    need.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const paths = [];                                   // corner lists from each lot to its road, for people walking the tracks
+    for (const [, i, start] of need) {
+      lot[i] = 1; let c = start; const pts = [c];
+      while (dist[c] > 0) {
+        let pick = -1, kind = '', at = -1, laid = false;
+        nbrs(c, (o, k2, e) => { if (dist[o] !== dist[c] - 1) return; const on = k2 === 'x' ? tx[e] : ty[e]; if (pick < 0 || (on && !laid)) { pick = o; kind = k2; at = e; laid = !!on; } });
+        if (pick < 0) break;
+        if (kind === 'x') tx[at] = 1; else ty[at] = 1;
+        sig = (sig * 31 + at * 2 + (kind === 'x' ? 1 : 0)) | 0; c = pick; pts.push(c);
+      }
+      if (pts.length > 1) paths.push({ i, pts });
+      sig = (sig * 17 + i) | 0;
+    }
+    this.trackPaths = paths;
+    if (sig !== before) { this._tkSig = sig; this.trackVer++; }
+  }
   zoneDemand(k) { return k === T.RES ? this.rd : k === T.COM ? this.cd : this.id; }
   // The single source of truth for "why isn't this growing": used by growth and by the inspector card.
   blocker(i, k, lvl) {
@@ -594,7 +731,9 @@ export class Sim {
     if (!this.pw[i]) return 'No power';
     if (k === T.RES ? !this.jobReach[i] : !this.workReach[i]) return k === T.RES ? 'No jobs within commuting distance' : 'No workers live within commuting distance';
     if (lvl === 0) return d > -0.05 ? null : `Low demand for ${ZONE_NAME[k].toLowerCase()}`;
+    if (this.aband[i]) return `Standing empty: its ${k === T.RES ? 'residents' : 'business'} left (${ABANDON_WHY[this.aband[i]]})`;
     if (lvl >= MAX_LEVEL) return null;
+    if (lvl >= TRACK_MAX && !this.fronts(i)) return this.trackLot[i] ? 'Only a dirt track reaches it. A road next to it lets it grow taller' : 'No road next to it. A road next to it lets it grow taller';
     if (!this.wt[i]) return 'No water';
     if (lvl >= 2 && !this.ts[i]) return 'Garbage isn\u2019t collected';
     if (lvl === 3 && !this.isUnlocked('sky')) return `Skyscrapers unlock at ${UNLOCK.sky.toLocaleString('en-US')} residents`;
@@ -649,30 +788,39 @@ export class Sim {
     this.day++;
     if ((this.needAn && this.day - (this.lastAn ?? -9) >= 2) || this.day - (this.lastAn ?? -9) >= 8) { this.startAnalyze(); this.lastAn = this.day; }   // growth is batched instead of recalculating every day
     const w = this.w, rnd = this.rnd, h = this.happiness;
-    for (let n = 0; n < 150; n++) {
+    for (let n = 0; n < 600; n++) {
       const x = Math.floor(rnd() * N), y = Math.floor(rnd() * N), i = w.idx(x, y);
       const z = w.kind[i];
       if (z !== T.RES && z !== T.COM && z !== T.IND) continue;
       if (this.pending.has(i)) continue;
       const d = this.zoneDemand(z), lvl = w.level[i];
       const road = w.roadNear(x, y, 2);
-      if (!road) { if (lvl && rnd() < 0.03) { w.level[i] = lvl - 1; if (z === T.RES) this.events.push({ type: 'moveOut', i, n: POP_CAP[lvl] - POP_CAP[lvl - 1] }); } continue; }
-      const grow = (to) => { const pv = w.variant[i], sp = z === T.IND ? (lvl === 0 ? this.pickSpec(i) : (pv >> 4) & 3) : 0; w.level[i] = to; w.variant[i] = Math.floor(rnd() * 16) | (sp << 4); this.needAn = true; this.markBuilt(i, { kind: z, from: lvl, to, pv }); };   // 8 looks per building (4..7 add roof and street details; +8 = second colour family)
-      const shrink = () => { w.level[i] = lvl - 1; this.needAn = true; if (z === T.RES) this.events.push({ type: 'moveOut', i, n: POP_CAP[lvl] - POP_CAP[lvl - 1] }); };
+      if (!road) { if (lvl && rnd() < 0.03) { w.level[i] = lvl - 1; if (z === T.RES && !this.aband[i]) this.events.push({ type: 'moveOut', i, n: POP_CAP[lvl] - POP_CAP[lvl - 1] }); } continue; }
+      const grow = (to) => { const pv = w.variant[i], sp = z === T.IND ? (lvl === 0 ? this.pickSpec(i) : (pv >> 4) & 3) : 0; w.level[i] = to; w.variant[i] = Math.floor(rnd() * 16) | (sp << 4); this.aband[i] = 0; this.needAn = true; this.markBuilt(i, { kind: z, from: lvl, to, pv }); };   // 8 looks per building (4..7 add roof and street details; +8 = second colour family)
       if (lvl === 0) {
         if (!this.blocker(i, z, 0) && rnd() < 0.15 + 0.5 * Math.max(0, d)) grow(1);
         continue;
       }
-      if (this.day <= this.grace) { /* older saves get time to adapt */ }
-      else if (!this.pw[i] && rnd() < 0.02) { shrink(); continue; }
-      else if (!this.linkedOut(i) && rnd() < 0.012) { shrink(); continue; }                       // cut off from the region
-      else if ((z === T.RES ? !this.jobReach[i] : !this.workReach[i]) && rnd() < 0.012) { shrink(); continue; }   // people move closer to work
-      if (z === T.RES && h < 35 && rnd() < ((35 - h) / 35) * 0.04) { shrink(); continue; }      // unhappy residents leave
-      if (lvl < MAX_LEVEL) {
-        if (!this.blocker(i, z, lvl) && rnd() < 0.1 * d + 0.02 + (z === T.RES ? Math.max(0, h - 60) / 400 : 0)) grow(lvl + 1);
-        else if (d < -0.25 && rnd() < 0.06) shrink();
-      } else if (d < -0.25 && rnd() < 0.06) shrink();
-      if (lvl === 1 && d < -0.35 && rnd() < 0.05) { w.level[i] = 0; this.needAn = true; if (z === T.RES) this.events.push({ type: 'moveOut', i, n: POP_CAP[1] }); }
+      // 0.8.6: a building in trouble first stands empty (its people leave, it goes dark and gets boarded up). If things
+      // stay bad it's torn down to a smaller one, still empty; if they get better, new people move back in.
+      let bad = 0;
+      if (this.day > this.grace) { if (!this.pw[i]) bad = 1; else if (!this.linkedOut(i)) bad = 2; else if (z === T.RES ? !this.jobReach[i] : !this.workReach[i]) bad = 3; }
+      if (!bad && z === T.RES && h < 35) bad = 4;
+      if (!bad && d < -0.25) bad = 5;
+      const empty = this.aband[i];
+      if (bad) {
+        const pr = [0, 0.02, 0.012, 0.012, ((35 - h) / 35) * 0.04, 0.06 + Math.max(0, -0.35 - d) * 0.1][bad];
+        if (rnd() < pr) {
+          if (!empty) { this.aband[i] = bad; this.needAn = true; if (z === T.RES) this.events.push({ type: 'moveOut', i, n: POP_CAP[lvl] }); }
+          else if (rnd() < 0.35) { w.level[i] = lvl - 1; if (lvl === 1) this.aband[i] = 0; else this.aband[i] = bad; this.needAn = true; }   // torn down to a smaller building
+        }
+        continue;
+      }
+      if (empty) {                                       // things are fine again: someone moves in
+        if (rnd() < 0.08 + 0.3 * Math.max(0, d)) { this.aband[i] = 0; this.needAn = true; if (z === T.RES) this.events.push({ type: 'moveIn', i, n: POP_CAP[lvl] }); }
+        continue;
+      }
+      if (lvl < MAX_LEVEL && !this.blocker(i, z, lvl) && rnd() < 0.1 * d + 0.02 + (z === T.RES ? Math.max(0, h - 60) / 400 : 0)) grow(lvl + 1);
     }
     this.recount();
     this.updateCut();
@@ -696,14 +844,22 @@ export class Sim {
     const exportK = this.hwRoads > 0 || this.ports > 0 ? 1 : 0.5;   // without the highway or a sea port, industry can't sell its goods
     this.grant = Math.round(Math.max(0, 300 * (1 - this.pop / 1200)));       // regional grant that tapers off as the town grows
     this.tourIncome = Math.round(this.tourists * 3 * (0.6 + this.tax.c / 22));                                   // visitors pay for rooms, meals and tickets
-    const inc = (this.pop * (this.tax.r / 100) * 22 * mood + this.cJobs * (this.tax.c / 100) * 22 * health + (this.iTax ?? this.iJobs) * (this.tax.i / 100) * 22 * health * exportK) * served + this.grant + this.tourIncome;
+    // goods: shops pay more for goods bought from the region (and can't get them at all without the highway or a port);
+    // factories earn a little more selling to local shops
+    const gs = this.goods, shopK = 1 - gs.importShare * (exportK === 1 ? 0.2 : 0.5), localK = 1 + 0.1 * (gs.made > 0 ? gs.local / gs.made : 0);
+    // trade with the neighbouring towns: spare power and water sold, garbage sent away for a fee (needs the highway)
+    const d = this.uDiag || {}, hwOk = this.hwRoads > 0;
+    this.tradeIncome = hwOk ? Math.round((this.trade.power ? (d.pSpare || 0) * TRADE.power : 0) + (this.trade.water ? (d.wSpare || 0) * TRADE.water : 0)) : 0;
+    this.tradeCost = hwOk && this.trade.waste ? Math.round((this.wasteOut || 0) * TRADE.waste) : 0;
+    const base = this.taxBase ?? this.pop;            // well-off residents pay more tax than working-class ones
+    const inc = (base * (this.tax.r / 100) * 22 * mood + this.cJobs * (this.tax.c / 100) * 22 * health * shopK + (this.iTax ?? this.iJobs) * (this.tax.i / 100) * 22 * health * exportK * localK) * served + this.grant + this.tourIncome + this.tradeIncome;
     let wires = 0; for (let i = 0; i < N * N; i++) if (this.w.wire[i]) wires += this.w.wire[i] === 2 ? 0.3 : 0.15;
     let pipes = 0; for (let i = 0; i < N * N; i++) if (this.w.pipe[i]) pipes += 0.1;
     let loanPay = 0;
     for (const l of this.loans) { loanPay += l.pay; l.left--; }
     this.loans = this.loans.filter((l) => l.left > 0);
     const interest = this.money < 0 ? Math.round(-this.money * OVERDRAFT_RATE) : 0;
-    const exp = this.roads * 0.4 + (this.avenues || 0) * 0.6 + (this.bridges || 0) * 1.6 + this.parks * 1 + n.upkeep + wires + pipes + this.ordCost();
+    const exp = this.roads * 0.4 + (this.avenues || 0) * 0.6 + (this.bridges || 0) * 1.6 + this.parks * 1 * ((this.fund.fun ?? 100) / 100) + n.upkeep + wires + pipes + this.ordCost() + this.tradeCost;
     this.lastIncome = Math.round(inc); this.lastExpense = Math.round(exp); this.lastLoanPay = loanPay; this.lastInterest = interest;
     const net = this.lastIncome - this.lastExpense - loanPay - interest;
     this.money += net;
@@ -713,7 +869,71 @@ export class Sim {
     this.updateCut();
     this.events.push({ type: 'month', income: this.lastIncome, expense: this.lastExpense + loanPay + interest });
     this.monthlyRequests();
+    this.monthlyPeople(net);
     this.headline();
+  }
+  // ---- 0.8.6: ages, approval and the yearly election ----
+  monthlyPeople(net) {
+    // ages: children grow up, adults grow old, seniors pass on (later with good health care); newcomers are mostly young
+    const a = { ...this.ages }, hc = this.net.health || 0, pop = this.pop, prev = this.prevPop || pop;
+    const births = a.adults * 0.0016, up = a.kids / 216, old = a.adults / 540, gone = a.seniors / (130 * (1 + hc));
+    a.kids += births - up; a.adults += up - old; a.seniors += old - gone;
+    if (pop > prev && pop > 0) { const f = Math.min(0.5, (pop - prev) / pop); a.kids = a.kids * (1 - f) + 0.3 * f; a.adults = a.adults * (1 - f) + 0.64 * f; a.seniors = a.seniors * (1 - f) + 0.06 * f; }
+    const t = a.kids + a.adults + a.seniors; for (const k in a) a[k] = clamp(a[k] / t, 0.04, 0.9);
+    this.ages = a; this.prevPop = pop;
+    // approval: how residents rate the mayor. Happiness counts most, then jobs and the city's books
+    const unemp = this.workforce > 0 ? Math.max(0, this.workforce - this.cJobs - this.iJobs) / this.workforce : 0;
+    const target = 0.75 * this.happiness + 15 * (1 - Math.min(1, unemp * 4)) + (this.money < 0 ? 0 : net >= 0 ? 10 : 5);
+    this.approval = Math.round(clamp(this.approval * 0.7 + target * 0.3, 0, 100));
+    if (this.taxCap && this.day >= this.taxCap.until) { this.taxCap = null; this.pushNews('The council hands tax decisions back to the mayor'); }
+    // election every January, from the second year on
+    if (this.month === 0 && this.day >= 360 && pop >= 50) {
+      const won = this.approval >= 50, year = this.year;
+      if (won) {
+        const prize = Math.round(500 + pop * 0.8);
+        this.money += prize; this.moods.push({ v: 3, until: this.day + 180 });
+        this.pushNews(`Mayor re-elected with ${this.approval}% approval. The region adds a ${fmt$(prize)} grant`);
+      } else {
+        this.taxCap = { until: this.day + 360, cap: 9 }; this.moods.push({ v: -2, until: this.day + 120 });
+        for (const k of ['r', 'c', 'i']) if (this.tax[k] > 9) this.tax[k] = 9;
+        this.pushNews(`Mayor loses the vote with ${this.approval}% approval. The council caps taxes at 9% for a year`);
+      }
+      this.lastVote = { year, won, approval: this.approval };
+      this.events.push({ type: 'vote', won, approval: this.approval });
+      this.recount();
+    }
+  }
+  nextVote() { const y = Math.max(this.year + 1, 2027); return `Jan ${y}`; }
+  setFund(k, v) { if (!FUND_GROUPS.includes(k)) return; this.fund[k] = clamp(Math.round(v / 10) * 10, 50, 150); this.needAn = true; }
+  setTrade(k, on) { if (!(k in this.trade)) return; this.trade[k] = !!on; this.needAn = true; }
+  // a household in a home: a name, their working day, and what they wish the city had
+  family(i) {
+    const w = this.w, x = i % N, y = (i / N) | 0, l = this.lvl(i);
+    const name = SURNAMES[Math.floor(hash(x, y, 31) * SURNAMES.length) % SURNAMES.length];
+    const size = 2 + Math.floor(hash(x, y, 37) * 4);
+    let best = -1, bd = 99;                          // the nearest workplace, as the crow flies
+    for (let r = 1; r <= 18 && best < 0; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; const xx = x + dx, yy = y + dy; if (!w.inb(xx, yy)) continue;
+      const q = yy * N + xx, k = w.kind[q]; if ((k === T.COM || k === T.IND) && this.lvl(q) && !this.aband[q]) { const dd = Math.hypot(dx, dy); if (dd < bd) { bd = dd; best = q; } }
+    }
+    const job = best < 0 ? null : (() => { const k = w.kind[best], sp = specOf(w, best); return (sp ? SPEC_TITLE[sp][this.lvl(best)] : LEVEL_NAME[k][this.lvl(best)]).toLowerCase(); })();
+    const wishes = [];
+    const c = this.cov;
+    if (c.health[i] < 0.3) wishes.push(['health', 1 - c.health[i]]); if (c.edu[i] < 0.3) wishes.push(['edu', 1 - c.edu[i]]); if (c.police[i] < 0.3) wishes.push(['police', 0.8 - c.police[i]]);
+    if (c.fun[i] < 0.3) wishes.push(['fun', 0.9 - c.fun[i]]); if (c.fire[i] < 0.3) wishes.push(['fire', 0.6 - c.fire[i]]); if (c.transit[i] < 0.2) wishes.push(['transit', 0.4]);
+    if (this.poll[i] > 20) wishes.push(['poll', this.poll[i] / 30]); if (this.crime[i] > 30) wishes.push(['crime', this.crime[i] / 40]); if (this.jam[i] > 0.3) wishes.push(['jam', this.jam[i]]);
+    if (!this.jobReach[i]) wishes.push(['commute', 2]);
+    wishes.sort((p, q) => q[1] - p[1]);
+    const wt = wealthOf(this.landValue(i, T.RES));
+    return { name: `The ${name} family`, size, wealth: WEALTH_NAME[wt], job: job ? `At the ${job}, ${Math.max(1, Math.round(bd))} tiles ${compass(x, y, best % N, (best / N) | 0) || 'away'}` : 'No job nearby', wish: wishes.length ? `Wishes for ${WISH[wishes[0][0]]}` : 'Happy with the neighbourhood', ok: !wishes.length, l };
+  }
+  // why each kind of zone wants (or doesn't want) to grow, in plain words
+  demandWhy() {
+    const jobs = this.cJobs + this.iJobs, pop = this.pop, gs = this.goods, out = {};
+    out.r = this.rd > 0.04 ? (jobs > pop * WORK_SHARE ? 'Jobs are waiting for workers' : 'People like the city') : (jobs < pop * WORK_SHARE ? 'Not enough jobs. Shops and industry need to grow first' : this.happiness < 50 ? 'People aren\u2019t happy here' : 'Taxes are putting people off');
+    out.c = this.cd > 0.04 ? (gs.importShare < 0.3 ? 'Customers want more shops, and local factories supply them' : 'Customers want more shops') : (this.hwRoads === 0 ? 'Shops need the highway' : 'Not enough customers yet. More homes bring more shoppers');
+    out.i = this.id > 0.04 ? (gs.need > gs.made ? 'Shops need more goods' : 'Workers want factory jobs') : (this.hwRoads === 0 && !this.ports ? 'Industry needs the highway or a sea port' : 'Not enough workers yet. More homes bring more workers');
+    return out;
   }
   headline() {
     const bad = this.advice.filter((a) => a.sev !== 'tip');
@@ -733,7 +953,7 @@ export class Sim {
 
   // ---- advisors: plain-language problems, worst first ----
   makeAdvice() {
-    const n = this.net, out = [], add = (who, sev, text, view, news) => out.push({ who, sev, text, view, news });
+    const n = this.net, out = [], add = (who, sev, text, view, news, tile) => out.push({ who, sev, text, view, news, tile });
     const avgTax = (this.tax.r + this.tax.c + this.tax.i) / 3, jobs = this.cJobs + this.iJobs;
     if (this.cut) add('Finance', 'bad', `The city owes the bank ${fmt$(-this.money)}. Closed to save money: ${this.closedList().join(', ')}. Services reopen once the balance is positive again.`, null, 'Residents protest closed services as the city struggles with debt');
     else if (this.lastIncome && this.lastIncome < this.lastExpense + this.lastLoanPay) add('Finance', 'warn', `Last month cost ${fmt$(this.lastExpense + this.lastLoanPay - this.lastIncome)} more than it earned. Raise taxes a little, drop ordinances, or take a loan to cover the gap.`, null, 'City budget slips into the red');
@@ -749,8 +969,32 @@ export class Sim {
     if (n.pDem > n.pSup) add('Utilities', 'bad', `Power demand is ${n.pDem} but plants make ${n.pSup}. Build another plant.`, 'power', 'Brownouts hit the city as power runs short');
     else if (n.unserved > 0.08) add('Utilities', 'warn', `${Math.round(n.unserved * 100)}% of buildings have no power. The power view shows the gaps.`, 'power');
     if (n.wDem > n.wSup) add('Utilities', 'bad', `Water demand is ${n.wDem} but supply is ${n.wSup}. Add a water source and pipes.`, 'water', 'Taps run dry in parts of the city');
+    { // plenty in total but not reaching buildings: say why (uDiag from anNetworks)
+      const u = this.uDiag || {}, list = (a) => (a.length > 2 ? `${a.slice(0, 2).join(', ')} and ${a.length - 2} more` : a.join(' and '));
+      if (u.pLoose && u.pLoose.length) add('Utilities', 'bad', `${list(u.pLoose)} ${u.pLoose.length > 1 ? 'aren\u2019t' : 'isn\u2019t'} touching a power line, so ${u.pLoose.length > 1 ? 'their' : 'its'} power goes nowhere. Run a line next to it.`, 'power');
+      if (u.pShort > 0 && u.pSpare >= u.pShort * 0.5) add('Utilities', 'warn', `Your power lines form separate networks. One has ${Math.round(u.pSpare)} spare while another is short by ${Math.round(u.pShort)}. Join the lines so power can reach everyone.`, 'power');
+      if (u.pNoLine > 2) add('Utilities', 'warn', `${u.pNoLine} buildings are more than 2 tiles from a power line. The power view shows them in red.`, 'power');
+      if (u.wLoose && u.wLoose.length) add('Utilities', 'bad', `${list(u.wLoose)} ${u.wLoose.length > 1 ? 'aren\u2019t' : 'isn\u2019t'} touching a pipe, so ${u.wLoose.length > 1 ? 'their' : 'its'} water goes nowhere. Lay a pipe next to it.`, 'water');
+      if (u.pumpsDark) add('Utilities', 'warn', `${u.pumpsDark === 1 ? 'A water pump has no power and pumps' : u.pumpsDark + ' water pumps have no power and pump'} only 30%. Put a power line next to ${u.pumpsDark === 1 ? 'it' : 'them'}.`, 'power');
+      if (u.wShort > 0 && u.wSpare >= u.wShort * 0.5) add('Utilities', 'warn', `Your pipes form separate networks. One has ${Math.round(u.wSpare)} water spare while another is short by ${Math.round(u.wShort)}. Join the pipes.`, 'water');
+      if (u.wNoPipe > 2) add('Utilities', 'warn', `${u.wNoPipe} buildings are more than 2 tiles from a water pipe. The water view shows them in red.`, 'water');
+      if (u.wOut > 2) add('Utilities', 'warn', `${u.wOut} buildings are out of reach of every landfill and recycling center. Build one closer to them.`, 'waste');
+      else if (u.wFull > 2) add('Utilities', 'warn', `The landfills and recycling centers near ${u.wFull} buildings are full. Build another one close by.`, 'waste');
+    }
     if (n.wasteUn > 0.15) add('Utilities', 'warn', `Garbage isn\u2019t collected from ${Math.round(n.wasteUn * 100)}% of buildings. Build a landfill or recycling center in range.`, 'waste', 'Garbage piles up on city streets');
     if (n.jamAvg > 0.2) add('Transport', 'warn', 'Traffic jams are slowing commutes and lowering land value. Add bus stops and a terminal, or build a second route.', 'traffic', 'Rush hour gridlock frustrates commuters');
+    { // the worst bottlenecks by name (flow.js finds stretches of jammed road), with a button that goes there
+      const necks = (this.flowM.necks || []).filter((b) => b.load > 1.1).slice(0, 2);
+      if (necks.length) {
+        let px = 0, py = 0, pw = 0; for (let q = 0; q < N * N; q++) if (this.w.kind[q] === T.RES && this.w.level[q]) { px += q % N; py += (q / N) | 0; pw++; }
+        const ox = pw ? px / pw : N / 2, oy = pw ? py / pw : N / 2;
+        necks.forEach((b, k) => {
+          const dir = compass(ox, oy, b.cx, b.cy), what = b.kind === 'bridge' ? 'bridge' : b.kind === 'avenue' ? 'avenue' : 'street';
+          const fix = b.kind === 'bridge' ? 'A second bridge nearby would share the load.' : b.kind === 'avenue' ? 'It is already an avenue: build a parallel route, or add buses or a metro so fewer people drive.' : 'Widen it to an avenue, or build a road alongside it.';
+          add('Transport', k ? 'tip' : 'warn', `${k ? 'Next worst' : 'Worst'} bottleneck: ${b.tiles > 15 ? 'a long stretch' : `${b.tiles} tile${b.tiles > 1 ? 's' : ''}`} of ${what}${b.by ? ` by the ${b.by}` : ''}${dir ? `, ${dir} of the town centre` : ' in the town centre'}. At rush hour it carries ${b.trips} trips where ${b.cap} fit. ${fix}`, 'traffic', k ? null : 'Drivers name the city\u2019s worst bottleneck', { x: b.x, y: b.y });
+        });
+      }
+    }
     if (n.crimeAvg > 28 && this.pop > 200) add('Safety', 'warn', 'Crime is rising in busy neighborhoods. Build police stations near homes.', 'crime', 'Break-ins rise downtown');
     if (n.fire < 0.3 && this.pop > 300) add('Safety', 'tip', 'Much of the city has no fire station in range. Fires there spread fast.', 'fire');
     if (n.pollAvg > 22) add('Health', 'warn', 'Pollution is hurting residents. Keep industry away from homes and plant parks between them.', 'pollution', 'Smog alert: residents told to stay indoors');
@@ -759,7 +1003,21 @@ export class Sim {
     if (offices && n.edu < 0.25) add('Education', 'warn', 'Offices and factories can\u2019t grow without educated workers. Build schools near homes.', 'edu');
     if (this.isUnlocked('sky') && !this.hasUni) add('Education', 'tip', 'Office megatowers and hi-tech campuses need a university.', 'edu');
     if (this.happiness < 45) { const worst = this.hapParts.find((p) => p[1] < 0); add('People', 'bad', `Residents are unhappy (${this.happiness}%)${worst ? `. Biggest complaint: ${worst[0].toLowerCase()}` : ''}. Unhappy residents move away.`, null, 'Families pack up and leave town'); }
+    { // buildings held back because only a dirt track reaches them: point at the biggest group
+      const w = this.w, held = [];
+      for (let i = 0; i < N * N; i++) { const k = w.kind[i]; if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i] >= TRACK_MAX && w.level[i] < MAX_LEVEL && !this.fronts(i) && this.zoneDemand(k) > 0.04 && /road next to it/.test(this.blocker(i, k, w.level[i]) || '')) held.push(i); }
+      if (held.length >= 4) {
+        const set = new Set(held); let best = held[0], bn = -1;
+        for (const i of held) { const x = i % N, y = (i / N) | 0; let n = 0; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (set.has((y + dy) * N + x + dx)) n++; if (n > bn) { bn = n; best = i; } }
+        add('Planning', 'tip', `${held.length} buildings could grow taller, but only a dirt track reaches them. A street through the block, next to them, lets them grow. Show on map goes to the biggest group.`, null, null, { x: best % N, y: (best / N) | 0 });
+      }
+    }
     if (this.rd > 0.5) add('Planning', 'tip', 'People want to move here. Zone more homes.');
+    if (this.bld.empty >= 3) add('Planning', this.bld.empty >= 12 ? 'warn' : 'tip', `${this.bld.empty} buildings stand empty. Tap one to see why its people left. They come back once the problem is fixed.`, null, 'Boarded-up buildings worry the neighbours');
+    { const unemp = this.workforce > 0 ? Math.max(0, this.workforce - jobs) / this.workforce : 0;
+      if (unemp > 0.12 && this.pop >= 100) add('Jobs', 'warn', `${Math.round(unemp * 100)}% of workers can\u2019t find a job. Zone shops and industry close to homes.`, 'commute', 'Job centre queues grow as unemployment rises'); }
+    if (this.goods.need > 40 && this.goods.importShare > 0.5) add('Industry', 'tip', `Shops import ${Math.round(this.goods.importShare * 100)}% of their goods, which eats into their profits. More industry would supply them locally.`);
+    if (this.approval < 50 && this.day >= 300) add('Mayor', 'warn', `Approval is ${this.approval}%. Below 50% at the January election, the council caps taxes at 9% for a year. Happier residents, jobs and a healthy budget raise it.`);
     if (this.cd > 0.5) add('Planning', 'tip', 'Shops are in demand. Zone more commercial.');
     if (this.id > 0.5) add('Planning', 'tip', 'Industry wants to expand. Zone more industrial land.');
     const rank = { bad: 0, warn: 1, tip: 2 };
@@ -777,8 +1035,34 @@ export class Sim {
       const fm = this.flowM, ld = fm.load[i], hw = this.roadLinked(i);
       const br = w.terrain[i] === TERRAIN.WATER;
       const av = !br && w.level[i] === 1;
+      const rows = [row('Traffic', `${ld > 1.1 ? 'Jammed' : ld > 0.7 ? 'Busy' : 'Light'}: ${Math.round(fm.flow[i])} of ${fm.capOf(i)} trips`, ld <= 1.1), row('Reaches the highway', yes(hw), hw)];
+      const jt = junctionType(w, x, y);
+      if (jt === SIGNAL) {
+        const s = greenShare(w, x, y), G = CYCLE - 3, gv = Math.round(Math.max(3.5, Math.min(G - 3.5, G * s))), gh = G - gv;
+        rows.push(row('Junction', gv === gh ? `Traffic lights, ${gv} s of green each way` : `Traffic lights: ${Math.max(gv, gh)} s of green for the busier road, ${Math.min(gv, gh)} s for the other`));
+      } else if (jt) rows.push(row('Junction', `Main road ${jt === PRI_V ? '\u2197\u2199' : '\u2196\u2198'}: side roads give way`));
+      let action = null, actions = null;
+      if (jt) {                                           // choose it by hand: lights, or which road goes first
+        const fx = this.jfix[i]; if (fx) rows[rows.length - 1].value += ' (set by you)';
+        actions = [['auto', 'Automatic', !fx], ['sig', 'Lights', fx === SIGNAL], ['v', 'Main \u2197\u2199', fx === PRI_V], ['h', 'Main \u2196\u2198', fx === PRI_H]].map(([id, label, on]) => ({ id: 'jn:' + id, label, on }));
+      }
+      if (hw && !w.hw[i]) {                                                          // where this road's trips come from and go to
+        const pr = fm.probeFor(i), pct = (v) => Math.round((v / pr.total) * 100);
+        if (!pr || (!pr.done && pr.total <= 0)) rows.push(row('Trips', 'Tracing routes\u2026'));
+        else if (pr.total < 0.5) rows.push(row('Trips', 'No regular trips use this road yet'));
+        else {
+          const why = [['work', pr.why[0]], ['shops', pr.why[1]], ['lorries', pr.why[2]]].filter((p) => pct(p[1]) >= 1).map((p) => `${p[0]} ${pct(p[1])}%`);
+          const where = (arr) => {
+            let n = 0, best = -1; for (let d = 0; d < arr.length; d++) { if (arr[d] / pr.total >= 0.05) n++; if (best < 0 || arr[d] > arr[best]) best = d; }
+            const bx = (best % DISTRICTS) * DISTRICT + DISTRICT / 2, by = ((best / DISTRICTS) | 0) * DISTRICT + DISTRICT / 2, dir = compass(x, y, bx, by), far = Math.round(Math.hypot(bx - x, by - y));
+            return `${Math.max(1, n)} area${n > 1 ? 's' : ''}; most ${dir ? `${far} tiles ${dir}` : 'close by'} (${pct(arr[best])}%)`;
+          };
+          rows.push(row('Trips for', why.join(' \u00b7 ')), row('Coming from', where(pr.from)), row('Going to', where(pr.to)));
+          action = { id: 'trips', label: 'Show trips on map', hint: 'Blue: where these trips start. Orange: where they go.' };
+        }
+      }
       return { x, y, w: 1, d: 1, title: w.hw[i] ? 'Highway' : br ? 'Bridge' : av ? 'Avenue' : 'Road', sub: w.hw[i] ? 'Links the city to the region' : br ? 'Upkeep $2/month' : av ? 'Carries twice the traffic of a street. Upkeep $1/month' : 'Upkeep $0.40/month. Pick Avenue and drag over it to widen it',
-        rows: [row('Traffic', `${ld > 1.1 ? 'Jammed' : ld > 0.7 ? 'Busy' : 'Light'}: ${Math.round(fm.flow[i])} of ${fm.capOf(i)} trips`, ld <= 1.1), row('Reaches the highway', yes(hw), hw)] };
+        rows, action, actions };
     }
     if (k === T.SVC) {
       const ax = x - (w.bo[i] & 3), ay = y - (w.bo[i] >> 2), a = w.idx(ax, ay), def = BT[w.bt[i]], shut = this.closed(def), building = this.pending.has(a);
@@ -803,6 +1087,7 @@ export class Sim {
         row('Water', yes(this.wt[i]), !!this.wt[i]),
         row('Garbage collected', l < 2 && !this.ts[i] ? 'Not needed yet' : yes(this.ts[i]), l < 2 && !this.ts[i] ? null : !!this.ts[i]),
         row('Reaches the highway', yes(this.hwNet[i]), !!this.hwNet[i]),
+        ...(l ? [row('Access', this.fronts(i) ? 'On a road' : this.trackLot[i] ? `Dirt track, grows to level ${TRACK_MAX}` : `No road next to it, grows to level ${TRACK_MAX}`, this.fronts(i) ? true : l >= TRACK_MAX ? false : null)] : []),
         row(res ? 'Jobs within reach' : 'Workers within reach', reach ? (c < 1 ? 'Yes, right nearby' : c < 255 ? `Yes, ${Math.round(c)} tiles away` : 'Yes') : 'No', !!reach),
         row('Land value', l < MAX_LEVEL ? `${lv} / ${LEVEL_LV[Math.max(1, l)]}` : lv, l >= MAX_LEVEL || lv >= LEVEL_LV[Math.max(1, l)]),
         row('Demand', this.zoneDemand(k) > 0.04 ? 'High' : this.zoneDemand(k) > -0.05 ? 'Steady' : 'Low', this.zoneDemand(k) > -0.05),
@@ -814,10 +1099,17 @@ export class Sim {
       const shr = w.shore[i], wf = shr ? `Waterfront (${SHORE_NAME[shr].toLowerCase()})` : '';
       if (shr) rows.splice(5, 0, row('Waterfront', `${SHORE_NAME[shr]}, +${WF_LV[shr]} land value`, true));
       if (k === T.IND && shr >= 2) { const sl = this.seaLink[i]; rows.splice(6, 0, row('Ships to the sea', sl === 1 ? 'Yes, goods ship out by sea' : sl === 2 ? 'No, a bridge blocks the way' : 'No, inland water (barges only)', sl === 1 ? true : sl === 2 ? false : null)); }
+      if (l && !building) {
+        const emp = this.aband[i];
+        if (emp) rows.unshift(row('Status', `Standing empty: ${ABANDON_WHY[emp]}`, false));
+        if (res && !emp) { const f = this.family(i); rows.unshift(row('Neighbours', `${f.name} \u00b7 ${f.wealth}`), row('Work', f.job, f.job !== 'No job nearby'), row('Their wish', f.wish, f.ok)); }
+        if (k === T.COM && !emp) { const gs = this.goods; rows.push(row('Goods on the shelves', gs.need <= 0 ? 'Local' : gs.importShare < 0.05 ? 'All from local factories' : gs.importShare > 0.95 ? (this.hwRoads ? 'All imported from the region' : 'Hard to get (no highway)') : `${Math.round((1 - gs.importShare) * 100)}% local, the rest imported`, gs.importShare < 0.5)); }
+        if (k === T.IND && !emp) { const gs = this.goods; rows.push(row('Goods go to', gs.made <= 0 ? 'Nowhere yet' : gs.local >= gs.made * 0.95 ? 'Local shops' : gs.local <= gs.made * 0.05 ? 'The region' : `Local shops (${Math.round((gs.local / gs.made) * 100)}%) and the region`, true)); }
+      }
       const spc = specOf(w, i);
       if (spc) rows.splice(0, 0, row('Industry type', ['', 'Farm: few jobs, little pollution', 'Forestry: some pollution', 'Tech: many jobs, clean, high tax'][spc], true));
       const title = l ? (spc ? SPEC_TITLE[spc][l] : shr ? WF_NAME[shr][k][l] : LEVEL_NAME[k][l]) : `${ZONE_NAME[k]} zone (empty lot)`;
-      const sub = l ? `${wf ? wf + '  \u00b7  ' : ''}Level ${l} of ${MAX_LEVEL}  \u00b7  ${cap} ${res ? 'residents' : 'jobs'}` : wf ? `${wf}: waiting for someone to build here` : 'Waiting for someone to build here';
+      const sub = l ? `${wf ? wf + '  \u00b7  ' : ''}Level ${l} of ${MAX_LEVEL}  \u00b7  ${this.aband[i] && !building ? `empty (room for ${cap} ${res ? 'residents' : 'jobs'})` : `${cap} ${res ? 'residents' : 'jobs'}`}` : wf ? `${wf}: waiting for someone to build here` : 'Waiting for someone to build here';
       return { x, y, w: 1, d: 1, title, sub, rows, why: why || (l >= MAX_LEVEL ? 'Fully grown' : l ? 'Ready to grow' : 'Ready to build'), good: !why };
     }
     const shrO = w.shore[i];
@@ -826,7 +1118,7 @@ export class Sim {
   roadLinked(i) { const c = this.roadComp[i]; return c >= 0 && !!this.hwRoadComp && this.hwRoadComp.has(c); }
 
   // ---- player actions ----
-  spend(c, force) { if (!force && this.money < c) return false; this.money -= c; return true; }
+  spend(c, force) { if (this.sandbox) return true; if (!force && this.money < c) return false; this.money -= c; return true; }
   noMoney() { return this.money < 0 ? 'The city is in debt. Nothing new can be built' : 'Not enough money'; }
   canPlaceBuilding(key, x, y) {
     const def = BY_KEY[key], w = this.w;

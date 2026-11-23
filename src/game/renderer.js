@@ -3,11 +3,13 @@ import { N, T, TERRAIN } from './world.js';
 import { SVC_FLAGS, getSeason, spriteBudget, buildingSprite, parkSprite, zoneSprite, terrainSprite, treeSprite, roadSprite, serviceSprite, mip, bridgeUnder, bridgeTop } from './sprites.js';
 import { tint } from './util.js';
 import { BT } from './buildings.js';
-import { REAL_H, SVC_H } from './construction.js';
-import { drawConstruction } from './construction.js';
+import { drawConstruction, siteBox } from './construction.js';
 import { drawSmoke, SMOKE } from './smoke.js';
 import { WF_SMOKE } from './waterfront.js';
-import { isSignal, light } from './traffic.js';
+import { junctionType, light, greenShare, SIGNAL, PRI_V } from './traffic.js';
+import { DISTRICT, DISTRICTS } from './flow.js';
+import { CityCache, FAR } from './citycache.js';
+import { junctionType as jType } from './traffic.js';
 import { createContext, touched } from './gl2d.js';
 // Which vertical strips of a w x d building picture belong to which of its tiles: each half-tile column goes to the
 // frontmost footprint tile it crosses; the picture's side margins go to the outermost columns. Cached per size.
@@ -106,8 +108,12 @@ export class Renderer {
   // so the land tiles cover whatever doesn't fall on water. Rippled and faded by the GPU shader.
   reflections(ctx, g, w, z, cx, cy, mode, lvl, top, mX) {
     const W = this.W, H = this.H, a = mode === 2 ? 0.5 : mode === 1 ? 0.4 : 0.36, tint = mode === 2 ? [0.85, 0.9, 1] : mode === 1 ? [1, 0.86, 0.78] : [0.8, 0.9, 1];
-    for (let s = 0; s < 2 * N - 1; s++) for (let x = Math.max(0, s - N + 1); x <= Math.min(s, N - 1); x++) {
-      const y = s - x, i = y * N + x; if (!w.shore[i]) continue;
+    if (this.reflFor !== w || !this.reflList || performance.now() - this.reflT > 3000) {   // the waterfront lots, in painter order (not every tile every frame)
+      this.reflFor = w; this.reflT = performance.now(); const L = this.reflList = [];
+      for (let s = 0; s < 2 * N - 1; s++) for (let x = Math.max(0, s - N + 1); x <= Math.min(s, N - 1); x++) { const i = (s - x) * N + x; if (w.shore[i]) L.push(i); }
+    }
+    for (const i of this.reflList) {
+      const x = i % N, y = (i / N) | 0;
       const X = (x - y) * 32 * z + cx, Y = (x + y) * 16 * z + cy;
       if (X < -mX * 3 || X > W + mX * 3 || Y < top || Y > H + 200 * z) continue;
       const k = w.kind[i]; let sp = null;
@@ -150,56 +156,93 @@ export class Renderer {
     }
     this.drawWater(ctx, w, z, cx, cy, t, mode);
     if (ctx.gpu && !g.fast && zd >= 0.5) this.reflections(ctx, g, w, z, cx, cy, mode, lvl, top, mX);   // land drawn next hides what isn't over water
+    // far out: the whole city is one cached picture (citycache.js); nearer, the ground alone is cached
+    let farOk = false;
+    if (zd <= FAR && !g.overlay && !this.noCity) { this.city = this.city || new CityCache(this); farOk = this.city.update(g, mode); }
+    const groundPass = () => {
     if (zd <= 0.7 && this.updateGround(w, mode)) this.drawGroundCache(ctx, z, cx, cy, zd);   // zoomed out: the whole ground is one cached image
     else for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       const X = sx(x, y), Y = sy(x, y);
       if (X < -mX || X > W + mX || Y < -34 * z || Y > H) continue;
       this.groundTile(ctx, w, x, y, X, Y, z, mode, lvl);
       if (this.wet > 0.03 && w.kind[y * N + x] === T.ROAD && w.terrain[y * N + x] !== TERRAIN.WATER) { ctx.globalAlpha = this.wet; ctx.drawImage(this.wetSprite(mode), X - 32 * z, Y, 64 * z, 32 * z); ctx.globalAlpha = 1; }
+      const zb = this.zebra ? this.zebra[y * N + x] : 0;
+      if (zb) for (let s2 = 0; s2 < 4; s2++) if (zb & (1 << s2)) ctx.drawImage(this.zebraSprite(s2, mode), X - 32 * z, Y, 64 * z, 32 * z);
     }
-    this.shadowLayer(ctx, g, w, z, cx, cy, mode, W, H, top);       // every building's shadow, cast across roads and open ground by the sun
+    };
+    if (!farOk && zd > 0.7) this.zebraScan(g, w);
+    // Still view (0.8.3): when the camera hasn't moved for a few frames, the ground and everything that doesn't move are
+    // drawn once into a screen-sized layer and shown from there every frame; only moving things (cars, people, ships,
+    // building sites, traffic lights, fires, flags) are drawn live, each followed by whatever stands in front of it.
+    // The layer is redrawn when anything in view changes (see viewSig). Moving the map uses the normal drawing.
+    let layer = false, rebuild = false;
+    if (!farOk && ctx.layerBegin && this.stillF > 6 && !g.preview && !this.noLayer) {
+      const key = this.viewSig(g, w, z, cx, cy, mode, zd, hi, lvl, W, H, top, mX);
+      layer = true;
+      // A busy city changes something in view every few frames (a building grows, a badge, a traffic pass), and each
+      // change meant redrawing the whole layer, so the layer saved nothing when the most was happening. Since 0.8.7 a
+      // change in the city is taken up at most every half second; the camera, the light or your own building and
+      // bulldozing still redraw it at once.
+      const hs = g.history, now = performance.now();
+      const vk = `${cx | 0},${cy | 0},${z},${mode},${getSeason()},${g.fast ? 1 : 0},${W},${H},${this.dpr},${hi ? 1 : 0},${lvl},${w.seed},${hs.length ? hs[hs.length - 1].t : 0},${g.overlay || ''}`;
+      const urgent = vk !== this.layerVK || !this.layerKey, due = this.stillF - (this.layerF || 0) >= 15 && now - (this.layerAt || 0) > 400;
+      if ((key !== this.layerKey && (urgent || due)) || (this.layerMiss && this.stillF % 12 === 0)) { rebuild = true; this.layerKey = key; this.layerVK = vk; this.layerAt = now; this.layerF = this.stillF; }
+    }
+    if (!farOk && !layer) groundPass();
+    if (!farOk && z >= 0.5 && !g.fast) this.waves(ctx, w, z, cx, cy, t, mode);
     // life on the water, then the objects pass in painter order
     this.boats(ctx, g, z, cx, cy, t, mode);
+    if (farOk) this.city.draw(ctx, z, cx, cy);
     const badges = [], smokeList = [], neon = [], wind = 0.7 + 0.5 * Math.sin(t * 0.07);
     // vehicles and people sorted into their tiles with two reusable arrays (no new lists or maps every frame)
     const cars = this.carsL || (this.carsL = []); cars.length = 0;
-    for (const Lst of [g.traffic.cars, g.agents.drivers, g.transit.buses, g.movers.vans, g.people, g.garbage.trucks, g.disasters.responders]) for (let jx = 0; jx < Lst.length; jx++) cars.push(Lst[jx]);
+    for (const Lst of [g.traffic.cars, g.agents.drivers, g.transit.buses, g.movers.vans, g.people, g.garbage.trucks, g.disasters.responders, g.life ? g.life.people : []]) for (let jx = 0; jx < Lst.length; jx++) cars.push(Lst[jx]);
     const bh = this.bHead || (this.bHead = new Int32Array(N * N).fill(-1)); if (!this.bNext || this.bNext.length < cars.length) this.bNext = new Int32Array(cars.length * 2 + 64); const bn = this.bNext, bt = this.bTouched || (this.bTouched = []);
     for (const q of bt) bh[q] = -1; bt.length = 0;
     for (let jx = cars.length - 1; jx >= 0; jx--) { const c = cars[jx], key = Math.max(0, Math.min(N - 1, Math.floor(c.py))) * N + Math.max(0, Math.min(N - 1, Math.floor(c.px))); if (bh[key] < 0) bt.push(key); bn[jx] = bh[key]; bh[key] = jx; }
     const shipB = new Map();                         // harbor ships are big, so they go in painter order with the buildings
     if (g.ships) for (const sh of g.ships.list) { const key = Math.max(0, Math.min(N - 1, Math.floor(sh.y))) * N + Math.max(0, Math.min(N - 1, Math.floor(sh.x))); (shipB.get(key) || shipB.set(key, []).get(key)).push(sh); }
 
-    for (let s = 0; s < 2 * N - 1; s++) {
-      const Yd = s * 16 * z + cy; if (Yd < top || Yd > H + 60 * z) continue;            // the whole diagonal is off screen
+    const L = rebuild;                               // building the layer: draw only what stands still, note what moves
+    const live = L ? (this.layerLive = new Map()) : null, addLive = (i, item) => { (live.get(i) || live.set(i, []).get(i)).push(item); };
+    if (L) this.layerMiss = false;
+    const objectPass = () => { for (let s = 0; s < 2 * N - 1; s++) {
+      const Yd = s * 16 * z + cy; if (Yd < top || Yd > H + 360 * z) continue;           // the whole diagonal is off screen (tall buildings below the edge still reach up into it)
       const xa = Math.max(Math.max(0, s - N + 1), Math.floor((s + (-mX * 3 - cx) / (32 * z)) / 2)), xb = Math.min(Math.min(s, N - 1), Math.ceil((s + (W + mX * 3 - cx) / (32 * z)) / 2));
       for (let x = xa; x <= xb; x++) {
         const y = s - x, X = sx(x, y), Y = sy(x, y);
-        if (X < -mX * 3 || X > W + mX * 3 || Y < top || Y > H + 60 * z) continue;
+        if (X < -mX * 3 || X > W + mX * 3 || Y < top) continue;
         const i = y * N + x, k = w.kind[i];
+        if (Y > H + 60 * z) {                              // 0.8.7: standing below the bottom edge, only a tall building's upper part can show
+          this.lowTall(g, w, ctx, x, y, X, Y, z, mode, lvl, hi, sx, sy, H);
+          continue;
+        }
         if (k === T.EMPTY && w.tree[i]) {
           const sp = mip(treeSprite(w.tree[i], mode), lvl), rainK = g.ambient.weather.k, sw = z < 0.6 ? 0 : Math.sin(t * (1.3 + rainK * 1.2) + x * 0.7 + y * 1.3) * (0.022 + rainK * 0.03) * (0.6 + wind * 0.5);
-          if (!sp) { /* picture not made yet (see spriteBudget): it appears in a frame or two */ }
-          else if (z >= 0.6) { ctx.save(); ctx.translate(X, Y + 16 * z); ctx.rotate(sw); ctx.drawImage(sp.c, -sp.ox * z, -sp.oy * z - 16 * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); ctx.restore(); }
+          if (!sp) { this.layerMiss = true; }
+          else if (z >= 0.6 && !L) { ctx.save(); ctx.translate(X, Y + 16 * z); ctx.rotate(sw); ctx.drawImage(sp.c, -sp.ox * z, -sp.oy * z - 16 * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); ctx.restore(); }
           else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);   // too small to see the sway
         }
-        else if (k === T.PARK) { const sp = mip(parkSprite(w.variant[i] % 4, mode), lvl), site = g.sites.get(i); if (!sp) { /* next frame */ } else if (site) drawConstruction(ctx, site, X, Y, z, mode, t, sp, null); else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
+        else if (k === T.PARK) { const sp = mip(parkSprite(w.variant[i] % 4, mode), lvl), site = g.sites.get(i); if (!sp) { this.layerMiss = true; } else if (site && L) addLive(i, 'site'); else if (site) drawConstruction(ctx, site, X, Y, z, mode, t, sp, null); else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); }
         else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) {
-          const shr = w.shore[i], sp = mip(buildingSprite(k, w.level[i], (w.variant[i] & 63), mode, g.sim.pw[i] === 1 && (mode !== 2 || hash(x, y, 17) < this.litFrac), shr, hi), lvl);
+          const emp = g.sim.aband[i];                       // standing empty (0.8.6): dark windows, no smoke or signs, a boarded-up badge
+          const shr = w.shore[i], sp = mip(buildingSprite(k, w.level[i], (w.variant[i] & 63), mode, !emp && g.sim.pw[i] === 1 && (mode !== 2 || hash(x, y, 17) < this.litFrac), shr, hi), lvl);
           const site = g.sites.get(i), lv = w.level[i];
-          if (mode === 2 && ctx.gpu && !g.fast && g.sim.pw[i] === 1 && !site) {
+          if (mode === 2 && ctx.gpu && !g.fast && g.sim.pw[i] === 1 && !site && !emp) {
             const r = (40 + lv * 10) * z; ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.2 + lv * 0.03;
             ctx.drawImage(this.poolSprite(), X - r, Y + 16 * z - r * 0.5, r * 2, r); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
           }
-          if (!sp) { /* picture not made yet: it appears in a frame or two */ }
+          if (!sp) { this.layerMiss = true; }
+          else if (site && L) addLive(i, 'site');
           else if (site) { const so = site.from > 0 ? mip(buildingSprite(k, site.from, (site.pv & 63), mode, g.sim.pw[i] === 1, shr), lvl) : null; drawConstruction(ctx, site, X, Y, z, mode, t, sp, so); }
           else ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
-          if (!site) {
+          if (!site && !emp) {
             const sm = shr ? WF_SMOKE[`${shr}${k}${lv}`] : SMOKE[`${k}${lv}`];
             if (sm && (k !== T.IND || g.sim.pw[i]) && (k !== T.RES || ((mode >= 1 || getSeason() === 2) && hash(x, y, 9) > 0.35))) smokeList.push([sm, X, Y, hash(x, y, 4)]);
             if (k === T.COM && mode === 2 && g.sim.pw[i]) neon.push([X, Y + 16 * z, lv, x, y]);
           }
           if (site) { /* no status badges while building */ }
+          else if (emp) badges.push([X, Y + 16 * z - BADGE_H[lv] * z, 'empty']);
           else if (!g.sim.pw[i]) badges.push([X, Y + 16 * z - BADGE_H[lv] * z, 'bolt']);
           else if (!g.sim.wt[i]) badges.push([X, Y + 16 * z - BADGE_H[lv] * z, 'drop']);
           else if (lv >= 2 && !g.sim.ts[i]) badges.push([X, Y + 16 * z - BADGE_H[lv] * z, 'trash']);
@@ -209,17 +252,19 @@ export class Renderer {
           // in front (a warehouse beside a landfill, say) covers it instead of the whole picture being painted over the neighbour.
           if (multi && !g.sites.has((y - dy) * N + (x - dx))) {
             const ax = x - dx, ay = y - dy, sp = mip(serviceSprite(bt, mode, def.power ? true : g.sim.pw[ay * N + ax] === 1, def.reach ? w.variant[ay * N + ax] : 0, hi), lvl);
-            if (sp) this.slices(ctx, sp, sx(ax, ay), sy(ax, ay), z, sliceOf(def.w, def.d)[dy * def.w + dx]);
+            if (sp) this.slices(ctx, sp, sx(ax, ay), sy(ax, ay), z, sliceOf(def.w, def.d)[dy * def.w + dx]); else this.layerMiss = true;
           }
           if (last) {
             const ax = x - dx, ay = y - dy, AX = sx(ax, ay), AY = sy(ax, ay), sp = mip(serviceSprite(bt, mode, def.power ? true : g.sim.pw[ay * N + ax] === 1, def.reach ? w.variant[ay * N + ax] : 0, hi), lvl);
             const site = g.sites.get(ay * N + ax);
-            if (!sp) { /* next frame */ }
+            if (!sp) { this.layerMiss = true; }
+            else if (site && L) addLive(i, 'site');
             else if (site) drawConstruction(ctx, site, AX, AY, z, mode, t, sp, null);
             else if (!multi) ctx.drawImage(sp.c, AX - sp.ox * z, AY - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
             if (!site) { const sm = SMOKE['s' + bt]; if (sm && (def.power || bt === 16 || g.sim.pw[ay * N + ax] === 1)) smokeList.push([sm, AX, AY, hash(ax, ay, 4)]); }
-            if (!site && SVC_FLAGS[bt] && z >= 0.4) for (const f of SVC_FLAGS[bt]) this.flag(ctx, sx(ax + f[0], ay + f[1]), sy(ax + f[0], ay + f[1], f[2]), z, t, mode, f[3], g.fast, hash(ax, ay, f[0] * 7));
-            if (bt === 2 && (!site || site.t / site.dur > 0.93)) this.blades(ctx, sx(ax + 0.5, ay + 0.5), sy(ax + 0.5, ay + 0.5, 74), z, t, mode);
+            if (L && ((!site && SVC_FLAGS[bt] && z >= 0.4) || bt === 2)) addLive(i, 'svcLive');
+            else if (!site && SVC_FLAGS[bt] && z >= 0.4) for (const f of SVC_FLAGS[bt]) this.flag(ctx, sx(ax + f[0], ay + f[1]), sy(ax + f[0], ay + f[1], f[2]), z, t, mode, f[3], g.fast, hash(ax, ay, f[0] * 7));
+            if (!L && bt === 2 && (!site || site.t / site.dur > 0.93)) this.blades(ctx, sx(ax + 0.5, ay + 0.5), sy(ax + 0.5, ay + 0.5, 74), z, t, mode);
             if (!site && g.sim.closed(def)) badges.push([sx(ax + def.w / 2, ay + def.d / 2), sy(ax + def.w / 2, ay + def.d / 2, 66), 'closed']);
             else if (!site && def.use && !g.sim.pw[ay * N + ax]) badges.push([sx(ax + def.w / 2, ay + def.d / 2), sy(ax + def.w / 2, ay + def.d / 2, 66), 'bolt']);
           }
@@ -232,22 +277,40 @@ export class Renderer {
           ctx.fillStyle = '#fff2b8'; ctx.beginPath(); ctx.arc(X, Y + 16 * z - 17 * z, 2 * z, 0, 6.3); ctx.fill();
         }
         if (z >= 0.5 && k === T.ROAD && !w.hw[i] && w.terrain[i] !== TERRAIN.WATER) this.street(ctx, w, x, y, X, Y, z, mode, lvl);
-        if (z >= 0.5 && k === T.ROAD && isSignal(w, x, y)) this.signal(ctx, x, y, X, Y, z, g.clock, mode);
+        if (z >= 0.5 && k === T.ROAD) {                                     // lights where busy roads meet, give-way lines elsewhere
+          const jt = junctionType(w, x, y);
+          if (jt === SIGNAL) { if (L) addLive(i, 'sig'); else this.signal(ctx, x, y, X, Y, z, g.clock, mode, greenShare(w, x, y)); }
+          else if (jt) { const m = w.roadMask(x, y); this.giveWay(ctx, X, Y, z, mode, jt === PRI_V ? m & 10 : m & 5); }
+        }
         if (k === T.ROAD && w.edgeOpen(x, y)) this.highwaySign(ctx, X, Y, z, mode);
+        if (z >= 0.45) {                                   // dirt tracks along this tile's front sides (they belong to the tile behind them)
+          const sm = g.sim, M = N + 1;
+          if (sm.trackX[(y + 1) * M + x]) { const sp = this.trackSprite(0, mode, this.wet > 0.3); ctx.drawImage(sp, X - 32 * z, Y, 64 * z, 32 * z); }
+          if (sm.trackY[y * M + x + 1]) { const sp = this.trackSprite(1, mode, this.wet > 0.3); ctx.drawImage(sp, X - 32 * z, Y, 64 * z, 32 * z); }
+        }
         const rub = g.disasters.rubble.get(i);
         if (rub !== undefined && (k === T.EMPTY || (k >= 2 && k <= 4 && !w.level[i]))) this.rubble(ctx, i, X, Y, z, rub, mode);
         const fire = g.disasters.fires.get(i);
-        if (fire) this.fire(ctx, fire, X, Y, z, t, mode, k === T.SVC ? 56 : [30, 54, 94, 180][Math.max(0, w.level[i] - 1)] || 40);
+        if (fire && !L) this.fire(ctx, fire, X, Y, z, t, mode, k === T.SVC ? 56 : [30, 54, 94, 180][Math.max(0, w.level[i] - 1)] || 40);
         if (z >= 0.5 && w.pipe[i] && (x + y) % 3 === 0 && !w.tree[i] && (k === T.EMPTY || k === T.ROAD || k === T.PARK)) this.manhole(ctx, X, Y, z, mode);
         if (z >= 0.45 && w.wire[i] === 1) this.pole(ctx, w, x, y, X, Y, z, mode);
         const sb = shipB.size ? shipB.get(i) : null;
-        if (sb) for (const sh of sb) this.ship(ctx, sh, w, z, cx, cy, t, mode);
-        for (let jj = bh[y * N + x]; jj >= 0; jj = bn[jj]) { const c = cars[jj]; if (c.ped) { if (z >= 0.5) this.person(ctx, c, z, cx, cy, mode, t); } else if (c.truck) this.truck(ctx, c, z, cx, cy, mode, t); else if (c.bus) this.bus(ctx, c, z, cx, cy, mode); else this.car(ctx, c, z, cx, cy, mode); }
+        if (sb && !L) for (const sh of sb) this.ship(ctx, sh, w, z, cx, cy, t, mode);
+        if (!L) for (let jj = bh[y * N + x]; jj >= 0; jj = bn[jj]) { const c = cars[jj]; if (c.ped) { if (z >= 0.5) this.person(ctx, c, z, cx, cy, mode, t); } else if (c.truck) this.truck(ctx, c, z, cx, cy, mode, t); else if (c.bus) this.bus(ctx, c, z, cx, cy, mode); else this.car(ctx, c, z, cx, cy, mode); }
       }
-    }
+    } };
+    if (farOk) this.farLive(g, w, ctx, z, cx, cy, t, mode, lvl, badges, cars, bh, bn, shipB, top);
+    else if (layer) {
+      if (rebuild && ctx.layerBegin()) {
+        groundPass(); objectPass(); ctx.layerEnd();
+        this.layerLists = { badges: badges.slice(), smoke: smokeList.slice(), neon: neon.slice() };
+      } else if (rebuild) { this.layerKey = null; }
+      ctx.drawLayer();
+      const LL = this.layerLists; if (LL && !rebuild) { for (const b of LL.badges) badges.push(b); for (const m of LL.smoke) smokeList.push(m); for (const n of LL.neon) neon.push(n); }
+      this.liveLayer(g, w, ctx, z, cx, cy, t, mode, lvl, hi, cars, bh, bn, bt, shipB, sx, sy);
+    } else objectPass();
     if (z >= 0.35) for (const [list, X, Y, seed] of smokeList) drawSmoke(ctx, list, X, Y, z, t, mode, seed, wind);
     if (neon.length) this.neon(ctx, neon, z, t);
-    this.clouds(ctx, g, z, cx, cy, t, mode);
     if (z >= 0.4) this.birds(ctx, g, z, cx, cy, t, mode);
     if (z >= 0.45 && !g.fast && g.ships) this.gulls(ctx, g, z, cx, cy, t, mode);
     if (g.disasters.tornado) this.tornado(ctx, g.disasters.tornado, z, cx, cy, t, mode);
@@ -265,15 +328,24 @@ export class Renderer {
       }
     }
     this.weather(ctx, g, t, mode);
-    if (!g.fast) this.grade(ctx, mode);
+    if (!g.fast) { this.mist(ctx, g, w, z, cx, cy, t); this.grade(ctx, mode, g); }
     this.vignette(ctx, mode);
-    if (still) this.warm(g, w, mode, lvl, z);
+    { // the water for the coming light, a few rows a frame, so it switches together with the land instead of a moment later
+      const nl = g.nextLight && g.nextLight();
+      if (nl && nl.in < 20 && nl.mode !== mode && this.wtex && this.wtex[mode] && !this.wtex[nl.mode] && this.waterRegions && this.waterRegions.length) this.waterTex(nl.mode);
+    }
+    if (still || this.stillF > 3) {                     // get pictures ready; shortly before the light changes, for the coming light
+      const nl = g.nextLight && g.nextLight();
+      if (nl && nl.in < 24 && nl.mode !== mode && this.warmDone === `${mode},${lvl}`) this.warm(g, w, nl.mode, lvl, z, true);
+      else if (still) this.warm(g, w, mode, lvl, z);
+    }
     if (ctx.end) ctx.end();
   }
   // While the map is still, get the pictures around the view ready (made and sent to the GPU) a few at a time,
   // so that dragging the map later shows them at once instead of making them mid-drag.
-  warm(g, w, mode, lvl, z) {
+  warm(g, w, mode, lvl, z, ahead) {
     const t0 = performance.now(), W = this.W, H = this.H, cx = g.cam.x, cy = g.cam.y, ctx = this.ctx;
+    if (ahead) spriteBudget.left = Math.max(spriteBudget.left, 4);      // the coming light: a few pictures every frame
     const inv = (X, Y) => { const u = (X - cx) / (32 * z), v = (Y - cy) / (16 * z); return [(u + v) / 2, (v - u) / 2]; };
     const cs = [inv(-W * 0.6, -H * 0.6), inv(W * 1.6, -H * 0.6), inv(-W * 0.6, H * 1.6), inv(W * 1.6, H * 1.6)];
     const x0 = Math.max(0, Math.floor(Math.min(...cs.map((c) => c[0])))), x1 = Math.min(N - 1, Math.ceil(Math.max(...cs.map((c) => c[0]))));
@@ -281,31 +353,273 @@ export class Renderer {
     const span = (x1 - x0 + 1) * (y1 - y0 + 1); if (span <= 0) return;
     const key = `${x0},${y0},${x1},${y1},${mode},${lvl}`;
     if (key !== this.warmKey) { this.warmKey = key; this.warmI = 0; }
+    if (this.warmI >= span) { if (!ahead) this.warmDone = `${mode},${lvl}`; return; }
     const send = (sp) => { if (sp && ctx.entry && ctx.canWarm()) ctx.entry(sp.c); };
     while (this.warmI < span && performance.now() - t0 < 1.5 && spriteBudget.left > 0) {
       const x = x0 + (this.warmI % (x1 - x0 + 1)), y = y0 + Math.floor(this.warmI / (x1 - x0 + 1)); this.warmI++;
       const i = y * N + x, k = w.kind[i];
       if (k === T.EMPTY && w.tree[i]) send(mip(treeSprite(w.tree[i], mode), lvl));
       else if (k === T.PARK) send(mip(parkSprite(w.variant[i] % 4, mode), lvl));
-      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) send(mip(buildingSprite(k, w.level[i], (w.variant[i] & 63), mode, g.sim.pw[i] === 1, w.shore[i]), lvl));
+      else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) { send(mip(buildingSprite(k, w.level[i], (w.variant[i] & 63), mode, g.sim.pw[i] === 1, w.shore[i]), lvl)); if (mode === 2 && ahead) send(mip(buildingSprite(k, w.level[i], (w.variant[i] & 63), mode, false, w.shore[i]), lvl)); }   // at night both the lit and the dark picture
       else if (k === T.SVC && w.bo[i] === 0) { const def = BT[w.bt[i]]; send(mip(serviceSprite(w.bt[i], mode, def.power ? true : g.sim.pw[i] === 1, def.reach ? w.variant[i] : 0), lvl)); }
     }
   }
-  // Color grading: aerial haze toward the far (upper) part of the view and a soft sunlight wash.
-  grade(ctx, mode) {
+  // Everything the still layer depends on, as one string: the view, the light, and every tile in view that can look
+  // different (its lot, building, look, tree, power and water, garbage, lit windows at night, building site, rubble).
+  viewSig(g, w, z, cx, cy, mode, zd, hi, lvl, W, H, top, mX) {
+    const sim = g.sim, lf = this.litFrac;
+    let h = 0;
+    for (let s = 0; s < 2 * N - 1; s++) {
+      const Yd = s * 16 * z + cy; if (Yd < top || Yd > H + 360 * z) continue;
+      const xa = Math.max(Math.max(0, s - N + 1), Math.floor((s + (-mX * 3 - cx) / (32 * z)) / 2)), xb = Math.min(Math.min(s, N - 1), Math.ceil((s + (W + mX * 3 - cx) / (32 * z)) / 2));
+      for (let x = xa; x <= xb; x++) {
+        const y = s - x, i = y * N + x, k = w.kind[i];
+        let v = k + (w.level[i] << 3) + ((w.variant[i] & 63) << 6) + (w.tree[i] << 12) + (w.bt[i] << 16) + (w.bo[i] << 24);
+        if (k >= 2) { v ^= (sim.pw[i] << 28) ^ (sim.wt[i] << 29) ^ (sim.ts[i] << 30) ^ (sim.aband[i] ? 0x13579 : 0); if (mode === 2 && sim.pw[i] && hash(x, y, 17) < lf) v ^= 1 << 27; }
+        if (g.sites.has(i)) v ^= 0x55555;
+        if (g.disasters.rubble.has(i)) v ^= 0x2a2a2;
+        h = (Math.imul(h, 31) + v) | 0;
+      }
+    }
+    const gv = this.gc ? (this.gc._v | 0) + (this.gJob ? 1e6 : 0) : 0;
+    return `${h},${cx | 0},${cy | 0},${z},${mode},${getSeason()},${g.fast ? 1 : 0},${W},${H},${this.dpr},${hi ? 1 : 0},${lvl},${sim.flowM.version},${sim.trackVer},${this.zebraV | 0},${Math.round((this.wet || 0) * 20)},${gv},${w.seed}`;
+  }
+  // The live pass over the still layer, in painter order: what moves (or animates) on each tile, then the still
+  // pictures of later tiles that stand in front of it, so a car behind a tower stays hidden behind it.
+  liveLayer(g, w, ctx, z, cx, cy, t, mode, lvl, hi, cars, bh, bn, bt, shipB, sx, sy) {
+    const tiles = this.liveT || (this.liveT = []); tiles.length = 0;
+    const seen = this.liveSeen || (this.liveSeen = new Uint8Array(N * N)), add = (i) => { if (!seen[i]) { seen[i] = 1; tiles.push(i); } };
+    if (this.layerLive) for (const i of this.layerLive.keys()) add(i);
+    for (const i of bt) add(i);
+    for (const i of shipB.keys()) add(i);
+    for (const i of g.disasters.fires.keys()) add(i);
+    tiles.sort((a, b) => { const sa = (a % N) + ((a / N) | 0), sb = (b % N) + ((b / N) | 0); return sa - sb || (a % N) - (b % N); });
+    const W = this.W, H = this.H, bb = [0, 0, 0, 0];
+    const grow = (x0, y0, x1, y1) => { if (x0 < bb[0]) bb[0] = x0; if (y0 < bb[1]) bb[1] = y0; if (x1 > bb[2]) bb[2] = x1; if (y1 > bb[3]) bb[3] = y1; };
+    for (const i of tiles) {
+      seen[i] = 0;
+      const x = i % N, y = (i / N) | 0, X = sx(x, y), Y = sy(x, y), k = w.kind[i];
+      if (X < -200 * z || X > W + 200 * z || Y < -360 * z || Y > H + 80 * z) continue;
+      bb[0] = 1e9; bb[1] = 1e9; bb[2] = -1e9; bb[3] = -1e9;
+      const items = this.layerLive && this.layerLive.get(i);
+      if (items) for (const it of items) {
+        if (it === 'site') {
+          if (k === T.PARK) { const sp = mip(parkSprite(w.variant[i] % 4, mode), lvl), site = g.sites.get(i); if (sp && site) { drawConstruction(ctx, site, X, Y, z, mode, t, sp, null); grow(X - sp.ox * z, Y - sp.oy * z, X + 60 * z, Y + 40 * z); const sb = siteBox(site, X, Y, z); grow(sb[0], sb[1], sb[2], sb[3]); } else if (sp) { ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); grow(X - sp.ox * z, Y - sp.oy * z, X - sp.ox * z + (sp.c.width / sp.S) * z, Y - sp.oy * z + (sp.c.height / sp.S) * z); } }
+          else if (k === T.RES || k === T.COM || k === T.IND) {
+            const site = g.sites.get(i);
+            if (!site) { const sp = this.staticPic(g, w, x, y, mode, lvl, hi, {}, sx, sy); if (sp) { ctx.drawImage(sp.c, X - sp.ox * z, Y - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); grow(X - sp.ox * z, Y - sp.oy * z, X - sp.ox * z + (sp.c.width / sp.S) * z, Y - sp.oy * z + (sp.c.height / sp.S) * z); } continue; }   // finished since the layer was made
+            const sp = mip(buildingSprite(k, w.level[i], w.variant[i] & 63, mode, g.sim.pw[i] === 1, w.shore[i], hi), lvl), so = site.from > 0 ? mip(buildingSprite(k, site.from, site.pv & 63, mode, g.sim.pw[i] === 1, w.shore[i]), lvl) : null;
+            if (sp) { drawConstruction(ctx, site, X, Y, z, mode, t, sp, so); const sb = siteBox(site, X, Y, z); grow(sb[0], sb[1], sb[2], sb[3]); grow(X - sp.ox * z, Y - sp.oy * z, X - sp.ox * z + (sp.c.width / sp.S) * z, Y - sp.oy * z + (sp.c.height / sp.S) * z); }
+          } else if (k === T.SVC) {
+            const def = BT[w.bt[i]], dx = w.bo[i] & 3, dy = w.bo[i] >> 2, ax = x - dx, ay = y - dy, site = g.sites.get(ay * N + ax); if (!def) continue;
+            const sp = mip(serviceSprite(w.bt[i], mode, def.power ? true : g.sim.pw[ay * N + ax] === 1, def.reach ? w.variant[ay * N + ax] : 0, hi), lvl);
+            if (sp) { const AX = sx(ax, ay), AY = sy(ax, ay); if (site) { drawConstruction(ctx, site, AX, AY, z, mode, t, sp, null); const sb = siteBox(site, AX, AY, z); grow(sb[0], sb[1], sb[2], sb[3]); } else ctx.drawImage(sp.c, AX - sp.ox * z, AY - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z); grow(AX - sp.ox * z, AY - sp.oy * z, AX - sp.ox * z + (sp.c.width / sp.S) * z, AY - sp.oy * z + (sp.c.height / sp.S) * z); }
+          }
+        } else if (it === 'sig') { this.signal(ctx, x, y, X, Y, z, g.clock, mode, greenShare(w, x, y)); grow(X - 32 * z, Y - 34 * z, X + 32 * z, Y + 32 * z); }
+        else if (it === 'svcLive') {
+          const bty = w.bt[i], def = BT[bty], dx = w.bo[i] & 3, dy = w.bo[i] >> 2, ax = x - dx, ay = y - dy, site = g.sites.get(ay * N + ax);
+          if (!site && SVC_FLAGS[bty] && z >= 0.4) for (const f of SVC_FLAGS[bty]) this.flag(ctx, sx(ax + f[0], ay + f[1]), sy(ax + f[0], ay + f[1], f[2]), z, t, mode, f[3], g.fast, hash(ax, ay, f[0] * 7));
+          if (bty === 2 && (!site || site.t / site.dur > 0.93)) this.blades(ctx, sx(ax + 0.5, ay + 0.5), sy(ax + 0.5, ay + 0.5, 74), z, t, mode);
+        }
+      }
+      const fire = g.disasters.fires.get(i);
+      if (fire) this.fire(ctx, fire, X, Y, z, t, mode, k === T.SVC ? 56 : [30, 54, 94, 180][Math.max(0, w.level[i] - 1)] || 40);
+      const sb = shipB.size ? shipB.get(i) : null;
+      if (sb) for (const sh of sb) { this.ship(ctx, sh, w, z, cx, cy, t, mode); const SX = (sh.x - sh.y) * 32 * z + cx, SY = (sh.x + sh.y) * 16 * z + cy; grow(SX - 90 * z, SY - 90 * z, SX + 90 * z, SY + 40 * z); }
+      for (let jj = bh[i]; jj >= 0; jj = bn[jj]) {
+        const c = cars[jj];
+        if (c.ped) { if (z < 0.5) continue; this.person(ctx, c, z, cx, cy, mode, t); }
+        else if (c.truck) this.truck(ctx, c, z, cx, cy, mode, t); else if (c.bus) this.bus(ctx, c, z, cx, cy, mode); else this.car(ctx, c, z, cx, cy, mode);
+        const CX = (c.px - c.py) * 32 * z + cx, CY = (c.px + c.py) * 16 * z + cy, r = mode !== 0 && !c.ped ? 50 * z : c.bus || c.truck ? 34 * z : 24 * z;   // headlight beams reach ~46 ahead
+        grow(CX - r, CY - Math.max(28 * z, r * 0.6), CX + r, CY + Math.max(14 * z, r * 0.6));
+      }
+      if (bb[0] < bb[2]) {
+        // Redraw what stands in front, but only inside this box. Whole pictures redrawn outside it would land on top of
+        // buildings further forward that were in the layer (a house painted over the block in front of it).
+        bb[0] -= 1; bb[1] -= 1; bb[2] += 1; bb[3] += 1;
+        // (0.8.7: clipped on the CPU with clipBox, which keeps everything in one batch; scissor ended the batch twice per tile)
+        const soft = !!ctx.clipBox, cut = soft ? ctx.clipBox(bb[0], bb[1], bb[2], bb[3]) : ctx.scissor ? ctx.scissor(bb[0], bb[1], bb[2], bb[3]) : false;
+        this.occluders(g, w, ctx, x, y, bb, z, cx, cy, mode, lvl, hi, sx, sy);
+        if (cut) { if (soft) ctx.noClipBox(); else ctx.noScissor(); }
+      }
+    }
+  }
+  // Redraw the still pictures of tiles after (x, y) in painter order whose pictures reach into the box bb.
+  occluders(g, w, ctx, x0, y0, bb, z, cx, cy, mode, lvl, hi, sx, sy) {
+    const s0 = x0 + y0, H = this.H;
+    for (let s = s0; s <= Math.min(2 * N - 2, s0 + 26); s++) {
+      const Ys = s * 16 * z + cy;
+      if (Ys + 40 * z < bb[1]) continue;                    // its pictures end above the box
+      if (Ys - 360 * z > bb[3]) break;                      // and every later diagonal starts below it
+      const d0 = Math.ceil((bb[0] - 210 * z - cx) / (32 * z)), d1 = Math.floor((bb[2] + 210 * z - cx) / (32 * z));
+      for (let d = d0; d <= d1; d++) {
+        if (((s + d) & 1) !== 0) continue;
+        const x = (s + d) / 2, y = (s - d) / 2; if (x < 0 || y < 0 || x >= N || y >= N) continue;
+        if (s === s0 && x <= x0) continue;
+        this.staticObj(g, w, ctx, x, y, sx(x, y), sy(x, y), z, mode, lvl, hi, bb, sx, sy);
+      }
+    }
+  }
+  // The still picture standing on one tile (no sway, no site), drawn if it reaches into bb.
+  staticObj(g, w, ctx, x, y, X, Y, z, mode, lvl, hi, bb, sx, sy) {
+    const i = y * N + x;
+    // what stands on each tile is looked up once per layer and kept (picture and box), so checking is just numbers
+    const C = this.stC || (this.stC = new Array(N * N)), stamp = this.layerKey;
+    let e = C[i];
+    if (!e || e.k !== stamp || (e.again && !e.sp)) {
+      e = C[i] = { k: stamp, sp: null, x0: 0, y0: 0, x1: 0, y1: 0, AX: X, AY: Y, rng: null, again: false };
+      const sp = this.staticPic(g, w, x, y, mode, lvl, hi, e, sx, sy);
+      if (sp) { e.sp = sp; e.x0 = e.AX - sp.ox * z; e.y0 = e.AY - sp.oy * z; e.x1 = e.x0 + (sp.c.width / sp.S) * z; e.y1 = e.y0 + (sp.c.height / sp.S) * z; }
+      else {
+        // 0.8.7: a picture that wasn't ready yet (frame budget) used to be remembered as "nothing here" until the layer was
+        // redrawn, so cars, people and building sites behind it showed through. Look again next time.
+        const k = w.kind[i]; e.again = (k === T.EMPTY && w.tree[i] > 0) || k === T.PARK || k === T.SVC || ((k === T.RES || k === T.COM || k === T.IND) && w.level[i] > 0);
+      }
+    }
+    if (!e.sp || e.x1 <= bb[0] || e.x0 >= bb[2] || e.y1 <= bb[1] || e.y0 >= bb[3]) return;
+    const sp = e.sp;
+    if (e.rng) this.slices(ctx, sp, e.AX, e.AY, z, e.rng);
+    else ctx.drawImage(sp.c, e.x0, e.y0, e.x1 - e.x0, e.y1 - e.y0);
+  }
+  // A building standing just below the bottom edge of the screen: its base is out of view but a tower can reach up into
+  // it. Before 0.8.7 these were skipped, so tall buildings popped in at the bottom edge (and showed only in patches
+  // around passing cars with the still view). Only the still picture is drawn: nothing else on the tile can be seen.
+  lowTall(g, w, ctx, x, y, X, Y, z, mode, lvl, hi, sx, sy, H) {
+    const i = y * N + x, k = w.kind[i];
+    if (!((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) && k !== T.SVC) return;
+    const e = this.lowE || (this.lowE = { AX: 0, AY: 0, rng: null });
+    e.AX = X; e.AY = Y; e.rng = null;
+    const sp = this.staticPic(g, w, x, y, mode, lvl, hi, e, sx, sy);
+    if (!sp || e.AY - sp.oy * z > H) return;
+    if (e.rng) this.slices(ctx, sp, e.AX, e.AY, z, e.rng);
+    else if (k !== T.SVC || (w.bo[i] & 3) === BT[w.bt[i]].w - 1 && (w.bo[i] >> 2) === BT[w.bt[i]].d - 1) ctx.drawImage(sp.c, e.AX - sp.ox * z, e.AY - sp.oy * z, (sp.c.width / sp.S) * z, (sp.c.height / sp.S) * z);
+  }
+  staticPic(g, w, x, y, mode, lvl, hi, e, sx, sy) {
+    const i = y * N + x, k = w.kind[i];
+    if (k === T.EMPTY && w.tree[i]) return mip(treeSprite(w.tree[i], mode), lvl);
+    if (k === T.PARK) return g.sites.has(i) ? null : mip(parkSprite(w.variant[i] % 4, mode), lvl);
+    if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) return g.sites.has(i) ? null : mip(buildingSprite(k, w.level[i], w.variant[i] & 63, mode, !g.sim.aband[i] && g.sim.pw[i] === 1 && (mode !== 2 || hash(x, y, 17) < this.litFrac), w.shore[i], hi), lvl);
+    if (k === T.SVC) {
+      const def = BT[w.bt[i]]; if (!def) return null; const dx = w.bo[i] & 3, dy = w.bo[i] >> 2, ax = x - dx, ay = y - dy, a = ay * N + ax;
+      if (g.sites.has(a)) return null;
+      const sp = mip(serviceSprite(w.bt[i], mode, def.power ? true : g.sim.pw[a] === 1, def.reach ? w.variant[a] : 0, hi), lvl); if (!sp) return null;
+      e.AX = sx(ax, ay); e.AY = sy(ax, ay); if (def.w * def.d > 1) e.rng = sliceOf(def.w, def.d)[dy * def.w + dx];
+      return sp;
+    }
+    return null;
+  }
+  // Morning mist: a pale veil over the view and soft banks drifting over the water and low ground, from first light
+  // until the sun is up, thinner in rain. Off on Smooth.
+  mist(ctx, g, w, z, cx, cy, t) {
+    if (g.timeSetting !== 'auto') return;
+    const ph = (g.clock / 180) % 1, m = (ph < 0.14 ? 1 - ph / 0.14 : ph > 0.94 ? (ph - 0.94) / 0.06 : 0) * (1 - Math.min(0.8, g.ambient.weather.k));
+    if (m <= 0.02) return;
     const W = this.W, H = this.H;
+    ctx.fillStyle = `rgba(226,232,238,${(0.16 * m).toFixed(3)})`; ctx.fillRect(0, 0, W, H);
+    if (!this.mistPts || this.mistFor !== w) {             // where the banks sit: every few water tiles, and some open ground
+      this.mistFor = w; this.mistPts = [];
+      for (let y = 2; y < N; y += 5) for (let x = 2; x < N; x += 5) { const i = y * N + x; if (w.terrain[i] === TERRAIN.WATER || ((x * 7 + y * 3) % 4 === 0 && w.kind[i] === T.EMPTY)) this.mistPts.push([x + 0.5, y + 0.5]); }
+    }
+    let sp = this.mistS; if (!sp) { sp = this.mistS = document.createElement('canvas'); sp.width = 128; sp.height = 64; const x = sp.getContext('2d'); const gr = x.createRadialGradient(64, 32, 4, 64, 32, 62); gr.addColorStop(0, 'rgba(240,244,248,.9)'); gr.addColorStop(1, 'rgba(240,244,248,0)'); x.fillStyle = gr; x.setTransform(1, 0, 0, 0.5, 0, 16); x.fillRect(0, -32, 128, 128); }
+    ctx.globalAlpha = 0.42 * m;
+    for (const [px, py] of this.mistPts) {
+      const dx = Math.sin(t * 0.05 + px) * 1.5, X = (px + dx - py) * 32 * z + cx, Y = (px + dx + py) * 16 * z + cy, r = 150 * z;
+      if (X < -r || X > W + r || Y < -r || Y > H + r) continue;
+      ctx.drawImage(sp, X - r, Y - r * 0.5, r * 2, r);
+    }
+    ctx.globalAlpha = 1;
+  }
+  // Zebra crossings on the approaches to junctions where people cross: next to shops, schools, parks and other places
+  // people walk to. Worked out every couple of seconds; drawn with the road when the ground isn't cached.
+  zebraScan(g, w) {
+    const now = performance.now(); if (this.zebraT && now - this.zebraT < 2000 && this.zebraFor === w) return;
+    this.zebraT = now; this.zebraFor = w; const z = this.zebra || (this.zebra = new Uint8Array(N * N)); z.fill(0);
+    const busy = (x, y) => { if (x < 0 || y < 0 || x >= N || y >= N) return false; const q = y * N + x, k = w.kind[q]; return (k === T.COM && w.level[q]) || k === T.PARK || (k === T.SVC && BT[w.bt[q]] && (BT[w.bt[q]].cat === 'fun' || BT[w.bt[q]].cat === 'svc')); };
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const i = y * N + x; if (w.kind[i] !== T.ROAD || w.hw[i] || w.terrain[i] === TERRAIN.WATER) continue;
+      let near = false; for (let j = -1; j <= 1 && !near; j++) for (let k = -1; k <= 1; k++) if (busy(x + k, y + j)) { near = true; break; }
+      if (!near) continue;
+      for (let s2 = 0; s2 < 4; s2++) { const nx = x + D4R[s2][0], ny = y + D4R[s2][1]; if (nx >= 0 && ny >= 0 && nx < N && ny < N && jType(w, nx, ny) && !jType(w, x, y)) z[i] |= 1 << s2; }
+    }
+    let h = 0; for (let i = 0; i < N * N; i++) if (z[i]) h = (h * 31 + i * 16 + z[i]) | 0;
+    if (h !== this.zebraH) { this.zebraH = h; this.zebraV = (this.zebraV | 0) + 1; }
+  }
+  // stripes across the road at the edge toward side s2 (0 up -y, 1 right +x, 2 down +y, 3 left -x)
+  zebraSprite(s2, mode) {
+    const key = s2 * 4 + mode; this.zbC = this.zbC || {}; if (this.zbC[key]) return this.zbC[key];
+    const c = this.zbC[key] = document.createElement('canvas'); c.width = 128; c.height = 64; const x = c.getContext('2d'); x.scale(2, 2);
+    const P = (u, v) => [32 + (u - v) * 32, (u + v) * 16], d = mode === 2 ? 0.55 : mode === 1 ? 0.85 : 1;
+    x.fillStyle = `rgba(${246 * d | 0},${246 * d | 0},${240 * d | 0},.85)`;
+    for (let k = 0; k < 6; k++) {
+      const a = 0.17 + k * 0.115, b = a + 0.06, n0 = 0.8, n1 = 0.95;   // bars across the road, near the junction edge
+      const q = s2 === 1 ? [[n0, a], [n1, a], [n1, b], [n0, b]] : s2 === 3 ? [[1 - n1, a], [1 - n0, a], [1 - n0, b], [1 - n1, b]] : s2 === 2 ? [[a, n0], [b, n0], [b, n1], [a, n1]] : [[a, 1 - n1], [b, 1 - n1], [b, 1 - n0], [a, 1 - n0]];
+      x.beginPath(); q.forEach((p, j) => { const pp = P(p[0], p[1]); if (j) x.lineTo(pp[0], pp[1]); else x.moveTo(pp[0], pp[1]); }); x.closePath(); x.fill();
+    }
+    return c;
+  }
+  // Waves rolling onto sand: on water tiles next to a beach, a white line comes in from the open water and fades at the
+  // edge, each tile on its own beat.
+  waves(ctx, w, z, cx, cy, t, mode) {
+    if (!this.waveList || this.waveFor !== w || this.waveV !== this.shoreFor) {
+      this.waveFor = w; this.waveV = this.shoreFor; this.waveList = [];
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const i = y * N + x; if (w.terrain[i] !== TERRAIN.WATER || w.kind[i] === T.ROAD) continue; for (let s2 = 0; s2 < 4; s2++) { const nx = x + D4R[s2][0], ny = y + D4R[s2][1]; if (nx >= 0 && ny >= 0 && nx < N && ny < N && w.terrain[ny * N + nx] === TERRAIN.SAND) this.waveList.push([x, y, s2]); } }
+    }
+    if (!this.waveList.length) return;
+    const W = this.W, H = this.H, col = mode === 2 ? '200,214,232' : '255,255,255';
+    ctx.lineWidth = 1.2 * z; ctx.lineCap = 'round';
+    for (const [x, y, s2] of this.waveList) {
+      const X0 = (x - y) * 32 * z + cx, Y0 = (x + y) * 16 * z + cy; if (X0 < -40 * z || X0 > W + 40 * z || Y0 < -40 * z || Y0 > H) continue;
+      const ph = ((t * 0.28 + ((x * 13 + y * 7) % 10) * 0.1) % 1), off = 0.42 * (1 - ph), a = Math.sin(ph * Math.PI) * (mode === 2 ? 0.35 : 0.6);
+      const [ex, ey] = D4R[s2], L = (u, v) => [X0 + (u - v) * 32 * z, Y0 + (u + v) * 16 * z];
+      // the line runs along the sand edge, `off` of a tile out from it
+      let p1, p2; if (ex) { const u = ex > 0 ? 1 - off : off; p1 = L(u, 0.12); p2 = L(u, 0.88); } else { const v = ey > 0 ? 1 - off : off; p1 = L(0.12, v); p2 = L(0.88, v); }
+      ctx.strokeStyle = `rgba(${col},${a.toFixed(3)})`; ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.quadraticCurveTo((p1[0] + p2[0]) / 2 + (ex - ey) * 2 * z, (p1[1] + p2[1]) / 2 - 1.5 * z, p2[0], p2[1]); ctx.stroke();
+    }
+  }
+  // Far zoom: the city picture is already drawn; add what moves or changes often, in painter order.
+  farLive(g, w, ctx, z, cx, cy, t, mode, lvl, badges, cars, bh, bn, shipB, top) {
+    const W = this.W, H = this.H;
+    for (let s = 0; s < 2 * N - 1; s++) {
+      const Yd = s * 16 * z + cy; if (Yd < top || Yd > H + 60 * z) continue;
+      for (let x = Math.max(0, s - N + 1); x <= Math.min(s, N - 1); x++) {
+        const y = s - x, X = (x - y) * 32 * z + cx, Y = (x + y) * 16 * z + cy; if (X < -120 * z || X > W + 120 * z) continue;
+        const i = y * N + x, k = w.kind[i], site = g.sites.get(i);
+        if (site) {
+          if (k === T.PARK) { const sp = mip(parkSprite(w.variant[i] % 4, mode), lvl); if (sp) drawConstruction(ctx, site, X, Y, z, mode, t, sp, null); }
+          else if (k === T.RES || k === T.COM || k === T.IND) { const sp = mip(buildingSprite(k, w.level[i], w.variant[i] & 63, mode, g.sim.pw[i] === 1, w.shore[i]), lvl), so = site.from > 0 ? mip(buildingSprite(k, site.from, site.pv & 63, mode, g.sim.pw[i] === 1, w.shore[i]), lvl) : null; if (sp) drawConstruction(ctx, site, X, Y, z, mode, t, sp, so); }
+          else if (k === T.SVC) { const def = BT[w.bt[i]], sp = def && mip(serviceSprite(w.bt[i], mode, true, def.reach ? w.variant[i] : 0), lvl); if (sp) drawConstruction(ctx, site, X, Y, z, mode, t, sp, null); }
+        } else if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i]) {
+          const lv = w.level[i];
+          if (g.sim.aband[i]) badges.push([X, Y + 16 * z - BADGE_H[lv] * z, 'empty']); else if (!g.sim.pw[i]) badges.push([X, Y + 16 * z - BADGE_H[lv] * z, 'bolt']); else if (!g.sim.wt[i]) badges.push([X, Y + 16 * z - BADGE_H[lv] * z, 'drop']); else if (lv >= 2 && !g.sim.ts[i]) badges.push([X, Y + 16 * z - BADGE_H[lv] * z, 'trash']);
+        }
+        const fire = g.disasters.fires.get(i); if (fire) this.fire(ctx, fire, X, Y, z, t, mode, k === T.SVC ? 56 : [30, 54, 94, 180][Math.max(0, w.level[i] - 1)] || 40);
+        const sb = shipB.size ? shipB.get(i) : null; if (sb) for (const sh of sb) this.ship(ctx, sh, w, z, cx, cy, t, mode);
+        for (let jj = bh[i]; jj >= 0; jj = bn[jj]) { const c = cars[jj]; if (c.ped) continue; if (c.truck) this.truck(ctx, c, z, cx, cy, mode, t); else if (c.bus) this.bus(ctx, c, z, cx, cy, mode); else this.car(ctx, c, z, cx, cy, mode); }
+      }
+    }
+  }
+  // Color grading: aerial haze toward the far (upper) part of the view and a soft sunlight wash.
+  grade(ctx, mode, g) {
+    const W = this.W, H = this.H;
+    { // the colour of the time of day over everything: pink-blue dawn, clear day, golden late afternoon, blue night
+      const ph = g.timeSetting === 'auto' ? (g.clock / 180) % 1 : [0.25, 0.53, 0.75][mode];
+      const K = [[0, 255, 168, 186, 0.13], [0.08, 255, 222, 206, 0.05], [0.18, 255, 255, 255, 0], [0.38, 255, 240, 214, 0.03], [0.48, 255, 176, 84, 0.13], [0.56, 238, 112, 92, 0.12], [0.64, 46, 66, 150, 0.12], [0.9, 46, 66, 150, 0.12], [1, 255, 168, 186, 0.13]];
+      let j = 0; while (j < K.length - 2 && ph > K[j + 1][0]) j++;
+      const A = K[j], B = K[j + 1], f = Math.max(0, Math.min(1, (ph - A[0]) / (B[0] - A[0] || 1))), m = (n) => A[n] + (B[n] - A[n]) * f;
+      const a = m(4); if (a > 0.004) { ctx.fillStyle = `rgba(${m(1) | 0},${m(2) | 0},${m(3) | 0},${a.toFixed(3)})`; ctx.fillRect(0, 0, W, H); }
+    }
     const haze = mode === 2 ? 'rgba(24,34,80,' : mode === 1 ? 'rgba(255,186,140,' : 'rgba(208,228,248,';
-    const g = ctx.createLinearGradient(0, 0, 0, H * 0.55);
-    g.addColorStop(0, haze + (mode === 2 ? 0.16 : mode === 1 ? 0.1 : 0.13) + ')'); g.addColorStop(1, haze + '0)');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H * 0.55);
+    const hz = ctx.createLinearGradient(0, 0, 0, H * 0.55);
+    hz.addColorStop(0, haze + (mode === 2 ? 0.16 : mode === 1 ? 0.1 : 0.13) + ')'); hz.addColorStop(1, haze + '0)');
+    ctx.fillStyle = hz; ctx.fillRect(0, 0, W, H * 0.55);
     if (mode === 1 && ctx.gpu) {                              // low sun from the upper right: warm light raking across the city
       const s = ctx.createLinearGradient(W, 0, W * 0.25, H);
       s.addColorStop(0, 'rgba(255,150,70,.26)'); s.addColorStop(0.55, 'rgba(255,120,60,.08)'); s.addColorStop(1, 'rgba(255,120,60,0)');
       ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = s; ctx.fillRect(0, 0, W, H); ctx.restore();
     }
   }
-  signal(ctx, x, y, X, Y, z, sigT, mode) {
-    const stV = light(sigT, x, y, true), stH = light(sigT, x, y, false), key = stV + stH + mode;
+  signal(ctx, x, y, X, Y, z, sigT, mode, share) {
+    const stV = light(sigT, x, y, true, share), stH = light(sigT, x, y, false, share), key = stV + stH + mode;
     this.sigC = this.sigC || {}; let c = this.sigC[key];
     if (!c) { c = this.sigC[key] = document.createElement('canvas'); c.width = 128; c.height = 76; const x2 = c.getContext('2d'); x2.scale(2, 2); this.signalPaint(x2, 32, 20, 1, stV, stH, mode); }
     ctx.drawImage(c, X - 32 * z, Y - 20 * z, 64 * z, 38 * z);
@@ -318,6 +632,50 @@ export class Renderer {
       }
       ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
     }
+  }
+  // A priority junction: give-way triangles across the side roads where they meet the major road, and a small
+  // give-way sign at the kerb. `minor` holds the side roads' bits (1 up, 2 right, 4 down, 8 left). Cached per layout.
+  giveWay(ctx, X, Y, z, mode, minor) {
+    if (!minor) return;
+    const key = minor * 4 + mode; this.gwC = this.gwC || {}; let c = this.gwC[key];
+    if (!c) {
+      c = this.gwC[key] = document.createElement('canvas'); c.width = 128; c.height = 112; const x = c.getContext('2d'); x.scale(2, 2);
+      const P = (lx, ly, h = 0) => [32 + (lx - ly) * 32, 22 + (lx + ly) * 16 - h], d = mode === 2 ? 0.62 : mode === 1 ? 0.88 : 1;
+      const paint = `rgba(${242 * d | 0},${242 * d | 0},${236 * d | 0},.88)`;
+      for (const [bit, ax, ay] of [[1, 0, -1], [2, 1, 0], [4, 0, 1], [8, -1, 0]]) {
+        if (!(minor & bit)) continue;
+        const sx = ay, sy = -ax, L = (along, side) => P(0.5 + ax * along + sx * side, 0.5 + ay * along + sy * side);
+        x.fillStyle = paint;
+        for (let u = 0.07; u < 0.46; u += 0.095) {                 // shark's teeth, pointing at the drivers who must wait
+          const a = L(0.38, u - 0.035), b = L(0.38, u + 0.035), t = L(0.47, u);
+          x.beginPath(); x.moveTo(a[0], a[1]); x.lineTo(b[0], b[1]); x.lineTo(t[0], t[1]); x.closePath(); x.fill();
+        }
+        const foot = L(0.47, 0.49), top = [foot[0], foot[1] - 13];   // the sign on its post at the kerb
+        x.strokeStyle = `rgb(${86 * d | 0},${90 * d | 0},${98 * d | 0})`; x.lineWidth = 0.9; x.beginPath(); x.moveTo(foot[0], foot[1]); x.lineTo(top[0], top[1]); x.stroke();
+        x.beginPath(); x.moveTo(top[0] - 3.2, top[1] - 2.6); x.lineTo(top[0] + 3.2, top[1] - 2.6); x.lineTo(top[0], top[1] + 2.4); x.closePath();
+        x.fillStyle = `rgb(${226 * d | 0},${52 * d | 0},${46 * d | 0})`; x.fill();
+        x.beginPath(); x.moveTo(top[0] - 1.7, top[1] - 1.7); x.lineTo(top[0] + 1.7, top[1] - 1.7); x.lineTo(top[0], top[1] + 0.9); x.closePath();
+        x.fillStyle = `rgb(${245 * d | 0},${245 * d | 0},${240 * d | 0})`; x.fill();
+      }
+    }
+    ctx.drawImage(c, X - 32 * z, Y - 22 * z, 64 * z, 56 * z);
+  }
+  // A dirt track along one side of a tile, inside the tile: axis 0 along its front-left side (toward +y), 1 along its
+  // front-right side (toward +x). Two wheel ruts with grass between; browner in autumn, snowy in winter, dark when wet.
+  trackSprite(axis, mode, wet) {
+    const se = getSeason(), key = axis * 100 + mode * 10 + se * 2 + (wet ? 1 : 0); this.trkC = this.trkC || {}; let c = this.trkC[key];
+    if (c) return c;
+    c = this.trkC[key] = document.createElement('canvas'); c.width = 128; c.height = 64; const x = c.getContext('2d'); x.scale(2, 2);
+    const P = (u, v) => [32 + (u - v) * 32, (u + v) * 16];
+    const Q = axis === 0 ? (s, t) => P(s, 0.78 + t * 0.22) : (s, t) => P(0.78 + t * 0.22, s);   // s along the side, t across it (0 inner, 1 edge)
+    const d = mode === 2 ? 0.5 : mode === 1 ? 0.85 : 1, rgb = (r, g, b, a = 1) => `rgba(${r * d | 0},${g * d | 0},${b * d | 0},${a})`;
+    const base = se === 2 ? rgb(196, 182, 160) : wet ? rgb(118, 92, 66) : se === 1 ? rgb(166, 128, 88) : rgb(178, 146, 104);
+    const rut = se === 2 ? rgb(128, 104, 80) : wet ? rgb(84, 64, 46) : rgb(132, 102, 70);
+    const mid = se === 2 ? rgb(240, 242, 238) : se === 1 ? rgb(170, 160, 92) : rgb(132, 170, 96);
+    const quad = (t0, t1, f) => { const a = Q(0, t0), b = Q(1, t0), e = Q(1, t1), f2 = Q(0, t1); x.beginPath(); x.moveTo(a[0], a[1]); x.lineTo(b[0], b[1]); x.lineTo(e[0], e[1]); x.lineTo(f2[0], f2[1]); x.closePath(); x.fillStyle = f; x.fill(); };
+    quad(0, 1, base); quad(0.12, 0.3, rut); quad(0.7, 0.88, rut); quad(0.42, 0.58, mid);
+    if (wet && se !== 2) for (let i = 0; i < 3; i++) { const p = Q(0.2 + i * 0.3, 0.2); x.fillStyle = 'rgba(170,190,210,.35)'; x.beginPath(); x.ellipse(p[0], p[1], 2.4, 0.8, 0, 0, 6.3); x.fill(); }   // puddles
+    return c;
   }
   signalPaint(ctx, X, Y, z, stV, stH, mode) {
     const P = (lx, ly, h = 0) => [X + (lx - ly) * 32 * z, Y + (lx + ly) * 16 * z - h * z];
@@ -429,7 +787,6 @@ export class Renderer {
         ctx.stroke();
       }
       ctx.save(); ctx.rotate(ang);
-      ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.beginPath(); ctx.ellipse(1.2 * z, 1.4 * z, (L + 1) * z, (Wd + 0.6) * z, 0, 0, 6.3); ctx.fill();   // shadow on the water
       if (yacht || ferry) {                                 // a white hull, pointed at the bow
         ctx.fillStyle = rgb(244, 244, 240); ctx.beginPath(); ctx.moveTo(-L * z, -Wd * z); ctx.lineTo(L * 0.55 * z, -Wd * z); ctx.quadraticCurveTo(L * z, -Wd * 0.4 * z, L * 1.08 * z, 0);
         ctx.quadraticCurveTo(L * z, Wd * 0.4 * z, L * 0.55 * z, Wd * z); ctx.lineTo(-L * z, Wd * z); ctx.closePath(); ctx.fill();
@@ -499,44 +856,6 @@ export class Renderer {
     for (let i = 0; i < 6; i++) { const u = 0.1 + i * 0.16, px = E[0][0] + (E[1][0] - E[0][0]) * u, py = E[0][1] + (E[1][1] - E[0][1]) * u; x.fillStyle = rgb(0.55); x.beginPath(); x.ellipse(px + (64 - px) * 0.08, py + (32 - py) * 0.08, 7 + (i % 3) * 3, 3 + (i % 2) * 1.5, 0, 0, 6.3); x.fill(); }
     this.edges.set(key, c); return c;
   }
-  // Where the sun is: shadow direction in tile units (dx, dy) per tile of height, and how dark. Null at night.
-  sun(g, mode) {
-    if (mode === 2) return null;
-    let ph = (g.clock / 180) % 1;
-    if (g.timeSetting !== 'auto') ph = mode === 1 ? 0.53 : 0.2;
-    const t = ph >= 0.9 ? 0 : Math.min(1, ph / 0.55), th = t * Math.PI / 2;            // sunrise: shadows to +x; sunset: to +y
-    const len = Math.min(3, 0.35 + 2.4 * Math.pow(Math.abs(t - 0.5) * 2, 2));
-    return { dx: Math.cos(th) * len, dy: Math.sin(th) * len, a: mode === 1 ? 0.38 : 0.32 };
-  }
-  // All building shadows go into one small canvas as solid shapes, then onto the view at once with one opacity, so where
-  // shadows overlap they don't get darker, and the small size makes their edges soft for free. Drawn after the ground and
-  // before the buildings: shadows fall on roads, water and open land.
-  shadowLayer(ctx, g, w, z, cx, cy, mode, W, H, top) {
-    const sun = this.sun(g, mode); if (!sun || z < 0.3) return;
-    const q = 0.25, cw = Math.max(8, Math.ceil(W * q)), ch = Math.max(8, Math.ceil(H * q));
-    let c = this.shc; if (!c) { c = this.shc = document.createElement('canvas'); c._solo = true; this.shx = c.getContext('2d'); }
-    if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
-    const sk = `${cx | 0},${cy | 0},${z},${cw},${sun.dx.toFixed(2)},${g.sim.day},${g.sites.size}`;
-    if (sk === this.shKey) { if (this.shAny) { ctx.globalAlpha = sun.a; ctx.drawImage(c, 0, 0, cw / q, ch / q); ctx.globalAlpha = 1; } return; }   // nothing moved: reuse last frame's shadows
-    this.shKey = sk;
-    const x2 = this.shx; x2.setTransform(1, 0, 0, 1, 0, 0); x2.clearRect(0, 0, cw, ch); x2.fillStyle = '#0a1426'; x2.beginPath();
-    let any = false;
-    const pt = (u, v, first) => { const X = ((u - v) * 32 * z + cx) * q, Y = ((u + v) * 16 * z + cy) * q; if (first) x2.moveTo(X, Y); else x2.lineTo(X, Y); };
-    const add = (x0, y0, fw, fd, h) => {                 // a box swept away from the sun: with dx, dy >= 0 that is always this hexagon
-      const k = Math.min(6, h / 32), ox = sun.dx * k, oy = sun.dy * k, x1 = x0 + fw, y1 = y0 + fd;
-      pt(x0, y0, true); pt(x1, y0); pt(x1 + ox, y0 + oy); pt(x1 + ox, y1 + oy); pt(x0 + ox, y1 + oy); pt(x0, y1); x2.closePath(); any = true;
-    };
-    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-      const X = (x - y) * 32 * z + cx, Y = (x + y) * 16 * z + cy;
-      if (X < -260 * z || X > W + 260 * z || Y < -260 * z || Y > H + 40 * z) continue;
-      const i = y * N + x, k = w.kind[i];
-      if ((k === T.RES || k === T.COM || k === T.IND) && w.level[i] && !g.sites.has(i)) add(x + 0.12, y + 0.12, 0.76, 0.76, REAL_H[k][w.level[i] - 1] * 0.8);
-      else if (k === T.SVC && w.bo[i] === 0 && !g.sites.has(i)) { const def = BT[w.bt[i]]; if (!def.reach) add(x + 0.1, y + 0.1, def.w - 0.2, def.d - 0.2, (SVC_H[def.key] || 40) * 0.7); }
-    }
-    this.shAny = any; if (!any) return;
-    x2.fill(); touched(c);
-    ctx.globalAlpha = sun.a; ctx.drawImage(c, 0, 0, cw / q, ch / q); ctx.globalAlpha = 1;
-  }
   // Street life on a road tile: trees along the pavement in front of homes, cars parked at the kerb by shops and offices,
   // benches and bins by parks. Placed by a hash of the tile, so they stay put.
   street(ctx, w, x, y, X, Y, z, mode, lvl) {
@@ -563,7 +882,6 @@ export class Renderer {
     const P = (u, v, h = 0) => [9 + (u - v) * 8, 6 + (u + v) * 4 - h];
     const L = axis ? 0.85 : 0.4, Wd = axis ? 0.4 : 0.85, u0 = -L / 2, v0 = -Wd / 2;
     const poly = (a, f) => { x.beginPath(); x.moveTo(a[0][0], a[0][1]); for (const p of a.slice(1)) x.lineTo(p[0], p[1]); x.closePath(); x.fillStyle = f; x.fill(); };
-    x.fillStyle = 'rgba(0,0,0,.22)'; x.beginPath(); x.ellipse(10, 7.5, 7, 3.2, 0, 0, 6.3); x.fill();
     const box = (a, b, c2, dd, h0, h1, f) => { poly([P(a, b + dd, h0), P(a + c2, b + dd, h0), P(a + c2, b + dd, h1), P(a, b + dd, h1)], sh(f, 1)); poly([P(a + c2, b, h0), P(a + c2, b + dd, h0), P(a + c2, b + dd, h1), P(a + c2, b, h1)], sh(f, 0.75)); poly([P(a, b, h1), P(a + c2, b, h1), P(a + c2, b + dd, h1), P(a, b + dd, h1)], sh(f, 1.12)); };
     box(u0, v0, L, Wd, 0.6, 2.6, base);
     box(u0 + (axis ? 0.2 : 0.06), v0 + (axis ? 0.06 : 0.2), axis ? L * 0.5 : L - 0.12, axis ? Wd - 0.12 : Wd * 0.5, 2.6, 4.4, base);
@@ -574,7 +892,6 @@ export class Renderer {
     this.bench = this.bench || []; if (this.bench[mode]) return this.bench[mode];
     const c = document.createElement('canvas'); c.width = 28; c.height = 20; const x = c.getContext('2d'); x.scale(2, 2);
     const d = mode === 2 ? 0.55 : mode === 1 ? 0.85 : 1, wood = `rgb(${(150 * d) | 0},${(102 * d) | 0},${(60 * d) | 0})`;
-    x.fillStyle = 'rgba(0,0,0,.18)'; x.beginPath(); x.ellipse(7.5, 7.5, 6, 2, 0, 0, 6.3); x.fill();
     x.strokeStyle = `rgb(${(60 * d) | 0},${(64 * d) | 0},${(72 * d) | 0})`; x.lineWidth = 0.8; x.beginPath(); x.moveTo(3, 7); x.lineTo(3, 4.5); x.moveTo(11, 7); x.lineTo(11, 4.5); x.stroke();
     x.fillStyle = wood; x.fillRect(2, 3.6, 10, 1.4); x.fillRect(2, 1.4, 10, 1.1);
     x.fillStyle = `rgb(${(70 * d) | 0},${(110 * d) | 0},${(70 * d) | 0})`; x.fillRect(12.4, 4, 1.4, 3);       // a bin
@@ -607,7 +924,7 @@ export class Renderer {
     for (let i = n; i >= 0; i--) ctx.lineTo(X + (L * i) / n, Y + H - (1.5 * z * i) / n + wv(i));
     ctx.closePath(); ctx.fill();
   }
-  // Gulls circling over harbors, piers, beaches and marinas (where boats and people are), with their shadows on the water.
+  // Gulls circling over harbors, piers, beaches and marinas (where boats and people are), over the water.
   gulls(ctx, g, z, cx, cy, t, mode) {
     if (!this.gullT || t - this.gullT > 5) {                  // where they gather is looked up every few seconds, not every frame
       this.gullT = t; const spots = [];
@@ -623,7 +940,6 @@ export class Renderer {
         const bx = qx + Math.cos(a) * r, by = qy + Math.sin(a) * r * 0.8, hgt = 34 + hash(q, j, 8) * 18 + Math.sin(t * 0.7 + ph) * 4;
         const X = (bx - by) * 32 * z + cx, Y = (bx + by) * 16 * z + cy;
         if (X < -20 || X > this.W + 20 || Y < -60 || Y > this.H + 20) continue;
-        ctx.fillStyle = 'rgba(0,0,0,.08)'; ctx.beginPath(); ctx.ellipse(X, Y, 2.6 * z, 1 * z, 0, 0, 6.3); ctx.fill();
         const flap = Math.sin(t * 9 + ph * 3) > 0.6 ? 2.4 : 0.6, yy = Y - hgt * z;   // mostly gliding, a few wingbeats
         ctx.strokeStyle = col; ctx.lineWidth = 1.1 * z; ctx.lineCap = 'round'; ctx.beginPath();
         ctx.moveTo(X - 4.5 * z, yy - flap * z); ctx.quadraticCurveTo(X - 2 * z, yy - 1.6 * z, X, yy); ctx.quadraticCurveTo(X + 2 * z, yy - 1.6 * z, X + 4.5 * z, yy - flap * z); ctx.stroke();
@@ -635,7 +951,6 @@ export class Renderer {
       for (let k = 0; k < f.n; k++) {
         const row = Math.ceil(k / 2) * (k % 2 ? 1 : -1), bx = f.x - f.vx * 0.12 * Math.abs(row) + f.vy * 0.1 * row, by = f.y - f.vy * 0.12 * Math.abs(row) - f.vx * 0.1 * row;
         const X = (bx - by) * 32 * z + cx, Y = (bx + by) * 16 * z + cy - (f.h + Math.sin(t + k) * 3) * z, fl = Math.sin(t * 11 + k * 1.7 + f.seed) * 3.2 * z;
-        ctx.fillStyle = 'rgba(0,0,0,.1)'; ctx.beginPath(); ctx.ellipse(X, Y + f.h * z, 3 * z, 1.2 * z, 0, 0, 6.3); ctx.fill();
         ctx.strokeStyle = mode === 2 ? '#aab' : '#2b2e36'; ctx.lineWidth = 1.2 * z; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(X - 5 * z, Y - fl); ctx.lineTo(X, Y); ctx.lineTo(X + 5 * z, Y - fl); ctx.stroke();
       }
     }
@@ -661,7 +976,12 @@ export class Renderer {
   }
   weather(ctx, g, t, mode) {
     const wt = g.ambient.weather, k = wt.k, W = this.W, H = this.H;
-    if (k > 0.01) {
+    if (k > 0.01 && getSeason() === 2) {                // winter: snow falls instead of rain, slowly and drifting
+      ctx.fillStyle = `rgba(200,210,226,${0.16 * k})`; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = `rgba(255,255,255,${0.85 * Math.min(1, k * 1.3)})`;
+      const n = Math.floor(this.rain.length * Math.min(1, k * 1.2));
+      for (let i = 0; i < n; i++) { const d = this.rain[i], sz = 1 + d.v * 1.6, x = ((d.x * W + Math.sin(t * 0.9 + d.y * 12) * 14 + t * 9 * d.v) % (W + 20) + W + 20) % (W + 20) - 10, y = ((d.y + t * 0.07 * d.v) % 1) * H; ctx.fillRect(x, y, sz, sz); }
+    } else if (k > 0.01) {
       ctx.fillStyle = `rgba(28,40,62,${0.24 * k})`; ctx.fillRect(0, 0, W, H);
       ctx.strokeStyle = `rgba(196,214,238,${0.4 * k})`; ctx.lineWidth = 1; ctx.beginPath();
       const n = Math.floor(this.rain.length * Math.min(1, k * 1.2));
@@ -715,7 +1035,6 @@ export class Renderer {
   tornado(ctx, t0, z, cx, cy, t, mode) {
     const bx = (t0.x - t0.y) * 32 * z + cx, by = (t0.x + t0.y) * 16 * z + cy + 16 * z, H = 120 * z, d = mode === 2 ? 0.55 : 1;
     ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(bx, by + 2 * z, 26 * z, 11 * z, 0, 0, 6.3); ctx.fill();
     for (let k = 0; k <= 16; k++) {
       const u = k / 16, y = by - u * H, rx = (5 + 30 * u * u) * z + Math.sin(t * 3 + k) * 1.5 * z, ox = Math.sin(t * 1.3 + u * 3.2) * 10 * u * z;
       const sh = (80 + 40 * ((k + Math.floor(t * 10)) % 2)) * d | 0;
@@ -733,7 +1052,6 @@ export class Renderer {
   ufo(ctx, u, z, cx, cy, t, mode) {
     const bx = (u.x - u.y) * 32 * z + cx, by = (u.x + u.y) * 16 * z + cy + 16 * z, sy = by - u.h * z, d = mode === 2 ? 0.7 : 1;
     ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(bx, by, 24 * z, 9 * z, 0, 0, 6.3); ctx.fill();
     if (u.beam) {
       const tx = (u.beam.i % N - (u.beam.i / N | 0)) * 32 * z + cx, ty = ((u.beam.i % N) + (u.beam.i / N | 0)) * 16 * z + cy + 16 * z, k = Math.min(1, u.beam.t / 1.3), fl = 0.5 + 0.5 * Math.sin(t * 24);
       ctx.globalCompositeOperation = 'lighter';
@@ -803,11 +1121,15 @@ export class Renderer {
   }
   badgeShape(ctx, X, Y, z, type) {
     const r = 8 * z;
-    ctx.fillStyle = type === 'bolt' ? '#ef6f5e' : type === 'trash' ? '#a0703c' : type === 'closed' ? '#6b7280' : '#3d8bd9'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4 * z;
+    ctx.fillStyle = type === 'bolt' ? '#ef6f5e' : type === 'trash' ? '#a0703c' : type === 'closed' || type === 'empty' ? '#6b7280' : '#3d8bd9'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4 * z;
     ctx.beginPath(); ctx.arc(X, Y, r, 0, 6.3); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#fff'; ctx.beginPath();
     if (type === 'bolt') { ctx.moveTo(X + 1.5 * z, Y - 5 * z); ctx.lineTo(X - 3 * z, Y + 1 * z); ctx.lineTo(X, Y + 1 * z); ctx.lineTo(X - 1.5 * z, Y + 5 * z); ctx.lineTo(X + 3 * z, Y - 1.2 * z); ctx.lineTo(X + 0.2 * z, Y - 1.2 * z); ctx.closePath(); }
     else if (type === 'closed') { ctx.rect(X - 4 * z, Y - 1 * z, 8 * z, 6 * z); ctx.fill(); ctx.beginPath(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.6 * z; ctx.arc(X, Y - 1.5 * z, 2.6 * z, Math.PI, 0); ctx.stroke(); return; }
+    else if (type === 'empty') {                         // a boarded-up window: two planks across a dark frame
+      ctx.fillStyle = '#374151'; ctx.fillRect(X - 4.5 * z, Y - 4 * z, 9 * z, 8 * z); ctx.fillStyle = '#d6b37a';
+      ctx.save(); ctx.translate(X, Y); ctx.rotate(0.45); ctx.fillRect(-6 * z, -1.2 * z, 12 * z, 2.4 * z); ctx.rotate(-0.9); ctx.fillRect(-6 * z, -1.2 * z, 12 * z, 2.4 * z); ctx.restore(); return;
+    }
     else if (type === 'trash') { ctx.rect(X - 3 * z, Y - 2 * z, 6 * z, 7 * z); ctx.rect(X - 4 * z, Y - 4 * z, 8 * z, 1.6 * z); ctx.rect(X - 1.5 * z, Y - 5.6 * z, 3 * z, 1.4 * z); }
     else { ctx.moveTo(X, Y - 5 * z); ctx.quadraticCurveTo(X + 5 * z, Y + 1 * z, X, Y + 5 * z); ctx.quadraticCurveTo(X - 5 * z, Y + 1 * z, X, Y - 5 * z); }
     ctx.fill();
@@ -832,6 +1154,8 @@ export class Renderer {
   overlay(ctx, g, z, cx, cy) {
     const w = g.world, sim = g.sim, ov = g.overlay, W = this.W, H = this.H;
     ctx.fillStyle = 'rgba(8,16,30,.4)'; ctx.fillRect(0, 0, W, H);
+    let pr = ov === 'trips' ? sim.flowM.pr : null;        // only for the road that is selected, once it has been traced
+    if (pr && (!g.sel || pr.tile !== g.sel.y * N + g.sel.x || pr.total <= 0)) pr = null;
     const ramp = (v, a) => `hsla(${Math.round(120 * Math.max(0, Math.min(1, v)))},78%,50%,${a})`;
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       const X = (x - y) * 32 * z + cx, Y = (x + y) * 16 * z + cy;
@@ -839,6 +1163,14 @@ export class Renderer {
       const i = y * N + x; let col = null;
       if (w.terrain[i] === TERRAIN.WATER) continue;
       switch (ov) {
+        case 'trips': {                                    // one road's trips: blue where they start, orange where they go
+          if (!pr) break;
+          const d = ((y / DISTRICT) | 0) * DISTRICTS + ((x / DISTRICT) | 0), a = pr.from[d] / pr.total, b = pr.to[d] / pr.total;
+          if (a > 0.01 && b > 0.01) col = `rgba(196,128,255,${0.2 + Math.min(0.6, Math.max(a, b) * 3)})`;
+          else if (a > 0.01) col = `rgba(90,150,255,${0.2 + Math.min(0.6, a * 3)})`;
+          else if (b > 0.01) col = `rgba(255,150,60,${0.2 + Math.min(0.6, b * 3)})`;
+          break;
+        }
         case 'value': col = ramp((sim.lv[i] - 25) / 65, 0.6); break;
         case 'commute': {
           const k = w.kind[i];
@@ -883,7 +1215,7 @@ export class Renderer {
         const i = y * N + x, wv = w.wire[i]; if (!wv) continue;
         const X = (x - y) * 32 * z + cx, Y = (x + y) * 16 * z + cy + 16 * z;
         if (X < -40 * z || X > W + 40 * z || Y < -34 * z || Y > H + 40 * z) continue;
-        const live = sim.powerMap[i] === 3; ctx.strokeStyle = live ? '#ffd166' : '#8a93a3'; ctx.lineWidth = 2 * z; ctx.setLineDash(wv === 2 ? [4 * z, 3 * z] : []);
+        const live = sim.lineLive ? sim.lineLive[i] === 1 : sim.powerMap[i] === 3; ctx.strokeStyle = live ? '#ffd166' : '#8a93a3'; ctx.lineWidth = 2 * z; ctx.setLineDash(wv === 2 ? [4 * z, 3 * z] : []);
         ctx.beginPath();
         if (x + 1 < N && w.wire[i + 1]) { ctx.moveTo(X, Y); ctx.lineTo(X + 32 * z, Y + 16 * z); }
         if (y + 1 < N && w.wire[i + N]) { ctx.moveTo(X, Y); ctx.lineTo(X - 32 * z, Y + 16 * z); }
@@ -1147,15 +1479,22 @@ export class Renderer {
   }
   person(ctx, c, z, cx, cy, mode, t) {
     const X = (c.px - c.py) * 32 * z + cx, Y = (c.px + c.py) * 16 * z + cy;
+    const fade = c.alpha !== undefined && c.alpha < 1; if (fade) { if (c.alpha <= 0) return; ctx.globalAlpha = c.alpha; }
+    if (c.swim) {                                                        // a swimmer: head and shoulders, and a ring of ripples
+      const d = mode === 2 ? 0.5 : mode === 1 ? 0.85 : 1, r = 2.6 + Math.sin(t * 2 + c.col) * 0.5;
+      ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 0.6 * z; ctx.beginPath(); ctx.ellipse(X, Y, r * z, r * 0.45 * z, 0, 0, 6.3); ctx.stroke();
+      ctx.fillStyle = `rgb(${(224 * d) | 0},${(180 * d) | 0},${(140 * d) | 0})`; ctx.beginPath(); ctx.arc(X, Y - 1.2 * z, 1.4 * z, 0, 6.3); ctx.fill();
+      if (fade) ctx.globalAlpha = 1; return;
+    }
     const d = mode === 2 ? 0.5 : mode === 1 ? 0.85 : 1, bob = c.idle || c.still ? 0 : Math.abs(Math.sin(t * 7 + c.col * 3)) * 0.8 * z;
     const cols = ['#e0483f', '#3a7bd5', '#f4c542', '#8e44ad', '#27ae60', '#e67e22', '#34495e', '#e86f9b'];
     const hex = cols[c.col % 8], h = parseInt(hex.slice(1), 16);
     const body = `rgb(${(((h >> 16) & 255) * d) | 0},${(((h >> 8) & 255) * d) | 0},${((h & 255) * d) | 0})`;
-    if (mode !== 2) { ctx.fillStyle = 'rgba(0,0,0,.2)'; ctx.beginPath(); ctx.ellipse(X + 2 * z, Y + 0.4 * z, 2.6 * z, 1.1 * z, 0, 0, 6.3); ctx.fill(); }
     const stride = c.idle || c.still ? 0 : Math.sin(t * 9 + c.col * 3) * 0.9 * z;                       // legs swing as they walk
     ctx.fillStyle = `rgb(${(47 * d) | 0},${(51 * d) | 0},${(64 * d) | 0})`; ctx.fillRect(X - 1.1 * z + stride * 0.5, Y - 1.6 * z - bob + Math.max(0, stride) * 0.4, 0.9 * z, 1.8 * z - Math.max(0, stride) * 0.4); ctx.fillRect(X + 0.2 * z - stride * 0.5, Y - 1.6 * z - bob + Math.max(0, -stride) * 0.4, 0.9 * z, 1.8 * z - Math.max(0, -stride) * 0.4);
     ctx.fillStyle = body; ctx.fillRect(X - 1.3 * z, Y - 6 * z - bob, 2.6 * z, 4.6 * z);
     ctx.fillStyle = `rgb(${(224 * d) | 0},${(180 * d) | 0},${(140 * d) | 0})`; ctx.beginPath(); ctx.arc(X, Y - 7.4 * z - bob, 1.6 * z, 0, 6.3); ctx.fill();
+    if (fade) ctx.globalAlpha = 1;
   }
   // A car is drawn from a small cached picture (one per color, direction and lighting) instead of six shapes every frame.
   carSprite(col, horiz, mode, van) {

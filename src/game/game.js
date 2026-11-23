@@ -2,10 +2,11 @@ import { Fleet } from './boats.js';
 import { Ships } from './ships.js';
 import { Movers } from './movers.js';
 import { World, N, T, TERRAIN } from './world.js';
-import { Sim, COST, SEASON_NAME } from './sim.js';
+import { Sim, COST, SEASON_NAME, FUND_GROUPS, FUND_NAME, TRADE, WEALTH_NAME } from './sim.js';
 import { BY_KEY, BT } from './buildings.js';
 import { ORD, TUTORIAL, UNLOCK } from './rules.js';
 import { SoundEngine } from './audio.js';
+import * as saves from './saves.js';
 import { Renderer } from './renderer.js';
 import { Traffic, Trucks } from './cars.js';
 import { Agents } from './agents.js';
@@ -14,9 +15,10 @@ import { Disasters } from './disasters.js';
 import { Transit } from './transit.js';
 import { Ambient } from './ambient.js';
 import { followPass } from './traffic.js';
+import { Life } from './life.js';
 import { clamp, mulberry32 } from './util.js';
 import { spriteBudget, setSeason, getSeason } from './sprites.js';
-const SEASON_OF = [2, 2, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2];   // by month: winter Dec-Feb, autumn Sep-Nov
+const SEASON_OF = [2, 2, 3, 3, 3, 0, 0, 0, 1, 1, 1, 2];   // by month: winter Dec-Feb, spring Mar-May (blossom), summer Jun-Aug, autumn Sep-Nov
 
 const SAVE_KEY = 'skyline.save.v1';
 const UNDO_MS = 20000;                 // a build can only be undone shortly after you make it
@@ -37,6 +39,7 @@ export class Game {
     this.fast = this.quality === 'fast'; this.frameAvg = 16; this.slowT = 0; this.runT = 0; this.perf = { n: 0, sum: 0, worst: 0, at: 0, avg: 0, fps: 0, max: 0 };
     this.renderer.resize();
     this.audio = new SoundEngine(); this.selTile = null; this.sel = null; this.lastAlert = 0; this.tutT = 0; this.sceneT = 0;
+    this.slot = saves.currentSlot();
     this.hadSave = this.load();
     if (!this.hadSave) this.newCity(Math.floor(Math.random() * 100000), true);
     if (this.sim.tut === 0) this.focusHighway();
@@ -60,7 +63,32 @@ export class Game {
   // ---------- start screen ----------
   // While the start screen is up the city sits behind it as a moving backdrop: the clock and the simulation
   // stand still, but cars, people and boats keep moving and the camera drifts slowly over the map.
-  hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
+  hasSave() { return !!saves.get(this.slot); }
+  // ---------- save slots ----------
+  slotLabel(k) { return k.startsWith('auto') ? 'Backup ' + k.slice(4) : 'Slot ' + k.slice(4); }
+  listSaves() { return [...saves.SLOTS, ...saves.BACKUPS].map((k) => ({ key: k, label: this.slotLabel(k), backup: k.startsWith('auto'), current: k === this.slot, info: saves.meta(k) })); }
+  willReplace() { return !!saves.get(this.slot) && !saves.firstEmptySlot(); }   // a new city goes to a free slot, and only replaces one when all three are full
+  saveTo(key) { this.slot = key; saves.rememberSlot(key); return this.save(true); }
+  loadFrom(key) {
+    const prev = this.slot, backup = key.startsWith('auto');
+    if (!saves.get(key)) return false;
+    if (backup) saves.backup(this.slot, true);                       // restoring a backup keeps the current city as a backup too
+    this.slot = key;
+    if (!this.load()) { this.slot = prev; return false; }
+    this.slot = backup ? (saves.SLOTS.includes(prev) ? prev : 'slot1') : key; saves.rememberSlot(this.slot);
+    this.previewing = false; this.hadSave = true; this.sel = null; this.selTile = null; this.dirtySave = true;
+    if (backup) this.save(true);
+    return true;
+  }
+  deleteSave(key) { saves.remove(key); if (key === this.slot) { this.slot = saves.currentSlot(); } }
+  exportSave(key) { return saves.exportSave(key); }
+  async importSave(text, key) { const r = await saves.importSave(text, key); if (r.ok) this.dirtySave = false; return r; }
+  setSandbox(on) {
+    const s = this.sim; if (!!s.sandbox === !!on) return;
+    s.sandbox = !!on;
+    if (on) { s.sbMoney = s.money; s.money = 9999999; } else if (s.sbMoney != null) { s.money = s.sbMoney; s.sbMoney = null; }
+    this.dirtySave = true; this.say(on ? 'Sandbox on: unlimited money, everything unlocked' : 'Sandbox off: back to your own budget');
+  }
   enterMenu() {
     if (!this.menu) this.camSaved = { ...this.cam };
     this.menu = true; this.setTool(null); this.clearSel(); this.setOverlay && this.setOverlay(null);
@@ -92,7 +120,10 @@ export class Game {
     if (this.load()) { this.camSaved = { ...this.cam }; this.hadSave = true; }
     this.aimMenu();
   }
-  startNewCity() {
+  startNewCity(sandbox) {
+    if (saves.get(this.slot)) { const e = saves.firstEmptySlot(); if (e) this.slot = e; }
+    saves.rememberSlot(this.slot);
+    if (sandbox) this.setSandbox(true);
     this.previewing = false; this.menu = false; this.hadSave = true;
     this.fitCamera(); this.focusHighway(); this.dirtySave = true; this.save();
     this.hooks.toast && this.hooks.toast('New city founded');
@@ -139,17 +170,20 @@ export class Game {
     this.cam.zoom = z;
     this.cam.x = r.W / 2; this.cam.y = r.H / 2 - (N * 16 * z) + 10 * z;
   }
-  save() {
+  save(force) {
     if (this.previewing) return false;              // a map being looked at on the start screen is not a city yet
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, world: this.world.toJSON(), sim: this.sim.state(), cam: this.cam, clock: this.clock }));
+      const data = JSON.stringify({ v: 1, world: this.world.toJSON(), sim: this.sim.state(), cam: this.cam, clock: this.clock });
+      saves.put(this.slot, data, { pop: this.sim.pop, money: this.sim.money, date: this.sim.dateLabel(), sandbox: this.sim.sandbox });
+      saves.backup(this.slot, false);
       this.dirtySave = false; return true;
     } catch (e) { return false; }
   }
   load() {
     try {
-      const raw = localStorage.getItem(SAVE_KEY);
-      if (!raw) return false;
+      const rec = saves.get(this.slot);
+      if (!rec) return false;
+      const raw = rec.data;
       const o = JSON.parse(raw);
       this.world = World.fromJSON(o.world);
       this.sim = new Sim(this.world, o.sim); this.sim.defer = true;
@@ -164,7 +198,15 @@ export class Game {
     } catch (e) { return false; }
   }
   setTool(t) { this.tool = t; this.preview = null; this.drag = null; if (t) this.clearSel(); }
-  clearSel() { this.selTile = null; this.sel = null; }
+  setJunction(x, y, v) { this.sim.setJunction(x, y, v); this.dirtySave = true; this.audio.play('tap'); }
+  clearSel() { this.selTile = null; this.sel = null; if (this.overlay === 'trips') this.overlay = null; }
+  // Advisors' "Show on map": go to a tile, select it (the Inspector opens) and keep the given view.
+  showAt(x, y, view) {
+    if (!this.world.inb(x, y)) return;
+    this.focus(x, y, Math.max(this.cam.zoom, 1.1));
+    this.selTile = { x, y }; const info = this.sim.inspect(x, y); this.sel = info ? { x: info.x, y: info.y, w: info.w, d: info.d } : null;
+    if (view !== undefined) this.overlay = view;
+  }
   takeLoan(k) { const r = this.sim.takeLoan(k); if (r.ok) { this.audio.play('coin'); this.dirtySave = true; } else { this.audio.play('error'); r.why && this.say(r.why); } return r; }
   repayLoan(k) { const r = this.sim.repayLoan(k); if (r.ok) { this.audio.play('coin'); this.dirtySave = true; this.say('Loan repaid'); } else { this.audio.play('error'); r.why && this.say(r.why); } return r; }
   skipTutorial() { this.sim.skipTutorial(); this.dirtySave = true; }
@@ -188,6 +230,7 @@ export class Game {
   // In Auto, watch the frame rate; if the phone can't keep up, switch to the lighter graphics once.
   watchFrames(dt) {
     if (this.quality !== 'auto' || this.fast || document.hidden) return;
+    if (this.lightAt && performance.now() - this.lightAt < 10000) return;   // the change of light makes many new pictures at once
     this.runT += dt; if (this.runT < 4) return;                     // let sprites warm up first
     this.frameAvg += (dt * 1000 - this.frameAvg) * 0.05;
     this.slowT = this.frameAvg > 30 ? this.slowT + dt : 0;            // under about 33 fps for 3 seconds
@@ -213,7 +256,7 @@ export class Game {
   trigger(k) { this.disasters.trigger(k); }
   stats() {
     const s = this.sim;
-    return { seasonName: SEASON_NAME[s.SEASON_NOW], tourists: s.tourists, tourIncome: s.tourIncome, beds: s.beds, attraction: s.attraction, request: s.requestView(), seasons: this.seasons, season: getSeason(), fpsSetting: this.fpsSetting, fpsNow: this.fpsNow, engine: this.renderer.engine, hitches: this.hitchInfo(), pages: this.renderer.ctx.pages ? this.renderer.ctx.pages.length : 0, money: Math.floor(s.money), pop: s.pop, date: s.dateLabel(), rd: s.rd, cd: s.cd, id: s.id, happy: s.happiness, tax: { ...s.tax }, income: s.lastIncome, expense: s.lastExpense, bld: s.bld, roads: s.roads, parks: s.parks, jobs: s.cJobs + s.iJobs, speed: this.speed, mode: this.mode, time: `${String(Math.floor(this.hour)).padStart(2, '0')}:${String(Math.floor((this.hour % 1) * 60)).padStart(2, '0')}`, citizens: this.agents.stats.total, employed: this.agents.stats.employed, tSup: s.net.tSup, tDem: s.net.tDem, wasteUn: s.net.wasteUn, pSup: s.net.pSup, pDem: s.net.pDem, wSup: s.net.wSup, wDem: s.net.wDem, upkeep: Math.round(s.net.upkeep), crime: Math.round(s.net.crimeAvg), poll: Math.round(s.net.pollAvg), cov: { police: s.net.police, fire: s.net.fire, health: s.net.health, edu: s.net.edu, fun: s.net.fun }, overlay: this.overlay,
+    return { seasonName: SEASON_NAME[s.SEASON_NOW], tourists: s.tourists, tourIncome: s.tourIncome, beds: s.beds, attraction: s.attraction, request: s.requestView(), seasons: this.seasons, season: getSeason(), fpsSetting: this.fpsSetting, fpsNow: this.fpsNow, engine: this.renderer.engine, hitches: this.hitchInfo(), pages: this.renderer.ctx.pages ? this.renderer.ctx.pages.length : 0, money: Math.floor(s.money), pop: s.pop, date: s.dateLabel(), rd: s.rd, cd: s.cd, id: s.id, happy: s.happiness, tax: { ...s.tax }, income: s.lastIncome, expense: s.lastExpense, bld: s.bld, roads: s.roads, parks: s.parks, jobs: s.cJobs + s.iJobs, speed: this.speed, mode: this.mode, time: `${String(Math.floor(this.hour)).padStart(2, '0')}:${String(Math.floor((this.hour % 1) * 60)).padStart(2, '0')}`, citizens: this.agents.stats.total, employed: this.agents.stats.employed, tSup: s.net.tSup, tDem: s.net.tDem, wasteUn: s.net.wasteUn, pSup: s.net.pSup, uDiag: s.uDiag || null, pDem: s.net.pDem, wSup: s.net.wSup, wDem: s.net.wDem, upkeep: Math.round(s.net.upkeep), crime: Math.round(s.net.crimeAvg), poll: Math.round(s.net.pollAvg), cov: { police: s.net.police, fire: s.net.fire, health: s.net.health, edu: s.net.edu, fun: s.net.fun }, overlay: this.overlay,
       canUndo: this.history.length, undoLabel: this.history.length ? this.history[this.history.length - 1].label : '', undoLeft: this.history.length ? Math.max(1, Math.ceil((UNDO_MS - (performance.now() - this.history[this.history.length - 1].t)) / 1000)) : 0,
       weather: this.ambient.setting, rain: this.ambient.weather.k, buses: this.transit.buses.length, riders: this.agents.stats.riding, heavyRoads: (() => { let n = 0; const l = this.sim.flowM.load; for (let i = 0; i < l.length; i++) if (l[i] > 1.1) n++; return n; })(),
       grant: s.grant || Math.round(Math.max(0, 300 * (1 - s.pop / 1200))), streak: s.streak, ordCost: s.ordCost(), disastersLevel: s.disasters,
@@ -222,9 +265,15 @@ export class Game {
       cut: s.cut, closed: s.closedList(), cutLimit: s.cutLimit(), owed: Math.round(s.owed()), interest: s.lastInterest, loanPay: s.lastLoanPay,
       loans: s.loans.map((l) => ({ ...l })), offers: s.loanOffers(), credit: Math.round(s.creditLimit()),
       history: s.history, news: s.news, advice: s.advice, hapParts: s.hapParts, hwRoads: s.hwRoads, peakPop: s.peakPop,
-      locked: Object.fromEntries(Object.entries(UNLOCK).filter(([k]) => !s.unlocked.has(k))),
+      sandbox: !!s.sandbox, locked: s.sandbox ? {} : Object.fromEntries(Object.entries(UNLOCK).filter(([k]) => !s.unlocked.has(k))),
       tut: s.tut < TUTORIAL.length ? { i: s.tut, n: TUTORIAL.length, id: TUTORIAL[s.tut].id, title: TUTORIAL[s.tut].title, text: TUTORIAL[s.tut].text, cat: TUTORIAL[s.tut].cat, tool: TUTORIAL[s.tut].tool } : null,
-      inspect: this.inspectInfo(), audio: this.audio.settings(), quality: this.quality, fast: this.fast, perf: { fps: Math.round(this.perf.fps), avg: Math.round(this.perf.avg), worst: Math.round(this.perf.max) }, jam: s.net.jamAvg, noJobN: s.net.noJobN };
+      inspect: this.inspectInfo(), audio: this.audio.settings(), quality: this.quality, fast: this.fast, perf: { fps: Math.round(this.perf.fps), avg: Math.round(this.perf.avg), worst: Math.round(this.perf.max) }, jam: s.net.jamAvg, noJobN: s.net.noJobN,
+      // 0.8.6: people, goods, budgets, elections and the region
+      people: (() => { const jobs = s.cJobs + s.iJobs, wf = s.workforce || 0; return { workforce: wf, jobs, unemployed: Math.max(0, wf - jobs), open: Math.max(0, jobs - wf), unemp: wf > 0 ? Math.max(0, wf - jobs) / wf : 0,
+        ages: { ...s.ages }, wealth: (s.wealth || [0, 0, 0]).map((n, k) => ({ name: WEALTH_NAME[k], n })), empty: s.bld.empty || 0, approval: s.approval, nextVote: s.nextVote(), lastVote: s.lastVote, taxCap: s.taxCap ? { cap: s.taxCap.cap, left: Math.max(1, Math.ceil((s.taxCap.until - s.day) / 30)) } : null, why: s.demandWhy() }; })(),
+      goodsInfo: { ...s.goods },
+      fund: FUND_GROUPS.map((k) => ({ k, name: FUND_NAME[k], v: s.fund[k] })),
+      trade: { ...s.trade, income: s.tradeIncome || 0, cost: s.tradeCost || 0, linked: s.hwRoads > 0, pSpare: (s.uDiag && s.uDiag.pSpare) || 0, wSpare: (s.uDiag && s.uDiag.wSpare) || 0, wasteOut: s.wasteOut || 0, rates: TRADE } };
   }
   inspectInfo() {
     if (!this.selTile) return null;
@@ -238,11 +287,14 @@ export class Game {
     const info = this.sim.inspect(t.x, t.y);
     if (this.sel && info && this.sel.x === info.x && this.sel.y === info.y) { this.clearSel(); return; }   // tapping it again closes the card
     this.selTile = t; this.sel = info ? { x: info.x, y: info.y, w: info.w, d: info.d } : null;
+    if (this.overlay === 'trips' && !(info && info.action && info.action.id === 'trips')) this.overlay = null;   // trips view belongs to a road
     if (!this.sim.inspected) { this.sim.inspected = true; this.dirtySave = true; }
     this.audio.play('tap');
     this.hooks.inspect && this.hooks.inspect();
   }
-  setTax(k, v) { this.sim.tax[k] = clamp(v, 0, 20); this.sim.recount(); this.dirtySave = true; }
+  setTax(k, v) { const cap = this.sim.taxCap ? this.sim.taxCap.cap : 20; this.sim.tax[k] = clamp(v, 0, cap); this.sim.recount(); this.dirtySave = true; }
+  setFund(k, v) { this.sim.setFund(k, v); this.dirtySave = true; }
+  setTrade(k, on) { this.sim.setTrade(k, on); this.audio.play('build'); this.dirtySave = true; }
 
   // ---------- coordinates ----------
   toTile(px, py) {
@@ -373,7 +425,7 @@ export class Game {
       w.kind[t.i] = t.kind; w.level[t.i] = t.level; w.variant[t.i] = t.variant; w.tree[t.i] = t.tree; w.bt[t.i] = t.bt; w.bo[t.i] = t.bo; w.wire[t.i] = t.wire; w.pipe[t.i] = t.pipe;
       s.pending.delete(t.i); this.sites.delete(t.i); this.disasters.fires.delete(t.i); this.disasters.rubble.delete(t.i);
     }
-    s.money += h.spent; s.needAn = true; s.roadsDirty = true; s.recount(); s.analyze(); this.dirtySave = true; this.audio.play('undo');
+    if (!s.sandbox) s.money += h.spent; s.needAn = true; s.roadsDirty = true; s.recount(); s.analyze(); this.dirtySave = true; this.audio.play('undo');
     this.hooks.toast && this.hooks.toast(`Undid ${h.label}${h.spent ? ' (+$' + h.spent.toLocaleString('en-US') + ')' : ''}`);
     return true;
   }
@@ -416,6 +468,7 @@ export class Game {
       let t1 = t0;
       try { this.update(dt); t1 = performance.now(); this.renderer.draw(now / 1000); } catch (e) { if (!this.drawErr) { this.drawErr = true; console.error(e); } }
       const t2 = performance.now();
+      this.bench(t2 - t0, raw * 1000, now);
       if (raw * 1000 > iv + 34 && this.runT > 3 && !document.hidden && raw < 1) {          // a stutter: note what happened in this frame and the one before
         const prev = this.lastWork || {};
         this.hitches.push({ at: now, ms: Math.round(raw * 1000), upd: Math.round(prev.upd || 0), drw: Math.round(prev.drw || 0), made: prev.made || 0, up: prev.up || 0, upKB: prev.upKB || 0, rec: prev.rec || 0, solo: prev.solo || 0 });
@@ -428,6 +481,13 @@ export class Game {
   // How often to draw. Auto draws 60 times a second while you touch, drag or zoom (and for a moment after),
   // 30 when the view is still, 20 when the game is paused, and 30 on the start screen. A city builder looks
   // almost the same at 30 and the phone does half the work, so it runs cooler and the battery lasts longer.
+  // The light that comes next on Auto, and how many game seconds until it does (for making its pictures early).
+  nextLight() {
+    if (this.timeSetting !== 'auto') return null;
+    const ph = (this.clock / 180) % 1, cuts = [[0.55, 1], [0.62, 2], [0.9, 1], [1, 0]];
+    for (const [p, m] of cuts) if (ph < p) return { mode: m, in: (p - ph) * 180 };
+    return null;
+  }
   targetFps(now) {
     const set = this.fpsSetting;
     if (set === 60 || set === 30) return set;
@@ -435,7 +495,24 @@ export class Game {
     const c = this.cam, key = c.x * 7 + c.y * 13 + c.zoom * 1000;
     if (key !== this.camSeen) { this.camSeen = key; this.lastInput = now; }
     if (this.pointers.size > 0 || now - (this.lastInput || 0) < 1500 || this.disasters.tornado || this.disasters.ufo) return 60;
-    return this.speed === 0 ? 20 : 30;
+    if (this.speed === 0) return now - (this.lastInput || 0) > 10000 ? 10 : 20;       // paused and nobody touching: save battery
+    return 30;
+  }
+  // First launch: watch how long frames take for a couple of seconds on the start screen and pick Smooth straight away
+  // on a slow phone, instead of starting on Pretty and lagging before Auto notices. Remembered on the phone.
+  bench(work, gap, now) {
+    if (this.benchDone) return;
+    let saved = null; if (!this.benchS) try { saved = localStorage.getItem('skyline.bench'); } catch (e) { /* ignore */ }
+    if (saved) { this.benchDone = true; if (saved === 'smooth' && this.quality === 'auto' && !this.fast) { this.fast = true; this.renderer.resize(); this.hooks.quality && this.hooks.quality(); } return; }
+    if (document.hidden) return;
+    const b = this.benchS || (this.benchS = { t0: now, n: 0, work: 0, gap: 0 });
+    if (now - b.t0 < 1500) return;                                   // let the first pictures be made
+    b.n++; b.work += work; b.gap += Math.min(250, gap);
+    if (now - b.t0 < 4000) return;
+    const slow = b.work / b.n > 20 || b.gap / b.n > 45;
+    try { localStorage.setItem('skyline.bench', slow ? 'smooth' : 'pretty'); } catch (e) { /* ignore */ }
+    this.benchDone = true;
+    if (slow && this.quality === 'auto' && !this.fast) { this.fast = true; this.renderer.resize(); this.hooks.quality && this.hooks.quality(); }
   }
   setSeasons(v) { this.seasons = v; try { localStorage.setItem('skyline.seasons', v); } catch (e) { /* ignore */ } }
   answerRequest(n) { this.sim.answerRequest(n); this.dirtySave = true; }
@@ -463,9 +540,13 @@ export class Game {
     if (this.menu) this.menuCamera(dt);
     this.pruneHistory();
     this.clock += dt * sp;
+    if (this.sim.sandbox && this.sim.money < 5000000) this.sim.money = 9999999;   // sandbox: the budget never runs out
+    const was = this.mode;
     if (this.timeSetting === 'auto') { const ph = (this.clock / 180) % 1; this.mode = ph < 0.55 ? 0 : ph < 0.62 ? 1 : ph < 0.9 ? 2 : 1; }
     else this.mode = this.timeSetting;
+    if (this.mode !== was) this.lightAt = performance.now();        // new pictures are being made: don't judge the phone's speed for a while
     setSeason(this.seasons === 'off' ? 0 : SEASON_OF[this.sim.month]);
+    if (this.ambient) this.ambient.snow = getSeason() === 2;
     this.sim.seasonsOn = this.seasons !== 'off';   // trees, grass and parks follow the calendar (cached per season)
     if (sp > 0) {
       this.acc += dt * sp;
@@ -482,6 +563,7 @@ export class Game {
       else if (ev.type === 'request') { this.audio.play(ev.fresh ? 'goal' : 'build'); this.hooks.request && this.hooks.request(ev); }
       else if (ev.type === 'cut') { this.audio.play('warn'); this.hooks.cut && this.hooks.cut(ev); }
       else if (ev.type === 'tut') this.audio.play('step');
+      else if (ev.type === 'vote') { this.audio.play(ev.won ? 'goal' : 'warn'); this.say(ev.won ? `Re-elected with ${ev.approval}% approval` : `Lost the election (${ev.approval}% approval). Taxes capped at 9% for a year`); }
       else if (ev.type === 'moveOut') this.movers.leave(ev.i, ev.n);
       else if (ev.type === 'moveIn') this.movers.arrive(ev.i, ev.n);
       else if (ev.type === 'built' && !this.sites.has(ev.i)) { const info = siteInfo(ev); this.sites.set(ev.i, { i: ev.i, kind: ev.kind, from: ev.from, to: ev.to, pv: ev.pv || 0, t: 0, ...info }); }
@@ -500,6 +582,8 @@ export class Game {
     this.movers.update(dt * live, sig);
     this.garbage.update(dt * live, Math.min(10, s.facilities.length * 2), sig);
     this.ambient.update(live > 0 ? dt : 0, this.mode);
+    if (!this.life) this.life = new Life(this);
+    this.life.update(live > 0 ? dt : 0);                                  // people at parks, beaches, piers and on the dirt tracks
     this.fleet.update(live > 0 ? dt : 0, s.pop);
     this.ships.update(live > 0 ? dt : 0, s);
     // congestion map: smoothed vehicle count per road tile
@@ -511,7 +595,7 @@ export class Game {
     if (alertN && !this.lastAlert) this.audio.play('alarm');
     this.lastAlert = alertN;
     this.sceneT += dt;
-    if (this.sceneT > 0.5) { this.sceneT = 0; this.audio.setScene({ pop: s.pop, zoom: this.cam.zoom, rain: this.ambient.weather.k, night: this.mode === 2, track: this.musicTrack(), paused: sp === 0 }); }
+    if (this.sceneT > 0.5) { this.sceneT = 0; this.audio.setScene({ pop: s.pop, zoom: this.cam.zoom, rain: this.ambient.snow ? 0 : this.ambient.weather.k, night: this.mode === 2, track: this.musicTrack(), paused: sp === 0 }); }
     this.saveTimer += dt;
     if (this.saveTimer > 20) { this.saveTimer = 0; if (this.dirtySave && !this.menu) this.save(); }
   }

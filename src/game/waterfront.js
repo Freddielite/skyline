@@ -64,7 +64,6 @@ function table(k, x, y, z = 0) { const { P, ell, C, line } = k; const p = P(x, y
 function palm(k, x, y, sd) {
   const { P, C, ctx, ell, mode } = k;
   const p = P(x, y), lean = (hash(sd, 2, 3) - 0.5) * 8, tx = p[0] + lean, ty = p[1] - 28;
-  if (mode !== 2) ell([p[0] + 6, p[1] + 1], 7, 2.6, 'rgba(0,0,0,.18)');
   ctx.strokeStyle = C('#8a6a44'); ctx.lineWidth = 2.2; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.quadraticCurveTo(p[0] - lean * 0.2, p[1] - 15, tx, ty); ctx.stroke();
   for (let i = 0; i < 7; i++) {

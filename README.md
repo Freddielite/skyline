@@ -216,6 +216,119 @@ Graphics and sound
 - Manhole covers hint at buried pipes in the normal view; the water view shows live pipes in blue and dead ones in gray
 - Older saves have no pipes: connect your towers to the buildings with pipes (you get 90 days before buildings without water start losing upgrades)
 
+## 0.8.7: no more lag in busy views
+
+- Pretty graphics stay smooth when a lot is happening: pictures no longer carry empty margins, so a busy city fits in the graphics chip's memory instead of being reloaded every frame
+- Cars and people passing behind buildings no longer split a frame into hundreds of separate draws
+- A busy, growing city redraws its still picture at most twice a second; moving the map and your own building still update at once
+- Everything looks the same as before
+- Fixed: cars, people and building sites could show through the buildings in front of them
+- Fixed: tall buildings standing just below the bottom of the screen were missing
+
+## 0.8.6: people, goods and the region
+
+- Buildings in trouble now stand empty, boarded up and dark, before they shrink. Fix the problem and people move back in
+- Tap a home to meet a family: where they work and what they wish the city had
+- Rich and poor neighbourhoods: high land value brings well-off residents who pay more tax
+- Factories make goods for shops. Shops that import their goods earn less
+- New jobs chip in the top bar, and tapping the R C I bars explains why each zone is or isn't growing
+- Children, adults and seniors: kids need schools, seniors need health care
+- Mayor approval and an election every January. Lose it and taxes are capped at 9% for a year
+- Service budgets: spend 50% to 150% on police, fire, health, schools, transit and parks
+- Deals with neighbouring towns: sell spare power and water, or pay to send garbage away
+- Factories can upgrade again (their own smoke used to hold them back)
+
+## 0.8.5: cities keep growing
+
+- Empty lots fill up and buildings upgrade again: people now move in before every job is ready, which brings customers and workers, which brings shops and factories
+- Growth is about four times faster, so lots fill and buildings upgrade in months instead of years
+
+## 0.8.4: still view fix
+
+- Buildings no longer get painted on top of the buildings in front of them while cars drive past (the glitch from 0.8.3)
+- Water changes with the light at the same moment as the land, instead of a moment later
+
+## 0.8.3: cooler phone, same graphics
+
+- When you're not moving the map, the city is drawn once and reused, and only the moving things (cars, people, ships, traffic lights, flags, building sites, smoke) are drawn each frame. About five times less drawing work in a big city, with every graphics setting still on
+- Trees sway while you move the map and hold still when the view is still
+
+- **0.8.7:** Pretty no longer lags when a lot is happening. Every picture is trimmed to what is actually drawn (about 70% of a building's picture was empty), so a busy view fits in the graphics chip's memory again instead of reloading about 60 MB of pictures every frame; the "redraw what stands in front of a car" step is clipped on the CPU so the whole frame stays a handful of draw calls instead of up to 200; and a busy city redraws its still layer at most twice a second. Looks the same. Also fixed: cars, people and building sites could show through buildings in front of them with the still view, and tall buildings just below the bottom edge of the screen were missing. Details in "Busy views on Pretty" above.
+- **0.8.6:** people, goods and the region. Buildings in trouble stand empty (dark, boarded-up badge) before they shrink, and fill again once the problem is fixed. Families in the Inspector, rich and poor neighbourhoods, goods from factories to shops, an unemployment chip and plain reasons behind the R C I bars, ages (kids, adults, seniors), mayor approval with a January election, service budgets (50 to 150%), and deals with neighbouring towns (sell power and water, send garbage away). Factories no longer block their own upgrades with their smoke. Details in "People, goods and the region" above.
+- **0.8.5:** growth no longer stalls. Homes wanted 0.85 jobs per resident while shops and industry only offered about 0.7 jobs per resident (0.3 + 0.4), so each zone waited on the others and the city froze with empty lots and no upgrades. Homes now want 0.6 jobs per resident (`rd` in `sim.recount`). The growth pass in `sim.tick` checks 600 random tiles a day instead of 150 (each tile about every 15 days instead of every 61), so lots fill and upgrade in months rather than years.
+- **0.8.4:** fix for the still view (0.8.3). When a car, person or ship passed behind buildings, the buildings in front of it were redrawn whole, so they landed on top of buildings standing further forward (a house painted over the block in front of it, changing as traffic moved). The redraw is now limited to the moving thing's box (`gl2d.scissor` / `noScissor`), and the box takes in headlight beams at dusk and night. The water for the coming light is made in the 20 s before the light changes, so water and land switch together.
+- **0.8.3:** much less work per frame with every graphics setting kept. When the view is still, the ground and everything that doesn't move are drawn once into a screen-sized picture on the graphics chip and reused every frame; only moving things are drawn live, each followed by whatever stands in front of it. In a dense test city the drawing work went from about 34 ms to 6 ms per frame, with the same picture. Waterfront reflections no longer scan the whole map every frame. Trees sway while the map moves and hold still when the view is still.
+
+## 0.8.2: smooth change of light
+
+- Buildings no longer disappear and pop back when day turns to dusk or night: the pictures for the coming light are made ahead of time, and any not ready yet keep their old look for a moment
+- The change of light no longer switches the game to Smooth graphics by mistake
+
+- **0.8.2:** buildings no longer vanish when the light changes (day, dusk, night). Each new-light picture is made a few per frame, and until a building's is ready the picture from the light before is shown (`otherLight` in `sprites.js`, for buildings, service buildings, parks and trees). About 24 game seconds before the light changes, the pictures in view for the coming light are made ahead (`game.nextLight`, `renderer.warm(..., ahead)`), so the change is usually instant. Auto graphics no longer judges the phone's speed for 10 s after a change of light, so the burst of new pictures can't switch it to Smooth.
+
+## 0.8.1: looks and speed
+
+- Spring: pink and white blossom and fresh green from March to May
+- Farm fields change through the year: young green rows, ripe crops, stubble with hay bales, bare fields in winter
+- Snow falls in winter instead of rain
+- Morning mist over the water and fields at first light
+- The light changes colour through the day: pink at dawn, golden in the late afternoon, blue at night
+- Zebra crossings at junctions near shops, parks and public buildings
+- Small waves roll onto the beaches
+- No more cloud shadows
+- Much faster when zoomed all the way out in a big city
+- Traffic is worked out in the background, so the map never stutters for it
+- On first launch the game tests the phone and picks Smooth on a slow one
+- Saves battery when the game is paused and you're not touching it
+
+- **0.8.1:** looks and speed. Spring (March to May) with pink and white blossom and fresh green; farms change through the year (young rows, ripe crops, stubble with bales, bare); snow falls in winter instead of rain (no thunder); morning mist over water and fields at first light; a colour wash for the time of day (pink dawn, golden late afternoon, blue night); zebra crossings at junctions near shops, parks and public buildings; waves rolling onto beaches; cloud shadows removed. Faster: far out, the whole city is one cached picture (draw work in a test city from about 48 ms to 1 to 2 ms per frame); traffic passes run in a background worker; a speed test on first launch picks Smooth on slow phones; paused and untouched for 10 s the game draws 10 times a second.
+
+## 0.8.0: life and looks
+
+- People hang out at parks, plazas, libraries, museums, the stadium, piers, beaches (some swimming), marinas and the cafe: more by day and in summer, fewer at night, in rain and in winter
+- People walk the dirt tracks behind the houses, and now and then a car drives along one
+- Tap a junction to choose it yourself: Automatic, Lights, or which road goes first
+- Snow on roofs and frosted yards in winter
+- Tall towers and office buildings now have many different tops: helipads, pyramid roofs, domes, slanted glass, twin masts, lantern crowns and water tanks
+- All the moving people are off on Smooth graphics
+
+- **0.8.0:** life and looks. People hang out at parks, plazas, libraries, museums, the stadium, piers, beaches (some swimming), marinas and pack places like the cafe, more by day and in summer, fewer at night and in rain; people and the odd car use the dirt tracks. Tap a junction to set it by hand: Automatic, Lights, or which road goes first (no roundabouts, by request). Snow on roofs and frosted yards in winter (winter pictures replace the others, so memory stays the same). Level 3 and 4 towers get eight different tops (helipad, pyramid roof, dome, slanted glass, twin masts, lantern crown, water tank), slimmer megatowers, a second stack on heavy plants and more solar on campuses.
+
+## 0.7.4: dirt tracks
+
+- Buildings that don't touch a road get a free dirt lane to the nearest street, along the edges of the lots; neighbours share one lane
+- The lanes change with the seasons and turn muddy in the rain
+- A building reached only by a dirt track grows to level 2. A road next to it lets it grow taller
+- Tap a building: the Access line says whether it is on a road or a dirt track
+- The Planning advisor shows where a new street would let the most buildings grow
+- Buildings that were already taller keep their height
+
+- **0.7.4:** dirt tracks. Houses, shops and factories that don't touch a road get a free dirt lane to the nearest street, along the lot edges (shared by neighbours, seasonal, muddy in rain). A building reached only by a track grows to level 2; a road next to it lets it grow taller. Track-only lots have a slightly longer commute, the Inspector shows Access, and the Planning advisor points at the biggest group of held-back buildings. Older buildings above level 2 keep their height.
+
+## 0.7.3: garbage count and saves fixes
+
+- The garbage "out" count on the top bar only counts buildings that really need collection (apartments, offices, factories and up, the ones with a bin badge). Houses don't need it yet
+- Tap an amber "out" on the top bar to see those buildings in red on the map
+- The Saves list on the start screen scrolls properly
+
+- **0.7.3:** the garbage "out" count and the Waste view now only count buildings that need collection (level 2 and up, the ones that get a bin badge); level 1 houses take only leftover landfill room and no longer make garbage pollution. Tapping an amber "out" chip opens that view (power, water or waste) with the buildings in red. The start screen's Saves list scrolls (it was centred with `justify-content: center`, which cut off the top of a list taller than the screen).
+
+## 0.7.2: junctions, road trips, utilities fix
+
+- No shadows: buildings, trees, cars, people, boats and gulls no longer cast them
+- Traffic lights only where two busy roads meet; elsewhere the side road gives way (white triangles and a sign) and waits for a gap
+- The busier road gets the longer green
+- Tap a road: what its trips are for, where most start and where most go; Show trips on map colours them blue and orange
+- Advisors name the worst bottlenecks, with Show on map
+- Cars and buses wait properly at red lights; jams no longer flicker on and off
+- Fixed: buildings without power, water or garbage collection while the city had plenty. A building near two lines or pipes now uses the one that has power or water, and garbage goes to the nearest landfill with room. When supply still doesn't reach some buildings, the top chip shows how many and the advisors say why
+
+- **0.7.2:** no shadows anywhere; smarter junctions (lights only where busy roads meet, give-way lines elsewhere, longer green for the busier road); tap a road to see where its trips come from and go to, with a map view; advisors name the worst bottlenecks with Show on map; cars and buses really wait at red lights; jams no longer flicker on and off. Fixed buildings going without power, water or garbage collection while the city had plenty: they now use the best line, pipe or landfill in reach, and the advisors and top chip say why when supply still doesn't reach them.
+
+## 0.7.1
+
+- **0.7.1:** saves, sandbox and bigger power. (1) Saves moved from localStorage (about 5 MB cap) to IndexedDB: three slots, three rolling auto-backups every 10 minutes, export to a file (share sheet) and import. The old single save moves into Slot 1 on first launch. A new city goes into a free slot instead of replacing your city. Start screen has Saves; in-game Menu has Saves, backups and export. (2) Sandbox mode (Menu, or chosen when starting a city): unlimited money, every building unlocked; turning it off restores your own budget. (3) Three bigger power stations for a growing city: Solar farm (3x3, 200, clean, unlocks 1,200 residents), Gas plant (3x3, 520, unlocks 1,500) and Nuclear plant (4x4, 2,400, unlocks 6,000), next to the coal plant's 150. New plugins @capacitor/filesystem and @capacitor/share (export), so run `npm install` before the push command.
+
 ## Adding content (0.7.0)
 
 0.7.0 in short: 16 looks per zoned building, a five-track recorded soundtrack chosen by time of day, and content packs (below).
@@ -232,7 +345,7 @@ New buildings and pictures are files, not code. Everything lives in `public/cont
 
 - `cat`: where it shows in the build menu: `util`, `svc`, `waste`, `transit` or `fun`.
 - Effects are the same fields the built-in buildings use: `cov` (`police`, `fire`, `health`, `edu`, `fun`, `transit`, `metro`), `power`, `water`, `waste`, `radius`, `use`, `pollute`.
-- `unlock`: residents needed. `height`: used for the construction animation and shadow.
+- `unlock`: residents needed. `height`: used for the construction animation.
 - One day-lit PNG is enough: dusk and night are painted over it by the game.
 
 **Picture anchor.** `scale` is picture pixels per game pixel (2 is normal). `ox`, `oy` (picture pixels) mark the back corner of the building's footprint diamond. Leave them out and the footprint is centred on the bottom edge. A 1x1 building fits a 320x220 picture at scale 2 (see `cafe.png`).

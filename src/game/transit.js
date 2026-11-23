@@ -100,7 +100,7 @@ export class Transit {
       let dist = b.hold ? 0 : b.speed * dt; const n = b.verts.length;
       while (dist > 0) {
         const A = vp(b.verts[b.seg]), nb = b.verts[(b.seg + 1) % n], B = vp(nb), len = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1, left = (1 - b.t) * len;
-        if (b.t < 0.46 && mustStop(w, nb % N, (nb / N) | 0, Math.sign(B[0] - A[0]), Math.sign(B[1] - A[1]), sigT) && b.t + dist / len > 0.46) { b.t = 0.46; dist = 0; break; }
+        if (b.t <= 0.46 && b.t + dist / len > 0.46 && mustStop(w, nb % N, (nb / N) | 0, Math.sign(B[0] - A[0]), Math.sign(B[1] - A[1]), sigT, b)) { b.t = 0.46; dist = 0; break; }
         if (dist < left) { b.t += dist / len; dist = 0; }
         else { dist -= left; b.seg = (b.seg + 1) % n; b.t = 0; const st = b.stopAt.get(b.seg); if (st) { this.dwellAt(b, st); dist = 0; break; } }
       }
